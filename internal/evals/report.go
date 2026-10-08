@@ -22,7 +22,7 @@ type Metric struct {
 	Eval       string  `json:"eval"`
 	Name       string  `json:"name"`
 	Split      string  `json:"split,omitempty"` // dev | test; "" = every item
-	Kind       string  `json:"kind"` // rate | lift | mean
+	Kind       string  `json:"kind"`            // rate | lift | mean
 	All        Cell    `json:"all"`
 	Human      *Cell   `json:"human,omitempty"`
 	Dispatched *Cell   `json:"dispatched,omitempty"`
