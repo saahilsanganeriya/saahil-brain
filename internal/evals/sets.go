@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"saahil.local/brain/internal/config"
 	"sort"
 	"strings"
 	"time"
@@ -335,7 +336,7 @@ func (b *builder) sessions(navFrom, cut time.Time) ([]NavItem, []MistakeItem, er
 		dispatched := isDispatchBrief(s.Prompts[0])
 		if s.Started.Before(navFrom) {
 			b.skipped["navigation: before its window"]++
-		} else if targets := b.targets(append(append([]string{}, s.Touched...), s.Produced...)); len(targets) > 0 {
+		} else if targets := b.targets(append(append([]string{}, s.Touched...), s.Produced...), s.Started); len(targets) > 0 {
 			nav = append(nav, NavItem{ID: "nav-" + s.shortID(), Session: rel, Machine: s.Machine, Started: s.Started,
 				CWD: s.CWD, Transcript: s.Transcript, Dispatched: dispatched, Targets: targets})
 		} else {
@@ -372,8 +373,9 @@ func (b *builder) sessions(navFrom, cut time.Time) ([]NavItem, []MistakeItem, er
 }
 
 // targets resolves a session's files to indexed docs and artifacts (a byte copy counts as its canonical); generic
-// files, folders, other sessions and files the index never saw (repo code) are dropped.
-func (b *builder) targets(files []string) []string {
+// files, folders, other sessions, files the index never saw (repo code) and files the session itself created (they did
+// not exist when its first prompt was typed, so no brain could have pointed at them) are dropped.
+func (b *builder) targets(files []string, started time.Time) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, f := range files {
@@ -391,6 +393,10 @@ func (b *builder) targets(files []string) []string {
 		}
 		if canonical != "" {
 			_ = b.ix.DB().QueryRow(`SELECT path FROM node WHERE id = ?`, canonical).Scan(&p)
+		}
+		if born := birthTime(b.absPath(p)); !born.IsZero() && !started.IsZero() && !born.Before(started) {
+			b.skipped["navigation: target created by the session itself"]++
+			continue
 		}
 		if !seen[p] && !genericFiles[path.Base(p)] {
 			seen[p] = true
@@ -686,4 +692,14 @@ func readLines[T any](p string, out *[]T) error {
 		*out = append(*out, it)
 	}
 	return nil
+}
+
+// absPath is a node path on this machine's disk: work/… lives in the shadow saahil-docs until the cut-over fills <brain>/work.
+func (b *builder) absPath(p string) string {
+	if rest, ok := strings.CutPrefix(p, "work/"); ok {
+		if _, err := os.Stat(filepath.Join(config.BrainRoot(), ".brain", "live")); err != nil {
+			return filepath.Join(config.LaptopHome, "Documents", "work-repo", "saahil-docs", rest)
+		}
+	}
+	return filepath.Join(config.BrainRoot(), p)
 }
