@@ -202,6 +202,7 @@ type leakGuard struct {
 	sourced map[string]bool
 	start   time.Time
 	exist   *existence
+	vetted  map[string]bool // the item's targets: the set builder checked they existed, with the files' original dates
 }
 
 func (e *Env) existence() *existence {
@@ -232,7 +233,7 @@ func (g leakGuard) hides(id string) bool {
 	if g.sourced[id] {
 		return true
 	}
-	if g.exist != nil && !g.exist.nodeBefore(id, g.start) {
+	if doc, _, _ := strings.Cut(id, "#"); g.exist != nil && !g.vetted[doc] && !g.exist.nodeBefore(id, g.start) {
 		return true
 	}
 	if !strings.HasPrefix(id, "sessions/") {
@@ -530,6 +531,11 @@ func (e *Env) Navigation() (Report, error) {
 		r.Query = src
 		t := e.targetsByPath(it.Targets)
 		g := e.guardFor(it.Session, it.Started)
+		g.vetted = map[string]bool{}
+		for _, t := range it.Targets {
+			doc, _, _ := strings.Cut(t, "#")
+			g.vetted[doc] = true
+		}
 		r.Pointers = e.Ranker.Pointers(q, it.CWD, g.hides)
 		r.Top3 = t.any(r.Pointers)
 		r.BoxTop3 = sharesBox(it.Targets, r.Pointers)

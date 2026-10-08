@@ -389,3 +389,17 @@ func TestCutoverManifestDatesRewrittenFiles(t *testing.T) {
 		t.Fatal("a file the manifest does not list keeps its own dates")
 	}
 }
+
+// TestVettedTargetsStayVisible: the set builder checked each target existed before its session, with the file's
+// original dates; the cut-over's rewrite replaced those files, so the run-time check hid three such targets.
+func TestVettedTargetsStayVisible(t *testing.T) {
+	cutDay := time.Date(2026, 10, 8, 13, 29, 0, 0, time.UTC)
+	stubFileTimes(t, map[string]time.Time{"COMMON.md": cutDay, "OTHER.md": cutDay})
+	x := &existence{root: t.TempDir(), touched: map[string]time.Time{}, times: map[string]fileDates{},
+		paths: map[string]string{"work/box/specs/COMMON.md": "work/box/specs/COMMON.md", "work/box/specs/OTHER.md": "work/box/specs/OTHER.md"}}
+	g := leakGuard{start: time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC), sourced: map[string]bool{}, exist: x,
+		vetted: map[string]bool{"work/box/specs/COMMON.md": true}}
+	if g.hides("work/box/specs/COMMON.md#scope") || !g.hides("work/box/specs/OTHER.md") {
+		t.Fatal("a vetted target (and its sections) must stay visible; any other file keeps the existence check")
+	}
+}

@@ -152,7 +152,7 @@ func SyncCarries(rel string) bool {
 // MonorepoBox is the work/ box the team-monorepo's old saahil-docs moved into at the cut-over.
 const MonorepoBox = "team-monorepo-saahil-docs-2026-08"
 
-var legacyDocsRE = regexp.MustCompile(`/Documents/(?:work-repo|worktrees/work-repo/[^/]+)/saahil-docs/(.+)$`)
+var legacyDocsRE = regexp.MustCompile(`/Documents/(?:work-repo|worktrees/work-repo/[^/]+(?:/work-repo)?)/saahil-docs/(.+)$`)
 var legacyMonorepoRE = regexp.MustCompile(`/apps/server/work-repo/saahil-docs/(.+)$`)
 
 // LegacyDocsPath maps an absolute path in an old saahil-docs spelling (the work-repo checkout, one of its

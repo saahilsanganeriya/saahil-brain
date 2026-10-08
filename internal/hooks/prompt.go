@@ -496,6 +496,9 @@ func hop(db *sql.DB, cands []cand, seeds Seeds) ([]cand, error) {
 		if degree[l.seed] > maxSeedDegree {
 			continue // a big folder or a much-cited node spreads nothing useful
 		}
+		if namesakes(l.seed, l.other) {
+			continue // a spec and the report named like it: their link is the shared name, counted once already
+		}
 		gain := weight[l.seed] / math.Sqrt(float64(degree[l.seed]))
 		prox[l.other] += gain
 		if gain > viaGain[l.other] {
@@ -790,4 +793,13 @@ func record(db *sql.DB, env Env, session string, lk Lookup, live bool, took time
 		}
 	}
 	return tx.Commit()
+}
+
+// namesakes: two documents with the same file stem in different folders (worker-specs/x.md and recon/x.md).
+func namesakes(a, b string) bool {
+	if path.Dir(a) == path.Dir(b) || !strings.Contains(a, "/") || !strings.Contains(b, "/") {
+		return false
+	}
+	sa, sb := strings.TrimSuffix(path.Base(a), path.Ext(a)), strings.TrimSuffix(path.Base(b), path.Ext(b))
+	return sa != "" && strings.EqualFold(sa, sb)
 }
