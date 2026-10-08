@@ -128,8 +128,8 @@ func dreamMergeDry(w io.Writer, root string, o mergeDryOptions) int {
 	for _, r := range res.Refused {
 		fmt.Fprintf(w, "refused by the applier: %s\n", r)
 	}
-	if !res.Complete {
-		fmt.Fprintf(w, "incomplete: %s\n", res.Reason)
+	for _, g := range res.Waiting {
+		fmt.Fprintf(w, "group waits (no merged body this run): %s\n", g)
 	}
 	if o.out != "" {
 		b, _ := json.MarshalIndent(res.Delta, "", " ")

@@ -29,7 +29,7 @@ const (
 	mergeStepName = "curate.merge"
 	// with no change the step still runs once a day; the same input is then a $0 ledger answer
 	mergeEvery     = 24 * time.Hour
-	maxMergeGroups = 20 // per run (the 2026-10-08 sweep merged 15 in one call); the rest are found again next run
+	maxMergeGroups = 20 // per run (the 2026-10-08 sweep merged 15); the rest are found again next run
 	questionChars  = 400
 )
 
@@ -178,10 +178,9 @@ func (a *Activities) MergeGate(_ context.Context, now time.Time) (MergeGateResul
 }
 
 type MergeDoneInput struct {
-	RunID    string
-	Now      time.Time
-	Owner    []OwnerQuestion
-	Complete bool // every stage ran; only then does the gate record this run
+	RunID string
+	Now   time.Time
+	Owner []OwnerQuestion
 }
 
 type MergeDoneResult struct {
@@ -189,23 +188,22 @@ type MergeDoneResult struct {
 	Waiting int
 }
 
-// MergeDone queues the owner questions and, for a complete run, records the global set as the merge left it, so the
-// merge's own writes do not wake the next merge.
+// MergeDone queues the owner questions and records the global set as the merge left it, so the merge's own writes do
+// not wake the next merge. Groups that wait (a failed or skipped bodies call) are found again within a day, so a group
+// that keeps failing costs at most one try a day.
 func (a *Activities) MergeDone(_ context.Context, in MergeDoneInput) (MergeDoneResult, error) {
 	var out MergeDoneResult
 	var err error
 	if out.Queued, err = queueOwnerQuestions(a.Cfg.BrainRoot, in.Owner, in.Now); err != nil {
 		return out, err
 	}
-	if in.Complete {
-		entries, _, err := globalCatalog(a.Cfg.BrainRoot)
-		if err != nil {
-			return out, err
-		}
-		b, _ := json.MarshalIndent(mergeState{LastRun: in.Now, Fingerprint: fingerprint(entries), RunID: in.RunID}, "", "  ")
-		if err := writeFile(a.path(".brain", "merge-state.json"), b); err != nil {
-			return out, err
-		}
+	entries, _, err := globalCatalog(a.Cfg.BrainRoot)
+	if err != nil {
+		return out, err
+	}
+	b, _ := json.MarshalIndent(mergeState{LastRun: in.Now, Fingerprint: fingerprint(entries), RunID: in.RunID}, "", "  ")
+	if err := writeFile(a.path(".brain", "merge-state.json"), b); err != nil {
+		return out, err
 	}
 	out.Waiting, err = WaitingOwnerQuestions(a.Cfg.BrainRoot)
 	return out, err
@@ -313,19 +311,19 @@ type MergeStepInput struct {
 }
 
 type MergeStepResult struct {
-	Status   string // ok | skipped | failed: whether the find stage answered
-	Reason   string
-	Complete bool // the find and, when there were groups, the bodies stage both answered
-	CostUSD  float64
-	Calls    int
-	Cached   int
-	StopLLM  bool
-	Notes    int
-	Plan     MergePlan // as settled by code, not as the model answered
-	Delta    delta.Delta
-	Edits    []Edit
-	Owner    []OwnerQuestion
-	Refused  []string // units the applier refused, each with its first reason
+	Status  string // ok | skipped | failed: whether the find stage answered
+	Reason  string
+	Waiting []string // duplicate groups with no merged body this run: "<keep>: <why>"
+	CostUSD float64
+	Calls   int
+	Cached  int
+	StopLLM bool
+	Notes   int
+	Plan    MergePlan // as settled by code, not as the model answered
+	Delta   delta.Delta
+	Edits   []Edit
+	Owner   []OwnerQuestion
+	Refused []string // units the applier refused, each with its first reason
 }
 
 func (r *MergeStepResult) add(s LLMStepResult) {
@@ -366,11 +364,16 @@ func (a *Activities) MergeStep(ctx context.Context, in MergeStepInput) (MergeSte
 		return out, err
 	}
 	out.Plan = settlePlan(plan, notes)
-	out.Complete = true
 
+	// one call per group: a failed or over-budget answer costs only its group, and each group's answer is cached
+	// on its own notes, so a change elsewhere does not pay for it again
 	bodies := map[string]string{}
-	if len(out.Plan.Duplicates) > 0 {
-		input, err := a.bodiesInput(out.Plan.Duplicates, notes)
+	for _, g := range out.Plan.Duplicates {
+		if out.StopLLM {
+			out.Waiting = append(out.Waiting, g.Keep+": no more model calls this run")
+			continue
+		}
+		input, err := a.bodiesInput(g, notes)
 		if err != nil {
 			return out, err
 		}
@@ -383,10 +386,12 @@ func (a *Activities) MergeStep(ctx context.Context, in MergeStepInput) (MergeSte
 			return out, err
 		}
 		if step.Status != "ok" {
-			out.Complete, out.Reason = false, "duplicate groups wait: "+step.Reason
+			out.Waiting = append(out.Waiting, g.Keep+": "+step.Reason)
 		}
 		for _, b := range ans.Bodies {
-			bodies[b.Keep] = b.Body
+			if b.Keep == g.Keep {
+				bodies[g.Keep] = b.Body
+			}
 		}
 	}
 	units, owner := mergeUnits(out.Plan, bodies, notes, in.Today)
@@ -483,8 +488,8 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 
 func dated(n delta.Note) bool { return len(n.AsOf) == len("2006-01-02") }
 
-// bodiesInput gives the bodies stage each group's whole notes and the cap the kept body must fit.
-func (a *Activities) bodiesInput(groups []DuplicateGroup, notes map[string]delta.Note) (string, error) {
+// bodiesInput gives the bodies stage one group's whole notes and the cap the kept body must fit.
+func (a *Activities) bodiesInput(g DuplicateGroup, notes map[string]delta.Note) (string, error) {
 	type noteText struct {
 		ID      string `json:"id"`
 		Content string `json:"content"`
@@ -496,20 +501,16 @@ func (a *Activities) bodiesInput(groups []DuplicateGroup, notes map[string]delta
 		CapChars  int        `json:"cap_chars"`
 		Notes     []noteText `json:"notes"`
 	}
-	var gs []group
-	for _, g := range groups {
-		keep := notes[g.Keep]
-		gr := group{Keep: g.Keep, Supersede: g.Supersede, Type: keep.Type, CapChars: bodyCap(keep, g.Supersede)}
-		for _, id := range append([]string{g.Keep}, g.Supersede...) {
-			b, err := os.ReadFile(a.path("notes", id+".md"))
-			if err != nil {
-				return "", err
-			}
-			gr.Notes = append(gr.Notes, noteText{id, string(b)})
+	keep := notes[g.Keep]
+	gr := group{Keep: g.Keep, Supersede: g.Supersede, Type: keep.Type, CapChars: bodyCap(keep, g.Supersede)}
+	for _, id := range append([]string{g.Keep}, g.Supersede...) {
+		b, err := os.ReadFile(a.path("notes", id+".md"))
+		if err != nil {
+			return "", err
 		}
-		gs = append(gs, gr)
+		gr.Notes = append(gr.Notes, noteText{id, string(b)})
 	}
-	b, err := json.Marshal(map[string]any{"step": mergeStepName, "stage": "bodies", "groups": gs})
+	b, err := json.Marshal(map[string]any{"step": mergeStepName, "stage": "bodies", "groups": []group{gr}})
 	return string(b), err
 }
 
@@ -630,7 +631,8 @@ func (a *Activities) dryRunUnits(ctx context.Context, units []unit) (delta.Delta
 
 // ---- workflow ----
 
-// merge is the dream's curate.merge step: gate, one Opus activity (find, then bodies), ApplyEdits, then MergeDone.
+// merge is the dream's curate.merge step: gate, one Opus activity (find, then a bodies call per group), ApplyEdits,
+// then MergeDone.
 func (r *run) merge(start time.Time) {
 	began := workflow.Now(r.ctx)
 	rec := StepRecord{Name: mergeStepName}
@@ -674,7 +676,7 @@ func (r *run) merge(start time.Time) {
 	}
 	var done MergeDoneResult
 	if err := workflow.ExecuteActivity(r.det, a.MergeDone, MergeDoneInput{RunID: r.rep.RunID, Now: start,
-		Owner: out.Owner, Complete: out.Complete}).Get(r.ctx, &done); err != nil {
+		Owner: out.Owner}).Get(r.ctx, &done); err != nil {
 		finish("failed", "merge done: "+err.Error())
 		return
 	}
@@ -694,6 +696,9 @@ func (r MergeStepResult) summary(done MergeDoneResult) string {
 	s := fmt.Sprintf("%d global notes: %d duplicate groups, %d conflicts (%d superseded, %d narrowed, %d to the owner), "+
 		"%d stale; %d files; %d owner questions queued, %d wait", r.Notes, len(r.Plan.Duplicates), len(r.Plan.Conflicts),
 		superseded, narrow, len(r.Owner), len(r.Plan.Stale), len(r.Edits), done.Queued, done.Waiting)
+	if len(r.Waiting) > 0 {
+		s += fmt.Sprintf("; %d duplicate groups wait, first: %s", len(r.Waiting), r.Waiting[0])
+	}
 	if len(r.Refused) > 0 {
 		s += fmt.Sprintf("; %d refused, first: %s", len(r.Refused), r.Refused[0])
 	}

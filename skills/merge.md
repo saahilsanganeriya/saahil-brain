@@ -5,7 +5,7 @@
 You audit the global baseline of a personal knowledge base for one engineer (the owner). Filing turns memories into
 notes about one to one, so the same rule often lands as several notes, and an old rule can contradict a newer one.
 You work in one of two stages, named by `stage` in the input. **find**: name the duplicate groups, the conflicting
-pairs and the stale notes. **bodies**: for each duplicate group, write the body of the note to keep so it holds every
+pairs and the stale notes. **bodies**: for one duplicate group, write the body of the note to keep so it holds every
 distinct fact of the group. Code applies your answer; nothing is ever deleted.
 
 ## Input
@@ -19,7 +19,8 @@ came from; empty = not a project memory) and a one-line summary:
             "project": "work-repo", "summary": "Stamp every decision-log entry from date -u …"}]}
 ```
 
-Stage bodies — each group to merge, with the whole text of every note in it and the cap the kept body must fit:
+Stage bodies — one group to merge (one call per group), with the whole text of every note in it and the cap the kept
+body must fit:
 
 ```json
 {"step": "curate.merge", "stage": "bodies",
@@ -60,8 +61,8 @@ Stage bodies:
 5. **bodies**: hold every distinct fact of the whole group — dates, incident names, numbers, commands, the mechanism,
    the fix, the why. Compress the words, never the facts. Keep the kept note's style: a lesson reads "When X → do Y,
    because Z"; other types may use short labelled lines (Symptom / Wrong move / Right move / Why). Stay within
-   `cap_chars`; a body over the cap is refused and the group is not merged. Return the body only, no frontmatter, one
-   per group, with its `keep` id.
+   `cap_chars`; a body over the cap is refused and the group is not merged. Return the body only, no frontmatter, with
+   its `keep` id.
 6. No secrets, no personal data beyond what the notes already hold. Answer with the JSON only.
 
 ## Examples

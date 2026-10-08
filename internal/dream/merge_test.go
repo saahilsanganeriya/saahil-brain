@@ -33,7 +33,8 @@ func (m *mergeModel) counts() (int, int) {
 
 const mergePlanAnswer = `{"duplicates": [
   {"keep": "anti-pattern-probe-old", "supersede": ["anti-pattern-probe-new"], "why": "same rule"},
-  {"keep": "lesson-cap-b", "supersede": ["lesson-cap-a"], "why": "same rule"}],
+  {"keep": "lesson-cap-b", "supersede": ["lesson-cap-a"], "why": "same rule"},
+  {"keep": "anti-pattern-noisy-new", "supersede": ["anti-pattern-noisy-old"], "why": "same rule"}],
  "conflicts": [
   {"newer": "decision-flakes-only-rerun", "older": "lesson-rerun-on-depot", "resolution": "narrow", "why": "reruns are for flakes only"},
   {"newer": "decision-p", "older": "decision-q", "resolution": "supersede", "why": "opposite rules"}],
@@ -41,7 +42,8 @@ const mergePlanAnswer = `{"duplicates": [
 
 // newMergeBrain adds to newBrain current global notes holding one case of each kind curate.merge handles, plus a
 // hub-scoped note it must not see. The fake's find answer keeps the OLDER probe note and calls a same-date pair a
-// supersede; its bodies answer merges each group, over the 300-char lesson cap for lesson-cap-b.
+// supersede; its bodies answers merge each group, over the 300-char lesson cap for lesson-cap-b, and are not JSON for
+// anti-pattern-noisy-new.
 func newMergeBrain(t *testing.T) (*Activities, *mergeModel) {
 	t.Helper()
 	acts, _ := newBrain(t, 0.01)
@@ -77,6 +79,10 @@ func newMergeBrain(t *testing.T) (*Activities, *mergeModel) {
 		"Use the old tool.", "")
 	note("decision-new-tool", "decision", "global", "2026-10-01", "Stacked PRs use gh stack; the old tool was replaced",
 		"gh stack replaced the old tool.", "")
+	note("anti-pattern-noisy-old", "anti-pattern", "global", "2026-09-01", "Polling a log in a loop floods the context",
+		"Wrong move: tail the log every second.", "")
+	note("anti-pattern-noisy-new", "anti-pattern", "global", "2026-09-02", "A tight log-polling loop floods the context",
+		"Wrong move: poll the log in a loop.", "")
 	note("finding-hub-only", "finding", "hub", "2026-10-05", "A hub-scoped finding", "Not global.", "")
 
 	m := &mergeModel{}
@@ -98,6 +104,9 @@ func newMergeBrain(t *testing.T) (*Activities, *mergeModel) {
 			return llm.Result{JSON: json.RawMessage(mergePlanAnswer)}
 		}
 		m.bodies++
+		if len(in.Groups) == 1 && in.Groups[0].Keep == "anti-pattern-noisy-new" {
+			return llm.Result{Text: "not json"}
+		}
 		var bodies []MergeBody
 		for _, g := range in.Groups {
 			body := "MERGED " + g.Keep + ": check put and delete rights before any write probe."
@@ -126,14 +135,17 @@ func readNote(t *testing.T, acts *Activities, id string) delta.Note {
 }
 
 // TestCurateMergeMergesNarrowsAndAsks catches curate.merge losing or misplacing facts: a duplicate kept on the older
-// note, a superseded note whose facts never reached the kept body (a merged body the applier refused must leave its
-// whole group alone), a narrow not written, a same-date pair settled by the model's guess instead of going to the
-// owner, a stale note left current, a delete, and a merge whose own writes wake the next dream's merge.
+// note, a superseded note whose facts never reached the kept body (a merged body the applier refused, or no usable
+// body, must leave its whole group alone), one group's bad bodies answer costing the other groups their merge, a
+// narrow not written, a same-date pair settled by the model's guess instead of going to the owner, a stale note left
+// current, a delete, and a merge whose own writes wake the next dream's merge.
 func TestCurateMergeMergesNarrowsAndAsks(t *testing.T) {
 	acts, model := newMergeBrain(t)
 	rep := runDream(t, acts, Input{Force: true}, mergeT0)
 	if s := step(rep, "curate.merge"); s.Status != "ok" || s.Edits != 5 {
 		t.Fatalf("curate.merge: %+v", s)
+	} else if !strings.Contains(s.Reason, "1 duplicate groups wait, first: anti-pattern-noisy-new") {
+		t.Fatalf("the group with no usable body is not reported as waiting: %s", s.Reason)
 	}
 	if !strings.Contains(model.findInput, `"project":"work-repo"`) || strings.Contains(model.findInput, "finding-hub-only") {
 		t.Fatalf("find input is not the current global notes with their project: %s", model.findInput)
@@ -144,7 +156,7 @@ func TestCurateMergeMergesNarrowsAndAsks(t *testing.T) {
 		kept.Status != "current" || gone.Status != "superseded" {
 		t.Fatalf("duplicate group not merged into the newest note: kept=%+v gone=%+v", kept, gone)
 	}
-	for _, id := range []string{"lesson-cap-a", "lesson-cap-b"} {
+	for _, id := range []string{"lesson-cap-a", "lesson-cap-b", "anti-pattern-noisy-old", "anti-pattern-noisy-new"} {
 		if n := readNote(t, acts, id); n.Status != "current" || len(n.Supersedes) > 0 || strings.Contains(n.Body, "xxx") {
 			t.Fatalf("a group whose merged body was refused was still changed: %+v", n)
 		}
@@ -188,7 +200,7 @@ func TestMergeGateRunsOnChangeOrDaily(t *testing.T) {
 	if g, err := acts.MergeGate(ctx, mergeT0); err != nil || g.Skip != "" {
 		t.Fatalf("first merge should run: %+v %v", g, err)
 	}
-	if _, err := acts.MergeDone(ctx, MergeDoneInput{RunID: "r1", Now: mergeT0, Complete: true}); err != nil {
+	if _, err := acts.MergeDone(ctx, MergeDoneInput{RunID: "r1", Now: mergeT0}); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
