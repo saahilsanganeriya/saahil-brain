@@ -102,10 +102,11 @@ func TestCompareCatchesMissingFile(t *testing.T) {
 
 // TestReconcileMovesOnlyThisMachinesLoser: the newer copy wins, and --apply on one machine renames aside only that
 // machine's losing copies; renaming the winner, or the other machine's files, would destroy the edit that should win.
+// A file on one side that is a directory on the other is reported, not silently dropped.
 func TestReconcileMovesOnlyThisMachinesLoser(t *testing.T) {
 	laptop, devbox := t.TempDir(), t.TempDir()
-	writeTree(t, laptop, map[string]string{"a.md": "laptop newer", "b.md": "laptop older", "same.md": "s"})
-	writeTree(t, devbox, map[string]string{"a.md": "devbox older", "b.md": "devbox newer", "same.md": "s"})
+	writeTree(t, laptop, map[string]string{"a.md": "laptop newer", "b.md": "laptop older", "same.md": "s", "kind": "f"})
+	writeTree(t, devbox, map[string]string{"a.md": "devbox older", "b.md": "devbox newer", "same.md": "s", "kind/x": "d"})
 	later := t0.Add(2 * time.Hour)
 	_ = os.Chtimes(filepath.Join(laptop, "a.md"), later, later)
 	_ = os.Chtimes(filepath.Join(devbox, "b.md"), later, later)
@@ -114,7 +115,7 @@ func TestReconcileMovesOnlyThisMachinesLoser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Same != 1 || len(res.Conflicts) != 2 {
+	if res.Same != 1 || len(res.Conflicts) != 2 || len(res.KindDiffers) != 1 || res.OnlyDevbox != 1 {
 		t.Fatalf("got %+v", res)
 	}
 	a, b := res.Conflicts[0], res.Conflicts[1]

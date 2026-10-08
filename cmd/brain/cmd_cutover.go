@@ -190,8 +190,8 @@ func cmdCutoverReconcile(args []string) int {
 	if err := report.Close(); err != nil {
 		return fail("%v", err)
 	}
-	fmt.Printf("%s: same %d · conflicts %d · only-laptop %d · only-devbox %d · unhashed-differ %d · binary-differ %d\n",
-		*out, res.Same, len(res.Conflicts), res.OnlyLaptop, res.OnlyDevbox, len(res.Unhashed), len(res.NonText))
+	fmt.Printf("%s: same %d · conflicts %d · only-laptop %d · only-devbox %d · unhashed-differ %d · binary-differ %d · kind-differ %d\n",
+		*out, res.Same, len(res.Conflicts), res.OnlyLaptop, res.OnlyDevbox, len(res.Unhashed), len(res.NonText), len(res.KindDiffers))
 	if !*apply {
 		return 0
 	}

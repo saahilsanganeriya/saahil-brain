@@ -125,9 +125,9 @@ type Conflict struct {
 }
 
 type ReconcileResult struct {
-	Same, OnlyLaptop, OnlyDevbox int
-	Conflicts                    []Conflict
-	Unhashed, NonText            []string // differing files reconcile cannot judge: no sha on a side, or a binary
+	Same, OnlyLaptop, OnlyDevbox   int
+	Conflicts                      []Conflict
+	Unhashed, NonText, KindDiffers []string // differences reconcile cannot judge: no sha, a binary, file vs dir/link
 }
 
 func Reconcile(laptop, devbox io.Reader) (ReconcileResult, error) {
@@ -142,7 +142,9 @@ func Reconcile(laptop, devbox io.Reader) (ReconcileResult, error) {
 			if d.Kind == KindFile {
 				res.OnlyDevbox++
 			}
-		case l.Kind != KindFile || d.Kind != KindFile:
+		case l.Kind != d.Kind && (l.Kind == KindFile || d.Kind == KindFile):
+			res.KindDiffers = append(res.KindDiffers, l.Path)
+		case l.Kind != KindFile:
 		case sameContent(l, d):
 			res.Same++
 		case l.SHA == "" || d.SHA == "":
@@ -199,9 +201,9 @@ func ApplyReconcile(root, machine string, conflicts []Conflict) ([]string, error
 func WriteReconcileReport(w io.Writer, res ReconcileResult) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Reconcile: laptop vs devbox saahil-docs\n\n")
-	fmt.Fprintf(&b, "| same | conflicts | only laptop | only devbox | differ, unhashed | differ, binary |\n|---|---|---|---|---|---|\n")
-	fmt.Fprintf(&b, "| %d | %d | %d | %d | %d | %d |\n\n", res.Same, len(res.Conflicts), res.OnlyLaptop, res.OnlyDevbox,
-		len(res.Unhashed), len(res.NonText))
+	fmt.Fprintf(&b, "| same | conflicts | only laptop | only devbox | differ, unhashed | differ, binary | file vs dir/link |\n")
+	fmt.Fprintf(&b, "|---|---|---|---|---|---|---|\n| %d | %d | %d | %d | %d | %d | %d |\n\n", res.Same, len(res.Conflicts),
+		res.OnlyLaptop, res.OnlyDevbox, len(res.Unhashed), len(res.NonText), len(res.KindDiffers))
 	if len(res.Conflicts) > 0 {
 		fmt.Fprintf(&b, "## Conflicts (newer wins; the loser is renamed aside on its own machine)\n\n")
 		fmt.Fprintf(&b, "| path | winner | laptop mtime | devbox mtime | loser kept as |\n|---|---|---|---|---|\n")
@@ -218,7 +220,8 @@ func WriteReconcileReport(w io.Writer, res ReconcileResult) error {
 	for _, list := range []struct {
 		title string
 		paths []string
-	}{{"Differ but unhashed (> 2 MB or bulk): not reconciled", res.Unhashed}, {"Differ, binary: not reconciled", res.NonText}} {
+	}{{"Differ but unhashed (> 2 MB or bulk): not reconciled", res.Unhashed}, {"Differ, binary: not reconciled", res.NonText},
+		{"A file on one machine, a directory or symlink on the other: not reconciled", res.KindDiffers}} {
 		if len(list.paths) == 0 {
 			continue
 		}
