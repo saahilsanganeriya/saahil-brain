@@ -32,7 +32,8 @@ func ownProcStart(t *testing.T) string {
 	return fields[19]
 }
 
-// Catches a stale registry file (dead pid) or a pid since reused by another process showing up as a live agent.
+// Catches a stale registry file (dead pid), a pid since reused by another process, or a live one-shot `claude -p` run
+// (the dream's model calls) showing up as an agent.
 func TestListSkipsDeadSessions(t *testing.T) {
 	dir := t.TempDir()
 	pid := os.Getpid()
@@ -40,6 +41,8 @@ func TestListSkipsDeadSessions(t *testing.T) {
 		registryFile{PID: 999_999_999, SessionID: "dead-session-0001", Name: "dead", Status: "idle"},
 		registryFile{PID: pid, SessionID: "reused-pid-000002", Name: "reused", ProcStart: "1", Status: "idle"},
 		registryFile{PID: pid, SessionID: "live-session-0003", Name: "live", ProcStart: ownProcStart(t), Status: "busy"},
+		registryFile{PID: pid, SessionID: "one-shot-call-0004", Name: "brain-llm-1-ab", ProcStart: ownProcStart(t), Status: "busy",
+			Entrypoint: "sdk-cli"},
 	)
 	sessions, err := LocalSessions(dir)
 	if err != nil {

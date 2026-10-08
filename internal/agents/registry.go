@@ -33,9 +33,11 @@ type registryFile struct {
 	CWD       string `json:"cwd"`
 	ProcStart string `json:"procStart"`
 	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	UpdatedAt int64  `json:"updatedAt"`
+	// "sdk-cli" is a one-shot `claude -p` run (the dream's model calls): it takes no notes, so it is no agent
+	Entrypoint string `json:"entrypoint"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	UpdatedAt  int64  `json:"updatedAt"`
 }
 
 func RegistryDir() string { return filepath.Join(config.ClaudeDir(), "sessions") }
@@ -56,7 +58,7 @@ func LocalSessions(dir string) ([]Session, error) {
 			continue
 		}
 		var rf registryFile
-		if json.Unmarshal(raw, &rf) != nil || rf.SessionID == "" || rf.PID <= 0 {
+		if json.Unmarshal(raw, &rf) != nil || rf.SessionID == "" || rf.PID <= 0 || rf.Entrypoint == "sdk-cli" {
 			continue
 		}
 		if !processIsSame(rf.PID, rf.ProcStart) || seen[rf.SessionID] {
