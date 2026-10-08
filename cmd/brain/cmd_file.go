@@ -38,12 +38,22 @@ func cmdFile(args []string) int {
 	model := fset.String("model", "haiku", "haiku | opus")
 	budget := fset.Float64("budget", 15, "stop before a call would take this run past $N")
 	seed := fset.Bool("seed-hubs", false, "copy the seed hubs into <brain>/hubs/ where missing, then stop")
+	relink := fset.Bool("relink", false, "rewrite [[old-memory-name]] links in notes to the notes they became, then stop")
 	if err := fset.Parse(args); err != nil {
 		return 2
 	}
 	root := config.BrainRoot()
 	if *seed {
 		return seedHubs(root, *dryRun)
+	}
+	if *relink {
+		rep, err := filing.Relink(root)
+		if err != nil {
+			return fail("relink: %v", err)
+		}
+		out, _ := json.Marshal(rep)
+		fmt.Println(string(out))
+		return 0
 	}
 	machines := []string{*machine}
 	if *machine == "all" {
