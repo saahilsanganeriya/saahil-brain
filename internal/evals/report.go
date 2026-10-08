@@ -21,6 +21,7 @@ type Cell struct {
 type Metric struct {
 	Eval       string  `json:"eval"`
 	Name       string  `json:"name"`
+	Split      string  `json:"split,omitempty"` // dev | test; "" = every item
 	Kind       string  `json:"kind"` // rate | lift | mean
 	All        Cell    `json:"all"`
 	Human      *Cell   `json:"human,omitempty"`
@@ -109,10 +110,14 @@ func (m Metric) verdict() string {
 
 // Line is the metric in one line for the terminal: all / human-typed / dispatched, then the verdict.
 func (m Metric) Line() string {
-	if m.NA != "" && m.All.N == 0 {
-		return fmt.Sprintf("%-10s %-52s %s", m.Eval, m.Name, m.verdict())
+	label := m.Eval
+	if m.Split != "" {
+		label += "/" + m.Split
 	}
-	s := fmt.Sprintf("%-10s %-52s all %s", m.Eval, m.Name, m.format(&m.All))
+	if m.NA != "" && m.All.N == 0 {
+		return fmt.Sprintf("%-15s %-52s %s", label, m.Name, m.verdict())
+	}
+	s := fmt.Sprintf("%-15s %-52s all %s", label, m.Name, m.format(&m.All))
 	if m.Human != nil {
 		s += fmt.Sprintf(" · human %s · dispatched %s", m.format(m.Human), m.format(m.Dispatched))
 	}
@@ -188,9 +193,9 @@ func (r Report) markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Eval: %s — %s\n\nran %s · sets built %s · index updated %s · ranker `%s`\n\n", r.Eval,
 		r.Ran.Format(time.DateOnly), r.Ran.Format(time.RFC3339), r.SetsBuilt.Format(time.RFC3339), r.IndexUpdated, r.Ranker)
-	b.WriteString("| metric | all | human-typed | dispatched | verdict |\n|---|---|---|---|---|\n")
+	b.WriteString("| split | metric | all | human-typed | dispatched | verdict |\n|---|---|---|---|---|---|\n")
 	for _, m := range r.Metrics {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n", m.Name, m.format(&m.All), m.format(m.Human), m.format(m.Dispatched), cell(m.verdict()))
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cmp.Or(m.Split, "all"), m.Name, m.format(&m.All), m.format(m.Human), m.format(m.Dispatched), cell(m.verdict()))
 	}
 	b.WriteString("\n## Notes\n\n")
 	for _, n := range r.Notes {
@@ -241,7 +246,7 @@ func list(ids []string) string {
 }
 
 func (NavRow) header() []string {
-	return []string{"id", "session", "dispatched", "query from", "targets", "top-3", "box top-3", "calls", "pointers"}
+	return []string{"id", "split", "session", "dispatched", "query from", "targets", "top-3", "box top-3", "calls", "pointers"}
 }
 
 func (r NavRow) cells() []string {
@@ -249,31 +254,31 @@ func (r NavRow) cells() []string {
 	if r.Error != "" {
 		q = "error: " + r.Error
 	}
-	return []string{r.ID, r.Session, yes(r.Dispatched), q, strconv.Itoa(r.Targets), yes(r.Top3), yes(r.BoxTop3), callsCell(r.Calls), list(r.Pointers)}
+	return []string{r.ID, r.Split, r.Session, yes(r.Dispatched), q, strconv.Itoa(r.Targets), yes(r.Top3), yes(r.BoxTop3), callsCell(r.Calls), list(r.Pointers)}
 }
 
 func (QARow) header() []string {
-	return []string{"id", "kind", "source", "question", "target", "hit", "topic hit", "returned"}
+	return []string{"id", "split", "kind", "source", "question", "target", "hit", "topic hit", "returned"}
 }
 
 func (r QARow) cells() []string {
-	return []string{r.ID, string(r.Kind), r.Source, r.Question, cmp.Or(r.Target, "(abstain)"), yes(r.Hit), yes(r.TopicHit), list(r.Returned)}
+	return []string{r.ID, r.Split, string(r.Kind), r.Source, r.Question, cmp.Or(r.Target, "(abstain)"), yes(r.Hit), yes(r.TopicHit), list(r.Returned)}
 }
 
 func (MistakeRow) header() []string {
-	return []string{"id", "session", "dispatched", "lessons", "surfaced", "pointers"}
+	return []string{"id", "split", "session", "dispatched", "lessons", "surfaced", "pointers"}
 }
 
 func (r MistakeRow) cells() []string {
-	return []string{r.ID, r.Session, yes(r.Dispatched), strconv.Itoa(r.Lessons), yes(r.Surfaced), list(r.Pointers)}
+	return []string{r.ID, r.Split, r.Session, yes(r.Dispatched), strconv.Itoa(r.Lessons), yes(r.Surfaced), list(r.Pointers)}
 }
 
 func (ABRow) header() []string {
-	return []string{"id", "dispatched", "brain top-3", "grep top-3", "brain calls", "grep calls"}
+	return []string{"id", "split", "dispatched", "brain top-3", "grep top-3", "brain calls", "grep calls"}
 }
 
 func (r ABRow) cells() []string {
-	return []string{r.ID, yes(r.Dispatched), yes(r.BrainTop3), yes(r.GrepTop3), callsCell(r.BrainCalls), callsCell(r.GrepCalls)}
+	return []string{r.ID, r.Split, yes(r.Dispatched), yes(r.BrainTop3), yes(r.GrepTop3), callsCell(r.BrainCalls), callsCell(r.GrepCalls)}
 }
 
 // RunAll runs every eval on the stored sets (rebuilding them first when build is set) and writes each report.

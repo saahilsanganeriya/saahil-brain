@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -19,8 +20,8 @@ import (
 
 func init() {
 	register("eval build", "build the eval sets from history into ~/brain/.brain/evals: brain eval build [--cut D] [--nav-from D]", cmdEvalBuild)
-	register("eval navigation", "first prompt → files the session used: top-3 pointers and within 3 tool calls", cmdEvalOne("navigation"))
-	register("eval qa", "answer-from-brain: recall@3 of the right note, abstain on unknowns", cmdEvalOne("qa"))
+	register("eval navigation", "first prompt → files the session used: top-3 pointers and within 3 tool calls [--split dev|test]", cmdEvalOne("navigation"))
+	register("eval qa", "answer-from-brain: recall@3 of the right note, abstain on unknowns [--split dev|test]", cmdEvalOne("qa"))
 	register("eval mistakes", "repeat-mistake: does a pointer surface the lesson before a past correction", cmdEvalOne("mistakes"))
 	register("eval ab", "offline A/B: navigation with the brain vs a budget-matched keyword grep", cmdEvalOne("ab"))
 	register("eval all", "run every eval on the built sets and write reports: brain eval all [--build]", cmdEvalAll)
@@ -107,10 +108,18 @@ func printReports(reports []evals.Report, root string) {
 
 func cmdEvalOne(name string) func([]string) int {
 	return func(args []string) int {
-		if len(args) > 0 {
-			return fail("eval %s takes no arguments", name)
+		fs := flag.NewFlagSet("eval "+name, flag.ContinueOnError)
+		only := fs.String("split", "", "run only the dev or the test half of the set")
+		if err := fs.Parse(args); err != nil {
+			return 2
+		}
+		if *only != "" && !slices.Contains(evals.Splits, *only) {
+			return fail("--split: dev or test, not %q", *only)
 		}
 		return withEvalEnv(false, func(env *evals.Env) int {
+			if *only != "" {
+				env.Only(*only)
+			}
 			rep, err := env.Run(name)
 			if err != nil {
 				return fail("eval %s: %v", name, err)
