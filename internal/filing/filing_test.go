@@ -184,3 +184,42 @@ func TestRenderMemoryIndexCaps(t *testing.T) {
 		t.Errorf("fact lines must carry the summary itself")
 	}
 }
+
+// TestEditedCopyOfFiledMemoryCountsAsFiled: the same memory file edited on one machine is not a byte duplicate, so it
+// is asked again; the model names the note it already became, the add is refused as existing, and the copy used to
+// count as left out though its note cites the other machine's copy.
+func TestEditedCopyOfFiledMemoryCountsAsFiled(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "hubs/index.md", "---\nid: index\ntype: hub\nstatus: current\nsummary: home\n---\n")
+	put(t, root, "hubs/git.md", "---\nid: git\ntype: hub\nstatus: current\nsummary: git practice\nbroader: [index]\n---\n")
+	for machine, body := range map[string]string{"devbox": "Wait in a loop.", "laptop": "Wait in a loop, acking heartbeats."} {
+		content := memory("2026-09-01T00:00:00Z", body)
+		put(t, root, ".import/"+machine+"/repo-a/inbox-loop.md", content)
+		put(t, root, ".import/"+machine+"-manifest.tsv", "repo-a/inbox-loop.md\t"+fmt.Sprint(len(content))+"\t-\n")
+	}
+	fake := &llm.Fake{Respond: func(c llm.Call) llm.Result {
+		var in struct{ Material []struct{ Path string } }
+		_ = json.Unmarshal([]byte(c.Input), &in)
+		var ops []map[string]any
+		for _, m := range in.Material {
+			ops = append(ops, map[string]any{"op": "add_note", "note": map[string]any{"id": "playbook-inbox-loop",
+				"type": "playbook", "status": "current", "summary": "wait in a loop", "scope": "global", "hubs": []string{"git"},
+				"evidence": []string{m.Path}, "sources": []string{m.Path}, "body": "1. wait in a loop."}})
+		}
+		out, _ := json.Marshal(map[string]any{"ops": ops})
+		return llm.Result{JSON: out}
+	}}
+	ledger, err := llm.OpenLedger(filepath.Join(root, ".index", "brain.db"), filepath.Join(root, ".data", "llm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	res, err := Run(context.Background(), Config{Root: root, Machines: []string{"devbox", "laptop"}, Batch: 1, Model: "haiku",
+		Runner: fake, Ledger: ledger, Skill: "file skill", BudgetUSD: 1, Now: time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rejected != 1 || res.Unfiled != 0 || res.FiledNow != 2 {
+		t.Fatalf("want the refused copy counted as filed under the existing note: %+v", res)
+	}
+}

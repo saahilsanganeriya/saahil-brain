@@ -420,6 +420,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 				res.Rejected += len(rep.Rejected)
 				res.LinksDropped += len(rep.DroppedRefs)
 				cited = citedSources(d, rep)
+				for path, ids := range filedCopyCitations(cfg.Root, d, rep) {
+					cited[path] = append(cited[path], ids...)
+				}
 			}
 			for _, it := range batch {
 				notes := cited[it.Path]
@@ -529,4 +532,44 @@ func writeAtomic(path string, b []byte) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// filedCopyCitations credits a memory whose add_note was refused only because the note exists and already cites the
+// same memory file from the other machine: an edited copy is no byte duplicate, so it is asked again and lands here.
+func filedCopyCitations(root string, d delta.Delta, rep delta.Report) map[string][]string {
+	out := map[string][]string{}
+	for _, r := range rep.Rejected {
+		if r.Op != "add_note" || !strings.Contains(r.Reason, "already exists") || r.Index >= len(d.Ops) || d.Ops[r.Index].Note == nil {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, "notes", r.Target+".md"))
+		if err != nil {
+			continue
+		}
+		existing, err := delta.Parse(raw)
+		if err != nil {
+			continue
+		}
+		for _, src := range d.Ops[r.Index].Note.Sources {
+			for _, have := range existing.Sources {
+				if src != have && machineFree(src) != "" && machineFree(src) == machineFree(have) {
+					out[src] = append(out[src], r.Target)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// machineFree drops ".import/<machine>/" so the two machines' copies of one memory file compare equal.
+func machineFree(p string) string {
+	rest, ok := strings.CutPrefix(p, ".import/")
+	if !ok {
+		return ""
+	}
+	_, after, ok := strings.Cut(rest, "/")
+	if !ok {
+		return ""
+	}
+	return after
 }
