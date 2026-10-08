@@ -40,7 +40,22 @@ var AllowedSteps = map[string]Step{
 	"sync-enable":   {Args: []string{"sync", "--enable"}, Timeout: 5 * time.Minute, Only: config.Laptop},
 	"session-backfill": {Args: []string{"session", "backfill", "--machine", "laptop"}, Timeout: 30 * time.Minute,
 		Only: config.Laptop},
+	// cut-over evidence on the laptop (read-only); the move itself is a gated task for a laptop session
+	"cutover-manifest-before": {Args: []string{"cutover", "manifest", laptopDocs, "--out", cutoverDir + "/laptop-before.tsv",
+		"--skip-hash-under", "**/artifacts/**", "--skip-hash-under", "**/.venv/**", "--skip-hash-under", "**/venv/**"},
+		Timeout: 2 * time.Hour, Only: config.Laptop},
+	"cutover-manifest-after": {Args: []string{"cutover", "manifest", config.LaptopHome + "/brain/work", "--out",
+		cutoverDir + "/laptop-after.tsv", "--skip-hash-under", "**/artifacts/**", "--skip-hash-under", "**/.venv/**",
+		"--skip-hash-under", "**/venv/**"}, Timeout: 2 * time.Hour, Only: config.Laptop},
+	"cutover-find-names": {Args: []string{"cutover", "find-names", config.LaptopHome + "/brain/work",
+		config.LaptopHome + "/Documents", config.LaptopHome + "/.claude", "--out", cutoverDir + "/laptop-names.txt"},
+		Timeout: time.Hour, Only: config.Laptop},
 }
+
+const (
+	laptopDocs = config.LaptopHome + "/Documents/work-repo/saahil-docs"
+	cutoverDir = config.LaptopHome + "/brain/.archive/cutover"
+)
 
 type Job struct {
 	ID       string    `json:"id"`
