@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"saahil.local/brain/internal/config"
 )
 
 // Catches `brain dream merge` writing into the brain it only reports on — a ledger under .index/, an owner question
@@ -66,4 +68,16 @@ func tree(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return b.String()
+}
+
+// Catches --out or --ledger slipping into the live brain under the devbox spelling of home (/home/test-user/brain is the
+// same folder as /Users/test-user/brain there).
+func TestInsideSeesBothHomeSpellings(t *testing.T) {
+	brain := filepath.Join(config.LaptopHome, "brain")
+	for path, want := range map[string]bool{filepath.Join(config.DevboxHome, "brain", "delta.json"): true,
+		filepath.Join(brain, ".index", "x"): true, filepath.Join(config.LaptopHome, "brain-other", "x"): false} {
+		if inside(path, brain) != want {
+			t.Errorf("inside(%s) = %v", path, !want)
+		}
+	}
 }
