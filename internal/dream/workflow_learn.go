@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/workflow"
@@ -50,17 +51,18 @@ func (s Signals) worthJudging() bool {
 }
 
 type LearnResult struct {
-	Session   string  `json:"session"`
-	Signals   Signals `json:"signals"`
-	Outcome   string  `json:"outcome,omitempty"` // success | partial | failure; "" when nothing needed judging
-	Reflected bool    `json:"reflected"`
-	Edits     []Edit  `json:"edits,omitempty"`
-	Applied   int     `json:"applied"`
-	CostUSD   float64 `json:"cost_usd"`
-	Calls     int     `json:"calls"`
-	Cached    int     `json:"cached"`
-	StopLLM   bool    `json:"stop_llm,omitempty"`
-	Reason    string  `json:"reason,omitempty"`
+	Session   string     `json:"session"`
+	Signals   Signals    `json:"signals"`
+	Outcome   string     `json:"outcome,omitempty"`  // success | partial | failure; "" when nothing needed judging
+	Counters  []delta.Op `json:"counters,omitempty"` // the judge's helpful/harmful ops that were applied, each with its why
+	Reflected bool       `json:"reflected"`
+	Edits     []Edit     `json:"edits,omitempty"`
+	Applied   int        `json:"applied"`
+	CostUSD   float64    `json:"cost_usd"`
+	Calls     int        `json:"calls"`
+	Cached    int        `json:"cached"`
+	StopLLM   bool       `json:"stop_llm,omitempty"`
+	Reason    string     `json:"reason,omitempty"`
 }
 
 func (r *LearnResult) add(s LLMStepResult) {
@@ -86,7 +88,8 @@ type LearnCallInput struct {
 
 type LearnCallResult struct {
 	LLMStepResult
-	Outcome string
+	Outcome  string
+	Counters []delta.Op `json:",omitempty"`
 }
 
 // LearnID names a session's learn run by the session's short id, the part of its note's name that never changes.
@@ -122,6 +125,7 @@ func LearnSessionWorkflow(ctx workflow.Context, in LearnInput) (LearnResult, err
 			return out, err
 		}
 		out.add(j.LLMStepResult)
+		out.Counters = j.Counters
 		if out.Outcome = j.Outcome; j.Status != "ok" {
 			return out, nil
 		}
@@ -297,10 +301,11 @@ func appendNew(list []string, items ...string) []string {
 	return list
 }
 
-const judgeSchema = `{"type":"object","required":["outcome","pointers"],"additionalProperties":false,"properties":{
+const judgeSchema = `{"type":"object","required":["outcome","ops"],"additionalProperties":false,"properties":{
 "outcome":{"type":"string","enum":["success","partial","failure"]},
-"pointers":{"type":"array","items":{"type":"object","required":["id","verdict"],"properties":{
-"id":{"type":"string"},"verdict":{"type":"string","enum":["helpful","misled","unused"]},"why":{"type":"string"}}}},
+"ops":{"type":"array","items":{"type":"object","required":["op","id","field","delta","why"],"properties":{
+"op":{"type":"string","enum":["counter"]},"id":{"type":"string"},"field":{"type":"string","enum":["helpful","harmful"]},
+"delta":{"type":"integer","enum":[1]},"why":{"type":"string"}}}},
 "notes":{"type":"string"}}}`
 
 func (a *Activities) sessionPayload(in LearnCallInput, step string) (map[string]any, error) {
@@ -313,8 +318,8 @@ func (a *Activities) sessionPayload(in LearnCallInput, step string) (map[string]
 	return map[string]any{"step": step, "material": []payloadFile{f}, "signals": in.Signals}, nil
 }
 
-// LearnJudge asks Haiku how the session went and which shown pointers helped or misled; the verdicts on pointers the
-// hooks really showed become helpful/harmful counters, once per answer.
+// LearnJudge asks Haiku how the session went and which shown pointers helped or misled. Its answer is delta counter
+// ops; those on notes the hooks really showed, one per pointer, go through delta.Apply into node_stats, once per answer.
 func (a *Activities) LearnJudge(ctx context.Context, in LearnCallInput) (LearnCallResult, error) {
 	skill, err := a.readSkill("judge")
 	if err != nil {
@@ -324,6 +329,7 @@ func (a *Activities) LearnJudge(ctx context.Context, in LearnCallInput) (LearnCa
 	if err != nil {
 		return LearnCallResult{}, err
 	}
+	payload["pointers"] = a.pointerSummaries(in.Signals.Shown)
 	input, _ := json.Marshal(payload)
 	p := paid{workflow: "learn", step: "judge", model: config.ModelBulk, skill: string(skill), input: string(input),
 		schema: judgeSchema, spentUSD: in.SpentUSD, capUSD: RunCapUSD}
@@ -333,22 +339,26 @@ func (a *Activities) LearnJudge(ctx context.Context, in LearnCallInput) (LearnCa
 		return out, err
 	}
 	var j struct {
-		Outcome  string `json:"outcome"`
-		Pointers []struct{ ID, Verdict string }
+		Outcome string     `json:"outcome"`
+		Ops     []delta.Op `json:"ops"`
 	}
 	if err := json.Unmarshal(answerJSON(res), &j); err != nil {
 		out.Status, out.Reason = "failed", "answer is not the judge JSON"
 		return out, nil
 	}
 	out.Outcome = j.Outcome
-	var counters []delta.Counter
-	for _, ptr := range j.Pointers {
-		field := map[string]string{"helpful": "helpful", "misled": "harmful"}[ptr.Verdict]
-		if field != "" && slices.Contains(in.Signals.Shown, ptr.ID) {
-			counters = append(counters, delta.Counter{ID: ptr.ID, Field: field, Delta: 1})
+	var ops []delta.Op
+	judged := map[string]bool{}
+	for _, op := range j.Ops {
+		if op.Op != "counter" || (op.Field != "helpful" && op.Field != "harmful") || judged[op.ID] ||
+			!slices.Contains(in.Signals.Shown, op.ID) {
+			continue
 		}
+		judged[op.ID] = true
+		op.Delta, op.Why = 1, firstLine(op.Why)
+		ops = append(ops, op)
 	}
-	if len(counters) == 0 {
+	if len(ops) == 0 {
 		return out, nil
 	}
 	stats, err := delta.OpenStats(a.path(".index", "brain.db"))
@@ -356,8 +366,43 @@ func (a *Activities) LearnJudge(ctx context.Context, in LearnCallInput) (LearnCa
 		return out, err
 	}
 	defer stats.Close()
-	_, err = stats.AddCounters(llm.Key(p.workflow, p.step, p.model, p.skill, p.input), counters)
-	return out, err
+	rep, err := delta.Apply(ctx, a.Cfg.BrainRoot, delta.Delta{Ops: ops}, delta.Options{Now: time.Now(), Stats: stats,
+		Key: llm.Key(p.workflow, p.step, p.model, p.skill, p.input), WorkRoot: a.shadowRoot()})
+	if err != nil {
+		return out, err
+	}
+	rejected := map[int]bool{}
+	for _, r := range rep.Rejected {
+		rejected[r.Index] = true // a pointer at a work doc: counters live on notes only
+	}
+	for i, op := range ops {
+		if !rejected[i] {
+			out.Counters = append(out.Counters, op)
+		}
+	}
+	return out, nil
+}
+
+// pointerSummaries gives the judge what each shown pointer said; an id the index lacks keeps an empty summary.
+func (a *Activities) pointerSummaries(ids []string) []map[string]string {
+	out := make([]map[string]string, 0, len(ids))
+	db, err := sql.Open("sqlite", "file:"+a.path(".index", "brain.db")+"?_pragma=busy_timeout(5000)&mode=ro")
+	if err == nil {
+		defer db.Close()
+	}
+	for _, id := range ids {
+		var summary string
+		if db != nil {
+			_ = db.QueryRow(`SELECT summary FROM node WHERE id = ?`, id).Scan(&summary)
+		}
+		out = append(out, map[string]string{"id": id, "summary": summary})
+	}
+	return out
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return line
 }
 
 // LearnReflect runs distil (Opus) over the session note and its signals; the delta comes back as whole-file edits.

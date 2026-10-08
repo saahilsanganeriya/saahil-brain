@@ -27,8 +27,10 @@ func newLearnBrain(t *testing.T, corrections map[string]int) (*Activities, *llm.
 	brain := acts.Cfg.BrainRoot
 	write(t, filepath.Join(brain, "hubs", "ci-depot.md"),
 		"---\nid: ci-depot\ntype: hub\nstatus: current\nsummary: CI on Depot\nbroader: [index]\n---\n")
-	write(t, filepath.Join(brain, "notes", "lesson-shown.md"), "---\nid: lesson-shown\ntype: lesson\nstatus: current\n"+
-		"summary: a shown lesson\nhubs: [ci-depot]\nevidence: [hubs/ci-depot.md]\n---\nbody\n")
+	for _, id := range []string{"lesson-shown", "lesson-unshown"} {
+		write(t, filepath.Join(brain, "notes", id+".md"), "---\nid: "+id+"\ntype: lesson\nstatus: current\n"+
+			"summary: a lesson\nhubs: [ci-depot]\nevidence: [hubs/ci-depot.md]\n---\nbody\n")
+	}
 	transcript := filepath.Join(brain, "t.jsonl")
 	write(t, transcript, `{"message":{"content":[{"type":"tool_use","id":"a","input":{"command":"go test ./..."}}]}}
 {"message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"FAIL"}]}}
@@ -60,7 +62,10 @@ func newLearnBrain(t *testing.T, corrections map[string]int) (*Activities, *llm.
 	fake := acts.LLM.(*llm.Fake)
 	fake.Respond = func(c llm.Call) llm.Result {
 		if strings.HasPrefix(c.Skill, "# Skill: judge") {
-			return llm.Result{JSON: json.RawMessage(`{"outcome":"success","pointers":[{"id":"lesson-shown","verdict":"helpful"}]}`)}
+			return llm.Result{JSON: json.RawMessage(`{"outcome":"success","ops":[
+				{"op":"counter","id":"lesson-shown","field":"helpful","delta":1,"why":"opened it, then re-ran the failing package"},
+				{"op":"counter","id":"lesson-shown","field":"helpful","delta":1,"why":"a second verdict on one pointer"},
+				{"op":"counter","id":"lesson-unshown","field":"harmful","delta":1,"why":"never shown to this session"}]}`)}
 		}
 		var in struct{ Material []struct{ Path string } }
 		_ = json.Unmarshal([]byte(c.Input), &in)
@@ -92,8 +97,9 @@ func runLearn(t *testing.T, acts *Activities, session string) LearnResult {
 }
 
 // TestLearnOnlyReflectsOnCorrectedOrFailed catches a learn step that pays Opus for every session (DESIGN §6 gates
-// reflect on a correction or failure), one that drops a corrected session's lesson or its evidence, and judge verdicts
-// that never reach the shown pointer's counters.
+// reflect on a correction or failure), one that drops a corrected session's lesson or its evidence, and judge counter
+// ops that never reach the shown pointer's counters, count one pointer twice, move a note the session was never
+// shown, or lose their why.
 func TestLearnOnlyReflectsOnCorrectedOrFailed(t *testing.T) {
 	acts, fake := newLearnBrain(t, map[string]int{"0000aaaa": 0, "0000bbbb": 2})
 	clean := runLearn(t, acts, strings.Replace(learnSession, "%s", "0000aaaa", 1))
@@ -112,6 +118,12 @@ func TestLearnOnlyReflectsOnCorrectedOrFailed(t *testing.T) {
 	defer stats.Close()
 	if helpful, _ := stats.Get("lesson-shown", "helpful"); helpful != 2 {
 		t.Fatalf("helpful counter %d, want one per judged session", helpful)
+	}
+	if harmful, _ := stats.Get("lesson-unshown", "harmful"); harmful != 0 {
+		t.Fatalf("a note the session was never shown moved: harmful %d", harmful)
+	}
+	if len(clean.Counters) != 1 || clean.Counters[0].Why != "opened it, then re-ran the failing package" {
+		t.Fatalf("counters reported %+v, want the one helpful op with its why", clean.Counters)
 	}
 }
 

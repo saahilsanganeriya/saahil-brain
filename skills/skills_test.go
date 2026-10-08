@@ -11,7 +11,7 @@ import (
 	"saahil.local/brain/templates"
 )
 
-var judgment = []string{"file", "distil", "link", "hubs", "summarise", "verify", "wrap"}
+var judgment = []string{"file", "distil", "judge", "link", "hubs", "summarise", "verify", "wrap"}
 
 var jsonBlock = regexp.MustCompile("(?s)```json\n(.*?)```")
 
