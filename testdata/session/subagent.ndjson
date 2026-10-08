@@ -1,0 +1,2 @@
+{"type":"user","isSidechain":true,"timestamp":"2026-10-08T01:20:00.000Z","sessionId":"11111111-2222-4333-8444-555555555555","message":{"role":"user","content":"SUBAGENT-PROMPT-TEXT"}}
+{"type":"assistant","isSidechain":true,"timestamp":"2026-10-08T01:21:00.000Z","sessionId":"11111111-2222-4333-8444-555555555555","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_sub","name":"Grep","input":{"pattern":"x","path":"/home/test-user/Documents/work-repo/saahil-docs/other-box/notes"}}]}}
