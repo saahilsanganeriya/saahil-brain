@@ -137,9 +137,9 @@ func cmdSync(args []string) int {
 	kinds := map[string]int{}
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
+		// with -prefer newer unison settles a both-changed file itself (the loser is copied), so "<=?=>" marks only
+		// items it skipped, and those are counted below by their reason
 		switch {
-		case strings.Contains(t, "<=?=>"):
-			kinds["conflict (both changed)"]++
 		case strings.Contains(t, "---->"):
 			kinds["laptop → devbox"]++
 		case strings.Contains(t, "<----"):
@@ -166,6 +166,10 @@ func cmdSync(args []string) int {
 	if !*dry {
 		raw, _ := json.Marshal(rec)
 		_ = os.WriteFile(syncRecordPath(), raw, 0o600)
+		// each machine keeps its own index (.index never syncs): fold in what the sync just brought
+		if code := cmdIndex(nil); code != 0 {
+			return code
+		}
 	}
 	// unison: 0 all done, 1 some files skipped, 2 non-fatal failures, 3 fatal
 	if rec.ExitCode >= 2 {
