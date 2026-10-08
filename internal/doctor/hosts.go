@@ -36,6 +36,13 @@ func checkHost(ctx context.Context, name string) (Status, string) {
 		parts = append(parts, label+" "+mark)
 	}
 	detail = strings.TrimSpace(detail + " " + strings.Join(parts, " · "))
+	if name == "claude" {
+		// files in place are not enough: Claude Code itself must load the mod (it refused a symlinked one)
+		if loaded, why := claudeLoadsMod(ctx); !loaded {
+			return Fail, detail + "; Claude Code does not load the mod: " + why
+		}
+		detail += " · loaded ✓"
+	}
 	switch {
 	case len(rep.Missing) > 0:
 		return Fail, detail + " (brain install)"
@@ -43,6 +50,38 @@ func checkHost(ctx context.Context, name string) (Status, string) {
 		return Warn, detail + "; " + strings.Join(rep.Conflicts, "; ")
 	}
 	return OK, detail
+}
+
+// claudeLoadsMod asks Claude Code whether the saahil-brain plugin is enabled and loaded.
+func claudeLoadsMod(ctx context.Context) (bool, string) {
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		return true, ""
+	}
+	out, err := exec.CommandContext(ctx, bin, "plugin", "list").CombinedOutput()
+	if err != nil {
+		return false, "claude plugin list failed: " + err.Error()
+	}
+	lines := strings.Split(string(out), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, install.ModName+"@"+install.ModMarketplace) {
+			continue
+		}
+		for _, next := range lines[i+1 : min(i+8, len(lines))] {
+			next = strings.TrimSpace(next)
+			if strings.HasPrefix(next, "Status:") {
+				if strings.Contains(next, "enabled") && !strings.Contains(next, "failed") {
+					return true, ""
+				}
+				return false, next
+			}
+			if strings.HasPrefix(next, "Error:") {
+				return false, next
+			}
+		}
+		return false, "no status line"
+	}
+	return false, "not listed by claude plugin list"
 }
 
 func hostVersion(ctx context.Context, name string) string {
