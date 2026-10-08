@@ -96,6 +96,8 @@ type Lookup struct {
 type Seeds struct {
 	Work, Hubs []string
 	Folder     string
+	// Hide drops nodes a pre-session index would not hold (offline evals replay a past session); nil keeps all.
+	Hide func(id string) bool
 }
 
 type cand struct {
@@ -105,6 +107,7 @@ type cand struct {
 	alias, prox, scope                        float64
 	mention, folder                           float64
 	own                                       bool // named like the session's folder
+	echo                                      bool // the prompt holds its text
 	via, viaRel                               string
 	score                                     float64
 }
@@ -135,6 +138,7 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	if err != nil {
 		return lk, err
 	}
+	mentioned = rank.Visible(mentioned, seeds.Hide)
 	own, related, err := sessionFolders(db, seeds, mentioned)
 	if err != nil {
 		return lk, err
@@ -146,11 +150,11 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	for _, w := range seeds.Work {
 		folders["work/"+w] = max(folders["work/"+w], workFolder)
 	}
-	named, err := fetch(db, hits)
+	named, err := fetch(db, hits, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
-	direct, err := pointed(db, mentioned, folders, own)
+	direct, err := pointed(db, mentioned, folders, own, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
@@ -159,7 +163,7 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 		return lk, nil
 	}
 	terms := nm.salientTerms(text, phrases)
-	textCands, err := query(db, terms)
+	textCands, err := query(db, terms, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
@@ -174,8 +178,9 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	for i := range cands {
 		c := &cands[i]
 		c.scope = scopeFit(c, seeds)
+		// naming a document and naming its folder are one piece of evidence, not two
 		c.score = wRelevance*c.rel + wAlias*c.alias + wProximity*c.prox + wScope*c.scope + typePrior[c.typ] +
-			wMention*c.mention + wFolder*c.folder
+			max(wMention*c.mention, wFolder*c.folder)
 		if strings.HasPrefix(c.path, "memory-import/") {
 			c.score -= 0.05 // the filed note in notes/ is the canonical form
 		}
@@ -184,11 +189,14 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 		return cands[i].score > cands[j].score || (cands[i].score == cands[j].score && cands[i].id < cands[j].id)
 	})
 	cands = dedupe(cands)
+	if err := markEchoes(db, cands, text); err != nil {
+		return lk, err
+	}
 	for i := 0; i < len(cands) && i < 10; i++ {
 		lk.Candidates = append(lk.Candidates, cands[i].id)
 	}
 	for _, c := range cands {
-		if c.typ != "hub" {
+		if c.answer() {
 			lk.Best = round3(c.score)
 			break
 		}
@@ -199,8 +207,7 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	}
 	var chosen []cand
 	for _, c := range cands {
-		// a hub is context, not an answer: it seeds the hop and reaches the session through the digest
-		if c.typ != "hub" && c.score >= Threshold && len(chosen) < config.MaxPointers {
+		if c.answer() && c.score >= Threshold && len(chosen) < config.MaxPointers {
 			chosen = append(chosen, c)
 		}
 	}
@@ -226,14 +233,20 @@ func sessionFolders(db *sql.DB, seeds Seeds, mentioned []string) (own, related m
 	if own, err = rank.MatchFolders(db, boxes, []string{seeds.Folder}); err != nil {
 		return nil, nil, err
 	}
-	related, err = rank.MatchFolders(db, boxes, stems)
-	return own, related, err
+	if related, err = rank.MatchFolders(db, boxes, stems); err != nil {
+		return nil, nil, err
+	}
+	if seeds.Hide != nil {
+		maps.DeleteFunc(own, func(id string, _ float64) bool { return seeds.Hide(id) })
+		maps.DeleteFunc(related, func(id string, _ float64) bool { return seeds.Hide(id) })
+	}
+	return own, related, nil
 }
 
 // pointed loads the documents the prompt names (mention 1), those they link to (linkShare), and the anchor
 // documents of named or session folders (folder strength, less for each later anchor); own marks what came from
 // a folder or document named like the session.
-func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([]cand, error) {
+func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64, hide func(string) bool) ([]cand, error) {
 	mention, folder, isOwn := map[string]float64{}, map[string]float64{}, map[string]bool{}
 	for _, id := range mentioned {
 		if isDir(db, id) {
@@ -250,7 +263,7 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([
 			isOwn[dir] = isOwn[dir] || mine
 			continue
 		}
-		anchors, err := rank.Anchors(db, dir, anchorsPer)
+		anchors, err := rank.Anchors(db, dir, anchorsPer, hide)
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +295,7 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([
 	for id, w := range folder {
 		ids[id] = max(ids[id], w)
 	}
-	out, err := fetch(db, ids)
+	out, err := fetch(db, ids, hide)
 	for i := range out {
 		out[i].alias = 0
 		// a document the prompt spells is already in hand; own is what the session's name adds
@@ -298,10 +311,12 @@ func isDir(db *sql.DB, id string) bool {
 }
 
 // fetch loads the named nodes that may be ranked, strongest names first.
-func fetch(db *sql.DB, hits map[string]float64) ([]cand, error) {
+func fetch(db *sql.DB, hits map[string]float64, hide func(string) bool) ([]cand, error) {
 	ids := make([]string, 0, len(hits))
 	for id := range hits {
-		ids = append(ids, id)
+		if hide == nil || !hide(id) {
+			ids = append(ids, id)
+		}
 	}
 	sort.Slice(ids, func(i, j int) bool {
 		return hits[ids[i]] > hits[ids[j]] || (hits[ids[i]] == hits[ids[j]] && ids[i] < ids[j])
@@ -331,23 +346,30 @@ func fetch(db *sql.DB, hits map[string]float64) ([]cand, error) {
 }
 
 // query ranks by BM25 over title, aliases and summary (DESIGN §5) for any of the terms.
-func query(db *sql.DB, terms []string) ([]cand, error) {
+func query(db *sql.DB, terms []string, hide func(string) bool) ([]cand, error) {
 	if len(terms) == 0 {
 		return nil, nil
 	}
+	limit := textCands
+	if hide != nil {
+		limit = ftsTop // hidden rows must not take the places of rows a pre-session index would rank
+	}
 	rows, err := db.Query(`SELECT `+candCols+`, m.b FROM (SELECT rowid AS r, bm25(fts, 0.0, 10.0, 8.0, 4.0, 0.0) AS b
 		FROM fts WHERE fts MATCH ? ORDER BY b LIMIT ?) m JOIN node n ON n.rowid = m.r `+rankable+` ORDER BY m.b LIMIT ?`,
-		matchExpr(terms), ftsTop, textCands)
+		matchExpr(terms), ftsTop, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []cand
-	for rows.Next() {
+	for rows.Next() && len(out) < textCands {
 		var c cand
 		var b float64
 		if err := rows.Scan(&c.id, &c.kind, &c.typ, &c.path, &c.title, &c.summary, &c.hubs, &c.shown, &b); err != nil {
 			return nil, err
+		}
+		if hide != nil && hide(c.id) {
+			continue
 		}
 		c.rel = -b / (-b + relHalf)
 		out = append(out, c)
@@ -456,6 +478,9 @@ func hop(db *sql.DB, cands []cand, seeds Seeds) ([]cand, error) {
 			rows.Close()
 			return nil, err
 		}
+		if seeds.Hide != nil && (seeds.Hide(src) || seeds.Hide(dst)) {
+			continue
+		}
 		if _, ok := weight[src]; ok {
 			links = append(links, link{src, dst, rel})
 			degree[src]++
@@ -524,6 +549,38 @@ func hop(db *sql.DB, cands []cand, seeds Seeds) ([]cand, error) {
 	return cands, rows.Err()
 }
 
+// maxEchoReads bounds the bodies one prompt reads to find echoes: the top candidates, where the pointers come from.
+const maxEchoReads = 8
+
+// markEchoes flags the candidates that could be chosen whose text the prompt already holds.
+func markEchoes(db *sql.DB, cands []cand, prompt string) error {
+	var shingles map[uint64]bool
+	read := 0
+	for i := range cands {
+		c := &cands[i]
+		if read == maxEchoReads || c.score < exploreFrac*Threshold {
+			break
+		}
+		if c.typ == "hub" {
+			continue
+		}
+		if shingles == nil {
+			shingles = rank.Shingles(prompt)
+		}
+		body, err := rank.Body(db, c.id)
+		if err != nil {
+			return err
+		}
+		read++
+		c.echo = rank.Echo(body, shingles) >= rank.EchoShare
+	}
+	return nil
+}
+
+// answer: a hub is context, not an answer (it seeds the hop and reaches the session through the digest), and a
+// document the prompt already holds (the brief a dispatch was pasted from) tells the session nothing new.
+func (c cand) answer() bool { return c.typ != "hub" && !c.echo }
+
 // scopeFit: the candidate lives in an active work box or sits in one of its hubs.
 func scopeFit(c *cand, seeds Seeds) float64 {
 	for _, w := range seeds.Work {
@@ -563,7 +620,7 @@ func ownSlot(chosen, cands []cand) []cand {
 		return chosen
 	}
 	for _, c := range cands {
-		if c.own && c.typ != "hub" && c.score >= Threshold {
+		if c.own && c.answer() && c.score >= Threshold {
 			chosen[len(chosen)-1] = c
 			return chosen
 		}
@@ -592,7 +649,7 @@ func explore(chosen, cands []cand) []cand {
 		floor = max(floor, exploreFrac*chosen[len(chosen)-1].score)
 	}
 	for _, c := range cands {
-		if !picked[c.id] && under(c) && c.typ != "hub" && c.score >= floor {
+		if !picked[c.id] && under(c) && c.answer() && c.score >= floor {
 			if len(chosen) < config.MaxPointers {
 				return append(chosen, c)
 			}

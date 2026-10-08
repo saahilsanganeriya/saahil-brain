@@ -30,7 +30,9 @@ func write(t *testing.T, path, body string) {
 
 func sessionFile(started, touched, transcript string, prompts ...string) string {
 	var b strings.Builder
+	start, _ := time.Parse(time.RFC3339, started)
 	b.WriteString("---\nid: session-x\ntype: session\nmachine: devbox\ncwd: /tmp/work\nstarted: " + started + "\n")
+	b.WriteString("ended: " + start.Add(time.Hour).Format(time.RFC3339) + "\n")
 	b.WriteString("transcript: " + transcript + "\ntouched: [" + touched + "]\nproduced: []\ncorrections: 1\n---\n\n## Owner prompts\n\n")
 	for _, p := range prompts {
 		b.WriteString("- 10-05 10:00Z " + p + "\n")
@@ -50,10 +52,31 @@ func transcriptFile(t *testing.T, path string, prompts ...string) string {
 	return path
 }
 
+// stubFileTimes dates every fixture file 2026-09-01 (older than every fixture session) unless a key of newer ends
+// its path: a test cannot set a real file's birth time. A later call replaces an earlier one.
+func stubFileTimes(t *testing.T, newer map[string]time.Time) {
+	t.Helper()
+	old := fileTimes
+	t.Cleanup(func() { fileTimes = old })
+	fileTimes = func(abs string) (time.Time, time.Time) {
+		for suffix, at := range newer {
+			if strings.HasSuffix(abs, suffix) {
+				return at, at
+			}
+		}
+		at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+		return at, at
+	}
+}
+
+// shardBrief is a brief file the dispatched fixture session's prompt was pasted from.
+const shardBrief = "Update the glacier tokenizer shard plan for the next run and report the shard widths back."
+
 // fixture is a synthetic brain: work docs (as the shadow saahil-docs), notes with a supersession, a lesson learned
 // from a session, an imported memory and the note filed from it, and sessions on both sides of each date window.
 func fixture(t *testing.T) *index.Index {
 	t.Helper()
+	stubFileTimes(t, nil)
 	home := t.TempDir()
 	t.Setenv("BRAIN_HOME", home)
 	root := filepath.Join(home, "brain")
@@ -62,6 +85,8 @@ func fixture(t *testing.T) *index.Index {
 	write(t, filepath.Join(docs, "box-a", "STATE.md"), "# Box A state\n\nThe glacier tokenizer rollout status. Plan: [plan](plans/rollout.md)\n")
 	write(t, filepath.Join(docs, "box-a", "plans", "rollout.md"), "# Rollout plan\n\nShard widths for the next run.\n")
 	write(t, filepath.Join(docs, "box-a", "README.md"), "# Box A\n\nglacier tokenizer readme\n")
+	write(t, filepath.Join(docs, "box-a", "artifacts", "run-7.json"), `{"shards": 8}`+"\n")
+	write(t, filepath.Join(docs, "box-a", "briefs", "shard-plan.md"), shardBrief+"\n")
 	write(t, filepath.Join(docs, "box-b", "baking.md"), "# Notes\n\nsourdough starter hydration at seventy percent\n")
 	write(t, filepath.Join(root, "notes", "decision-glacier-shards.md"), "---\nid: decision-glacier-shards\ntype: decision\nstatus: current\n"+
 		"summary: Glacier tokenizer runs use eight shards per worker; wider shards stalled the queue\nhubs: [box-a]\nevidence: [work/box-a/STATE.md]\n---\nBody.\n")
@@ -82,15 +107,15 @@ func fixture(t *testing.T) *index.Index {
 	write(t, filepath.Join(sessions, "09", "2026-09-10-bbbb2222-early.md"), sessionFile("2026-09-10T10:00:00Z",
 		"work/box-a/plans/rollout.md", "", "glacier rollout "+promptMarker, "no, don't widen the shards"))
 	brief := "Please carry out this task from my Orca coordinator. <pasted_content id=\"1\"> You are working inside Orca. " +
-		"=== CLI COMMANDS === orca orchestration send ... === TASK === Update the glacier tokenizer shard plan " + promptMarker + " </pasted_content id=\"1\">"
+		"=== CLI COMMANDS === orca orchestration send ... === TASK === " + shardBrief + " " + promptMarker + " </pasted_content id=\"1\">"
 	dispatched := transcriptFile(t, filepath.Join(home, "dispatched.jsonl"), brief)
 	write(t, filepath.Join(sessions, "09", "2026-09-25-cccc3333-dispatch.md"), sessionFile("2026-09-25T10:00:00Z",
-		"work/box-a/plans/rollout.md", dispatched, brief[:120], "no, stop widening them"))
+		"work/box-a/briefs/shard-plan.md, work/box-a/plans/rollout.md", dispatched, brief[:120], "no, stop widening them"))
 	// fitted to its size cap, the note lists only the first prompt; the correction survives in the transcript
 	typed := transcriptFile(t, filepath.Join(home, "typed.jsonl"), "where is the glacier tokenizer state "+promptMarker,
 		"fine, continue", "no, don't widen the shards "+promptMarker)
 	write(t, filepath.Join(sessions, "10", "2026-10-05-aaaa1111-glacier.md"), sessionFile("2026-10-05T10:00:00Z",
-		"work/box-a/STATE.md, work/box-a/README.md, /tmp/repo/main.go, work/box-a", typed,
+		"work/box-a/STATE.md, work/box-a/README.md, /tmp/repo/main.go, work/box-a, work/box-a/artifacts", typed,
 		"where is the glacier tokenizer state "+promptMarker))
 
 	ix, err := index.Open(root)
@@ -122,16 +147,21 @@ func ids[T any](items []T, id func(T) string) []string {
 }
 
 // TestBuildSplitsByDateAndKeepsOnlyRealTargets catches sets that leak sessions from before their window into the
-// evaluation, count generic files, folders or unindexed repo code as navigation targets, replay a correction from
-// the wrong prompt, or lose corrections a note dropped to fit its size cap (148 real ones were, on 2026-10-08).
+// evaluation, count generic files, folders, a bulk folder or unindexed repo code as navigation targets, count the
+// brief a dispatch was pasted from (the session already holds its text; 21 of 74 DEV hits were only that, on
+// 2026-10-08), replay a correction from the wrong prompt, or lose corrections a note dropped to fit its size cap
+// (148 real ones were, on 2026-10-08).
 func TestBuildSplitsByDateAndKeepsOnlyRealTargets(t *testing.T) {
 	sets := buildSets(t, fixture(t))
 	nav := ids(sets.Navigation, func(it NavItem) string { return it.ID })
 	if want := []string{"nav-2026-09-25-cccc3333", "nav-2026-10-05-aaaa1111"}; !slices.Equal(nav, want) {
 		t.Fatalf("navigation items %v, want %v (09-10 is before the 09-20 window)", nav, want)
 	}
+	if got := sets.Navigation[0].Targets; !slices.Equal(got, []string{"work/box-a/plans/rollout.md"}) {
+		t.Errorf("targets %v: the brief the dispatch was pasted from must be dropped", got)
+	}
 	if got := sets.Navigation[1].Targets; !slices.Equal(got, []string{"work/box-a/STATE.md"}) {
-		t.Errorf("targets %v: README, the folder and repo code must be dropped", got)
+		t.Errorf("targets %v: README, the folder, the bulk artifacts folder and repo code must be dropped", got)
 	}
 	if !sets.Navigation[0].Dispatched || sets.Navigation[1].Dispatched {
 		t.Errorf("dispatched flags wrong: %+v", sets.Navigation)
@@ -297,5 +327,48 @@ func TestSplitsPartitionItemsBySession(t *testing.T) {
 		if r.Split != SplitOf(r.Session) {
 			t.Errorf("%s: split %q, want %q (by session)", r.ID, r.Split, SplitOf(r.Session))
 		}
+	}
+}
+
+// TestRankingSeesTheBrainAsOfTheSessionStart catches a navigation eval that ranks the live index: a file born after
+// the session started (no older copy, no earlier session read it) credited as a pointer or a navigator hit, though a
+// brain as of the first prompt could not hold it; one that takes a file re-born by an agent's Edit (a new inode) for a
+// new one when an earlier session had read it; and one that keeps a file it cannot find where its path says as old
+// (CARDs staged on 2026-10-08 under .brain/staging, presented as work/<box>/CARD.md, became pointers for 10-04 sessions).
+func TestRankingSeesTheBrainAsOfTheSessionStart(t *testing.T) {
+	ix := fixture(t)
+	env := NewEnv(ix, Sets{}, testNow)
+	start := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
+	const prompt = "where is the box-a glacier tokenizer state"
+	state := env.targetsByPath([]string{"work/box-a/STATE.md"})
+	open := env.guardFor("sessions/devbox/2026/10/2026-10-05-aaaa1111-glacier.md", start)
+	if !state.any(env.Ranker.Pointers(prompt, "/tmp/work", open.hides)) || env.brainCalls(prompt, state, open) != 1 {
+		t.Fatalf("control: STATE.md, older than the session, must be a pointer and the first search's hit")
+	}
+
+	oct6 := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+	stubFileTimes(t, map[string]time.Time{"box-a/STATE.md": oct6, "box-a/plans/rollout.md": oct6, "box-a/README.md": {}})
+	env = NewEnv(ix, Sets{}, testNow)
+	g := env.guardFor("sessions/devbox/2026/10/2026-10-05-aaaa1111-glacier.md", start)
+	if ptrs := env.Ranker.Pointers(prompt, "/tmp/work", g.hides); state.any(ptrs) {
+		t.Errorf("pointers %v include STATE.md, born after the session started", ptrs)
+	}
+	if got := env.brainCalls(prompt, state, g); got != 0 {
+		t.Errorf("navigator reached STATE.md, born after the session started, in %d calls", got)
+	}
+	if g.hides("work/box-a/plans/rollout.md") {
+		t.Errorf("rollout.md was re-born after the start, but the 09-25 session read it: it existed")
+	}
+	if !g.hides("work/box-a/README.md") {
+		t.Errorf("README.md is not on disk and the index saw it after the start: it must be dated by that, not kept")
+	}
+}
+
+// TestNavigationCountsANoteFiledFromATargetMemory catches a navigation eval that scores a pointer to the note filed
+// from an imported memory as a miss when the session read the memory itself (QA already counts them as one answer).
+func TestNavigationCountsANoteFiledFromATargetMemory(t *testing.T) {
+	env := NewEnv(fixture(t), Sets{}, testNow)
+	if !env.targetsByPath([]string{"memory-import/-proj/nimbus-flag.md"}).has("decision-nimbus-flag") {
+		t.Errorf("decision-nimbus-flag, filed from the target memory, is not a hit")
 	}
 }

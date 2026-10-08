@@ -11,18 +11,20 @@ import (
 	"unicode"
 
 	"saahil.local/brain/internal/index"
+	"saahil.local/brain/internal/rank"
 )
 
-// Ranker is the prompt-pointer ranker under test: at most three node ids for a prompt, or none (it abstains).
+// Ranker is the prompt-pointer ranker under test: at most three node ids for a prompt, or none (it abstains). hide
+// drops what the brain could not have held when the prompt was typed; nil keeps all.
 type Ranker interface {
-	Pointers(prompt, cwd string) []string
+	Pointers(prompt, cwd string, hide func(id string) bool) []string
 }
 
-// SearchRanker stands in for the hook ranker until internal/hooks lands: the top three of brain_search.
+// SearchRanker stands in for the hook ranker when its name dictionary cannot be built: the top three of brain_search.
 type SearchRanker struct{ Index *index.Index }
 
-func (r SearchRanker) Pointers(prompt, _ string) []string {
-	hits, err := r.Index.Search(prompt, index.SearchOpts{Limit: 3})
+func (r SearchRanker) Pointers(prompt, _ string, hide func(id string) bool) []string {
+	hits, err := r.Index.Search(prompt, index.SearchOpts{Limit: 3, Hide: hide})
 	if err != nil {
 		return nil
 	}
@@ -49,6 +51,8 @@ type Env struct {
 	Now    time.Time
 	sets   Sets
 	nodes  map[string]nodeFacts
+	exist  *existence
+	filed  map[string][]string // memory key (<project>/<file>) → notes filed from that memory
 }
 
 type nodeFacts struct {
@@ -89,17 +93,27 @@ func taskText(prompt string) string {
 	return strings.TrimSpace(rest)
 }
 
-// navQuery is what the ranker would have seen: the full first owner prompt from the transcript when it is on this
+// firstPrompt is what the ranker would have seen: the full first owner prompt from the transcript when it is on this
 // machine (the note keeps 500 characters), cut to its task text. It is used in memory only, never written.
-func (e *Env) navQuery(it NavItem) (q, source string, err error) {
-	if p := ownerPrompts(it.Transcript, 1); len(p) == 1 {
-		return taskText(p[0]), "transcript", nil
+func firstPrompt(transcript string, notePrompts []string) (q, source string) {
+	if p := ownerPrompts(transcript, 1); len(p) == 1 {
+		return taskText(p[0]), "transcript"
 	}
-	s, err := readSession(e.Index.Root, it.Session)
-	if err != nil || len(s.Prompts) == 0 {
+	if len(notePrompts) > 0 {
+		return taskText(notePrompts[0]), "note"
+	}
+	return "", ""
+}
+
+func (e *Env) navQuery(it NavItem) (q, source string, err error) {
+	if q, source = firstPrompt(it.Transcript, nil); source == "" {
+		s, _ := readSession(e.Index.Root, it.Session)
+		q, source = firstPrompt("", s.Prompts)
+	}
+	if source == "" {
 		return "", "", fmt.Errorf("%s: no owner prompt", it.Session)
 	}
-	return taskText(s.Prompts[0]), "note", nil
+	return q, source, nil
 }
 
 // ---- matching ----
@@ -107,6 +121,8 @@ func (e *Env) navQuery(it NavItem) (q, source string, err error) {
 // targetSet answers "is this node one of the targets": by id, by path, and a section by its document.
 type targetSet struct{ ids, paths map[string]bool }
 
+// targetsByPath is the set of target files; an imported memory is also reached through a note filed from it (its
+// sources name the memory's .import copy), as QA counts it.
 func (e *Env) targetsByPath(paths []string) targetSet {
 	t := targetSet{ids: map[string]bool{}, paths: map[string]bool{}}
 	for _, p := range paths {
@@ -115,8 +131,34 @@ func (e *Env) targetsByPath(paths []string) targetSet {
 		if e.Index.DB().QueryRow(`SELECT id FROM node WHERE path = ? AND kind != 'section' LIMIT 1`, p).Scan(&id) == nil {
 			t.ids[id] = true
 		}
+		if k, ok := strings.CutPrefix(p, "memory-import/"); ok {
+			for _, note := range e.filedFrom()[k] {
+				t.ids[note] = true
+			}
+		}
 	}
 	return t
+}
+
+func (e *Env) filedFrom() map[string][]string {
+	if e.filed != nil {
+		return e.filed
+	}
+	e.filed = map[string][]string{}
+	rows, err := e.Index.DB().Query(`SELECT src, dst FROM edge WHERE rel = 'sources' AND dst >= '.import/' AND dst < '.import0'`)
+	if err != nil {
+		return e.filed
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var src, dst string
+		if rows.Scan(&src, &dst) == nil {
+			if k, ok := memoryKey(dst); ok {
+				e.filed[k] = append(e.filed[k], src)
+			}
+		}
+	}
+	return e.filed
 }
 
 func (e *Env) targetsByID(ids []string) targetSet {
@@ -143,16 +185,27 @@ func (t targetSet) has(id string) bool {
 
 func (t targetSet) any(ids []string) bool { return slices.ContainsFunc(ids, t.has) }
 
-// leakGuard hides what the brain could only know from the evaluated session or later: session notes from that day
-// on, and notes whose sources name the session. The index itself is live (it keeps no history), so this is the part
-// of "the brain as of before the session" that can be enforced.
+// leakGuard hides what the brain could only know from the evaluated session or later: files that did not exist
+// before it started, session notes from that day on, and notes whose sources name the session. The index itself is
+// live (it keeps no history), so the ranker and the navigator see it through this guard: the brain as of the
+// session's start.
 type leakGuard struct {
 	day     string
 	sourced map[string]bool
+	start   time.Time
+	exist   *existence
+}
+
+func (e *Env) existence() *existence {
+	if e.exist == nil {
+		// an unreadable sessions folder only loses the "read by an earlier session" evidence
+		e.exist, _ = newExistence(e.Index.Root, e.Index.DB())
+	}
+	return e.exist
 }
 
 func (e *Env) guardFor(sessionPath string, started time.Time) leakGuard {
-	g := leakGuard{day: started.UTC().Format(time.DateOnly), sourced: map[string]bool{}}
+	g := leakGuard{day: started.UTC().Format(time.DateOnly), sourced: map[string]bool{}, start: started, exist: e.existence()}
 	rows, err := e.Index.DB().Query(`SELECT src FROM edge WHERE rel IN ('sources', 'learned_from') AND dst = ?`, sessionPath)
 	if err != nil {
 		return g
@@ -169,6 +222,9 @@ func (e *Env) guardFor(sessionPath string, started time.Time) leakGuard {
 
 func (g leakGuard) hides(id string) bool {
 	if g.sourced[id] {
+		return true
+	}
+	if g.exist != nil && !g.exist.nodeBefore(id, g.start) {
 		return true
 	}
 	if !strings.HasPrefix(id, "sessions/") {
@@ -194,15 +250,13 @@ func (e *Env) facts(id string) nodeFacts {
 // brain_show of one neighbour (the best-ranked search hit among its neighbours, else its highest-PageRank neighbour).
 // It returns the call whose output first names a target, or 0 when none does within three calls.
 func (e *Env) brainCalls(query string, t targetSet, g leakGuard) int {
-	hits, err := e.Index.Search(query, index.SearchOpts{Limit: searchLimit})
+	hits, err := e.Index.Search(query, index.SearchOpts{Limit: searchLimit, Hide: g.hides})
 	if err != nil {
 		return 0
 	}
 	var ids []string
 	for _, h := range hits {
-		if !g.hides(h.ID) {
-			ids = append(ids, h.ID)
-		}
+		ids = append(ids, h.ID)
 	}
 	if t.any(ids) {
 		return 1
@@ -331,11 +385,13 @@ func (e *Env) loadGrep(vocab map[string]bool) (*grepCorpus, error) {
 	return g, rows.Err()
 }
 
-func (g *grepCorpus) top(keywords []string, k int) []string {
+func (g *grepCorpus) top(keywords []string, k int, hide func(string) bool) []string {
 	count := map[int32]int{}
 	for _, w := range keywords {
 		for _, d := range g.post[w] {
-			count[d]++
+			if hide == nil || !hide(g.ids[d]) {
+				count[d]++
+			}
 		}
 	}
 	docs := make([]int32, 0, len(count))
@@ -361,15 +417,15 @@ func (g *grepCorpus) top(keywords []string, k int) []string {
 
 // grepCalls replays an agent without the brain on the same budget: call 1 grep (searchLimit files); call 2 read the
 // best file (what it links to); call 3 read one of those links (one grep also found, else the first by path).
-func (e *Env) grepCalls(g *grepCorpus, keywords []string, t targetSet) int {
-	found := g.top(keywords, searchLimit)
+func (e *Env) grepCalls(g *grepCorpus, keywords []string, t targetSet, guard leakGuard) int {
+	found := g.top(keywords, searchLimit, guard.hides)
 	if t.any(found) {
 		return 1
 	}
 	if len(found) == 0 {
 		return 0
 	}
-	links := e.linksOf(found[0])
+	links := rank.Visible(e.linksOf(found[0]), guard.hides)
 	if t.any(links) {
 		return 2
 	}
@@ -388,7 +444,7 @@ func (e *Env) grepCalls(g *grepCorpus, keywords []string, t targetSet) int {
 			}
 		}
 	}
-	if next != "" && t.any(e.linksOf(next)) {
+	if next != "" && t.any(rank.Visible(e.linksOf(next), guard.hides)) {
 		return 3
 	}
 	return 0
@@ -462,10 +518,11 @@ func (e *Env) Navigation() (Report, error) {
 		}
 		r.Query = src
 		t := e.targetsByPath(it.Targets)
-		r.Pointers = e.Ranker.Pointers(q, it.CWD)
+		g := e.guardFor(it.Session, it.Started)
+		r.Pointers = e.Ranker.Pointers(q, it.CWD, g.hides)
 		r.Top3 = t.any(r.Pointers)
 		r.BoxTop3 = sharesBox(it.Targets, r.Pointers)
-		r.Calls = e.brainCalls(q, t, e.guardFor(it.Session, it.Started))
+		r.Calls = e.brainCalls(q, t, g)
 		rows = append(rows, r)
 	}
 	ok := func(r NavRow) bool { return r.Error == "" }
@@ -527,8 +584,8 @@ func (e *Env) navNotes(rows []NavRow) []string {
 		fmt.Sprintf("query: the session's first owner prompt, from the transcript for %d of %d items (the note's 500 characters otherwise); an Orca dispatch brief is cut to its TASK text", fromTranscript, len(rows)),
 		fmt.Sprintf("%d items had no readable prompt and are left out of every rate", failed),
 		"brain search reads only the first 16 words of a query, so long prompts are ranked on their opening words",
-		"index: the live index, not a pre-session snapshot (it keeps no history); session notes from the session's day on and notes sourced from the session are hidden from the navigator",
-		"targets: indexed docs and artifacts the session read or wrote, without generic files (README, CLAUDE.md, MEMORY.md, …), folders, sessions or repo code",
+		"index: the live index seen as of the session's start: the ranker and the navigator skip files with no sign of existing before it (born, last modified, or read by a session that ended, earlier), session notes from its day on and notes sourced from it",
+		"targets: indexed docs and data files the session read or wrote and that existed before it, without generic files (README, CLAUDE.md, MEMORY.md, …), folders, bulk-folder summaries, sessions, repo code or files the first prompt already holds (the brief it was pasted from); an imported memory is also hit through a note filed from it",
 		"diagnostic: a pointer into the same work box as a target, though not a target file",
 	}
 }
@@ -550,7 +607,7 @@ func (e *Env) QA() (Report, error) {
 	for _, it := range e.sets.QA {
 		r := QARow{ID: it.ID, Split: SplitOf(it.ID), Kind: it.Kind, Source: it.Source, Question: it.Question, Target: it.Target}
 		if it.Kind == QAUnknown {
-			r.Returned = e.Ranker.Pointers(it.Question, "")
+			r.Returned = e.Ranker.Pointers(it.Question, "", nil)
 			r.Hit = len(r.Returned) == 0
 			rows = append(rows, r)
 			continue
@@ -636,7 +693,7 @@ func (e *Env) Mistakes() (Report, error) {
 			continue
 		}
 		r := MistakeRow{ID: it.ID, Split: SplitOf(it.Session), Session: it.Session, Dispatched: it.Dispatched, Lessons: len(it.Lessons)}
-		r.Pointers = e.Ranker.Pointers(taskText(prompts[it.Correction-1]), it.CWD)
+		r.Pointers = e.Ranker.Pointers(taskText(prompts[it.Correction-1]), it.CWD, nil)
 		r.Surfaced = e.targetsByID(it.Lessons).any(r.Pointers)
 		rows = append(rows, r)
 	}
@@ -692,9 +749,10 @@ func (e *Env) AB() (Report, error) {
 	rows := make([]ABRow, 0, len(items))
 	for _, p := range items {
 		t := e.targetsByPath(p.it.Targets)
+		guard := e.guardFor(p.it.Session, p.it.Started)
 		rows = append(rows, ABRow{ID: p.it.ID, Split: SplitOf(p.it.Session), Dispatched: p.it.Dispatched,
-			BrainTop3: t.any(e.Ranker.Pointers(p.q, p.it.CWD)), GrepTop3: t.any(g.top(p.kws, 3)),
-			BrainCalls: e.brainCalls(p.q, t, e.guardFor(p.it.Session, p.it.Started)), GrepCalls: e.grepCalls(g, p.kws, t)})
+			BrainTop3: t.any(e.Ranker.Pointers(p.q, p.it.CWD, guard.hides)), GrepTop3: t.any(g.top(p.kws, 3, guard.hides)),
+			BrainCalls: e.brainCalls(p.q, t, guard), GrepCalls: e.grepCalls(g, p.kws, t, guard)})
 	}
 	all := func(ABRow) bool { return true }
 	dispatched := func(r ABRow) bool { return r.Dispatched }

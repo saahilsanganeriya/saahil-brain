@@ -16,7 +16,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"saahil.local/brain/internal/config"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +24,7 @@ import (
 
 	"saahil.local/brain/internal/index"
 	"saahil.local/brain/internal/parse"
+	"saahil.local/brain/internal/rank"
 	"saahil.local/brain/internal/session"
 )
 
@@ -279,6 +279,7 @@ type BuildOptions struct {
 type builder struct {
 	ix      *index.Index
 	root    string
+	exist   *existence
 	skipped map[string]int
 }
 
@@ -291,9 +292,12 @@ func Build(ix *index.Index, opt BuildOptions) (Sets, error) {
 	if opt.NavFrom.IsZero() {
 		opt.NavFrom = DefaultNavFrom
 	}
-	b := &builder{ix: ix, root: ix.Root, skipped: map[string]int{}}
+	exist, err := newExistence(ix.Root, ix.DB())
+	if err != nil {
+		return Sets{}, err
+	}
+	b := &builder{ix: ix, root: ix.Root, exist: exist, skipped: map[string]int{}}
 	sets := Sets{}
-	var err error
 	if sets.Navigation, sets.Mistakes, err = b.sessions(opt.NavFrom, opt.Cut); err != nil {
 		return sets, err
 	}
@@ -336,11 +340,14 @@ func (b *builder) sessions(navFrom, cut time.Time) ([]NavItem, []MistakeItem, er
 		dispatched := isDispatchBrief(s.Prompts[0])
 		if s.Started.Before(navFrom) {
 			b.skipped["navigation: before its window"]++
-		} else if targets := b.targets(append(append([]string{}, s.Touched...), s.Produced...), s.Started); len(targets) > 0 {
-			nav = append(nav, NavItem{ID: "nav-" + s.shortID(), Session: rel, Machine: s.Machine, Started: s.Started,
-				CWD: s.CWD, Transcript: s.Transcript, Dispatched: dispatched, Targets: targets})
 		} else {
-			b.skipped["navigation: no indexed target"]++
+			first, _ := firstPrompt(s.Transcript, s.Prompts)
+			if targets := b.targets(append(append([]string{}, s.Touched...), s.Produced...), s.Started, rank.Shingles(first)); len(targets) > 0 {
+				nav = append(nav, NavItem{ID: "nav-" + s.shortID(), Session: rel, Machine: s.Machine, Started: s.Started,
+					CWD: s.CWD, Transcript: s.Transcript, Dispatched: dispatched, Targets: targets})
+			} else {
+				b.skipped["navigation: no indexed target"]++
+			}
 		}
 		prompts, from := s.Prompts, "note"
 		if s.Corrections > 0 && !s.Started.Before(cut) {
@@ -372,10 +379,12 @@ func (b *builder) sessions(navFrom, cut time.Time) ([]NavItem, []MistakeItem, er
 	return nav, mistakes, nil
 }
 
-// targets resolves a session's files to indexed docs and artifacts (a byte copy counts as its canonical); generic
-// files, folders, other sessions, files the index never saw (repo code) and files the session itself created (they did
-// not exist when its first prompt was typed, so no brain could have pointed at them) are dropped.
-func (b *builder) targets(files []string, started time.Time) []string {
+// targets resolves a session's files to indexed docs and data files (a byte copy counts as its canonical); generic
+// files, folders (a bulk folder's summary node too: no session reads a folder as a file), other sessions, files the
+// index never saw (repo code), files the session itself created (they did not exist when its first prompt was typed,
+// so no brain could have pointed at them) and files the first prompt already holds (the brief a dispatch was pasted
+// from: the session has its text, so finding it is no navigation) are dropped.
+func (b *builder) targets(files []string, started time.Time, prompt map[uint64]bool) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, f := range files {
@@ -388,14 +397,19 @@ func (b *builder) targets(files []string, started time.Time) []string {
 		}
 		var kind, typ, p, canonical string
 		if b.ix.DB().QueryRow(`SELECT kind, type, path, canonical_of FROM node WHERE id = ?`, id).Scan(&kind, &typ, &p, &canonical) != nil ||
-			(kind != "doc" && kind != "artifact") || typ == "session" {
+			(kind != "doc" && kind != "artifact") || typ == "session" || typ == "bulk" || typ == "repo" {
 			continue
 		}
 		if canonical != "" {
+			id = canonical
 			_ = b.ix.DB().QueryRow(`SELECT path FROM node WHERE id = ?`, canonical).Scan(&p)
 		}
-		if born := birthTime(b.absPath(p)); !born.IsZero() && !started.IsZero() && !born.Before(started) {
+		if !b.exist.before(p, started) {
 			b.skipped["navigation: target created by the session itself"]++
+			continue
+		}
+		if body, err := rank.Body(b.ix.DB(), id); err == nil && rank.Echo(body, prompt) >= rank.EchoShare {
+			b.skipped["navigation: target text already in the first prompt"]++
 			continue
 		}
 		if !seen[p] && !genericFiles[path.Base(p)] {
@@ -692,14 +706,4 @@ func readLines[T any](p string, out *[]T) error {
 		*out = append(*out, it)
 	}
 	return nil
-}
-
-// absPath is a node path on this machine's disk: work/… lives in the shadow saahil-docs until the cut-over fills <brain>/work.
-func (b *builder) absPath(p string) string {
-	if rest, ok := strings.CutPrefix(p, "work/"); ok {
-		if _, err := os.Stat(filepath.Join(config.BrainRoot(), ".brain", "live")); err != nil {
-			return filepath.Join(config.LaptopHome, "Documents", "work-repo", "saahil-docs", rest)
-		}
-	}
-	return filepath.Join(config.BrainRoot(), p)
 }

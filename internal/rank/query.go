@@ -3,6 +3,7 @@ package rank
 import (
 	"context"
 	"database/sql"
+	"hash/fnv"
 	"path"
 	"regexp"
 	"slices"
@@ -271,8 +272,8 @@ func anchorRank(kind, typ, p string) int {
 }
 
 // Anchors lists a folder's rankable documents (and those of its plans/ folder) in anchorRank order, newest first
-// within a rank, at most n.
-func Anchors(db *sql.DB, dir string, n int) ([]string, error) {
+// within a rank, at most n, without those hide drops.
+func Anchors(db *sql.DB, dir string, n int, hide func(string) bool) ([]string, error) {
 	rows, err := db.Query(`SELECT n.id, n.kind, n.type, n.path FROM edge e JOIN node n ON n.id = e.src `+rankable+`
 		AND e.rel = 'part_of' AND (e.dst = ?1 OR e.dst = ?1 || '/plans') ORDER BY n.mtime DESC, n.id LIMIT 400`, dir)
 	if err != nil {
@@ -289,7 +290,9 @@ func Anchors(db *sql.DB, dir string, n int) ([]string, error) {
 		if err := rows.Scan(&id, &kind, &typ, &p); err != nil {
 			return nil, err
 		}
-		docs = append(docs, doc{id, anchorRank(kind, typ, p)})
+		if !hidden(hide, id) {
+			docs = append(docs, doc{id, anchorRank(kind, typ, p)})
+		}
 	}
 	sort.SliceStable(docs, func(i, j int) bool { return docs[i].rank < docs[j].rank })
 	var out []string
@@ -413,3 +416,51 @@ func subset(a, b []string) bool {
 func stem(p string) string { b := path.Base(p); return strings.TrimSuffix(b, path.Ext(b)) }
 
 func isDistinctive(w string) bool { return len(w) >= 4 || strings.ContainsAny(w, "0123456789") }
+
+// ---- echo: a document the prompt already holds ----
+
+// EchoShare is the share of a document's word 5-grams found in a prompt above which the prompt holds the document
+// (a dispatched brief is pasted from its file): pointing at it, or counting it as found, adds nothing.
+const EchoShare = 0.5
+
+const shingleWords = 5
+
+// Shingles are a text's word 5-grams (lowercase, TokenRE words), hashed.
+func Shingles(text string) map[uint64]bool {
+	words := TokenRE.FindAllString(strings.ToLower(text), -1)
+	out := make(map[uint64]bool, max(0, len(words)-shingleWords+1))
+	for i := 0; i+shingleWords <= len(words); i++ {
+		h := fnv.New64a()
+		for _, w := range words[i : i+shingleWords] {
+			h.Write([]byte(w))
+			h.Write([]byte{' '})
+		}
+		out[h.Sum64()] = true
+	}
+	return out
+}
+
+// Echo is the share of doc's 5-grams that are in prompt; 0 for a document shorter than one 5-gram.
+func Echo(doc string, prompt map[uint64]bool) float64 {
+	shingles := Shingles(doc)
+	if len(shingles) == 0 {
+		return 0
+	}
+	in := 0
+	for s := range shingles {
+		if prompt[s] {
+			in++
+		}
+	}
+	return float64(in) / float64(len(shingles))
+}
+
+// Body is a node's indexed text ("" when it has none).
+func Body(db *sql.DB, id string) (string, error) {
+	var body string
+	err := db.QueryRow(`SELECT f.body FROM fts f JOIN node n ON n.rowid = f.rowid WHERE n.id = ?`, id).Scan(&body)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return body, err
+}

@@ -149,7 +149,7 @@ const maxContents = 40
 // addContents lists a folder's next hops as part_of edges: its anchor documents first (CARD, STATE, GOAL, the live
 // spec or plan, report or readme, rankable only), then its sub-folders.
 func (ix *Index) addContents(n *Node) error {
-	anchors, err := rank.Anchors(ix.st.DB, n.ID, maxContents)
+	anchors, err := rank.Anchors(ix.st.DB, n.ID, maxContents, nil)
 	if err != nil {
 		return err
 	}
