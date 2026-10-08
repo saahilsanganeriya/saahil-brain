@@ -171,6 +171,33 @@ func TestRewriteSkipsBinaryAndHistory(t *testing.T) {
 	}
 }
 
+// TestRewriteSkipAndMinAge: a skipped top-level entry and a file written within MinAge (an agent may be mid-edit) stay
+// untouched, while a loose top-level file is still rewritten; splitting the walk into one root per entry had silently
+// skipped every top-level file.
+func TestRewriteSkipAndMinAge(t *testing.T) {
+	root := t.TempDir()
+	line := "see " + oldPrefix + "box/a\n"
+	writeTree(t, root, map[string]string{"STATE.md": line, "busy/x.md": line, "tools/old.sh": line, "tools/fresh.sh": line})
+	now := time.Now()
+	_ = os.Chtimes(filepath.Join(root, "tools/fresh.sh"), now, now)
+
+	opts := rewriteOpts(root, true, filepath.Join(t.TempDir(), "rewrite-1"))
+	opts.Skip, opts.MinAge = []string{"busy"}, 30*time.Minute
+	var changed []string
+	stats, err := Rewrite(opts, func(c FileChange) { changed = append(changed, c.Path) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(changed, ",") != "STATE.md,tools/old.sh" || stats.Recent != 1 {
+		t.Fatalf("changed %v stats %+v", changed, stats)
+	}
+	for _, rel := range []string{"busy/x.md", "tools/fresh.sh"} {
+		if readFile(t, filepath.Join(root, rel)) != line {
+			t.Errorf("%s was rewritten", rel)
+		}
+	}
+}
+
 // TestRewriteKeepsBackup: a dry run writes nothing, and --apply copies each original (bytes, mode, mtime) into the
 // backup dir and records sha256 before/after and the old mtime before replacing the file, keeping its mode.
 func TestRewriteKeepsBackup(t *testing.T) {

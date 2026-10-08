@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -55,7 +56,7 @@ type scanItem struct {
 
 // scanTree walks each root (no symlinked directories followed, history pruned) and runs job on the pool, handing
 // results to emit in walk order. It returns how many entries the walk itself could not read.
-func scanTree[T any](roots []string, workers int, onError func(string, error), job func(scanItem) T, emit func(T) error) (int, error) {
+func scanTree[T any](roots []string, skipTop []string, workers int, onError func(string, error), job func(scanItem) T, emit func(T) error) (int, error) {
 	var walkErr error
 	walkErrors := 0
 	venvs := map[string]bool{}
@@ -80,7 +81,8 @@ func scanTree[T any](roots []string, workers int, onError func(string, error), j
 					return nil
 				}
 				name := d.Name()
-				if abs != root && (d.IsDir() && historyDirs[name] || !d.IsDir() && isHistoryFile(name)) {
+				skipped := filepath.Dir(abs) == root && slices.Contains(skipTop, name)
+				if abs != root && (skipped || d.IsDir() && historyDirs[name] || !d.IsDir() && isHistoryFile(name)) {
 					if d.IsDir() {
 						return filepath.SkipDir
 					}
@@ -170,6 +172,8 @@ type RewriteOptions struct {
 	To        string
 	Apply     bool
 	BackupDir string
+	Skip      []string      // top-level entries of Root left untouched, e.g. a box agents are still writing
+	MinAge    time.Duration // files changed more recently than this are left untouched (an agent may be mid-edit)
 	Workers   int
 	Progress  io.Writer
 	OnError   func(path string, err error)
@@ -182,11 +186,12 @@ type FileChange struct {
 }
 
 type RewriteStats struct {
-	Scanned, Text, Binary, Large, Changed, Occurrences, Errors int
-	ByCategory                                                 map[string]int
+	Scanned, Text, Binary, Large, Changed, Occurrences, Errors, Recent int
+	ByCategory                                                         map[string]int
 }
 
 type rewriteResult struct {
+	recent    bool
 	change    *FileChange
 	read      textRead
 	isText    bool
@@ -221,13 +226,16 @@ func Rewrite(opt RewriteOptions, emit func(FileChange)) (RewriteStats, error) {
 		backup = bufio.NewWriter(f)
 		defer backup.Flush()
 	}
-	rw := rewriter{pattern: pattern, to: []byte(opt.To), apply: opt.Apply, backupDir: opt.BackupDir}
-	walkErrors, err := scanTree([]string{root}, opt.Workers, onError, rw.process, func(r rewriteResult) error {
+	rw := rewriter{pattern: pattern, to: []byte(opt.To), apply: opt.Apply, backupDir: opt.BackupDir, minAge: opt.MinAge, now: time.Now()}
+	walkErrors, err := scanTree([]string{root}, opt.Skip, opt.Workers, onError, rw.process, func(r rewriteResult) error {
 		stats.Scanned++
 		if opt.Progress != nil && stats.Scanned%100_000 == 0 {
 			fmt.Fprintf(opt.Progress, "rewrite-paths: %d entries scanned, %d text, %d would change\n", stats.Scanned, stats.Text, stats.Changed)
 		}
 		switch {
+		case r.recent:
+			stats.Recent++
+			return nil
 		case r.err != nil:
 			stats.Errors++
 			onError(r.change.Path, r.err)
@@ -297,6 +305,8 @@ type rewriter struct {
 	to        []byte
 	apply     bool
 	backupDir string
+	minAge    time.Duration
+	now       time.Time
 }
 
 func (rw rewriter) replace(content []byte) ([]byte, int) {
@@ -311,6 +321,12 @@ func (rw rewriter) process(it scanItem) rewriteResult {
 	switch {
 	case it.isRoot || it.mode.IsDir():
 		return rewriteResult{}
+	case rw.minAge > 0:
+		if info, err := os.Lstat(it.abs); err == nil && rw.now.Sub(info.ModTime()) < rw.minAge {
+			return rewriteResult{recent: true}
+		}
+	}
+	switch {
 	case it.mode&fs.ModeSymlink != 0:
 		res.err = rw.symlink(it, &res)
 	case it.mode.IsRegular():
@@ -453,7 +469,7 @@ func FindNames(roots []string, needle string, workers int, progress io.Writer, o
 		err  error
 		path string
 	}
-	walkErrors, err := scanTree(roots, workers, onError, func(it scanItem) found {
+	walkErrors, err := scanTree(roots, nil, workers, onError, func(it scanItem) found {
 		var f found
 		if filepath.Base(it.abs) == needle {
 			f.hits = append(f.hits, Hit{Path: it.abs, What: "name:" + string(kindOf(it.mode))})
@@ -516,21 +532,4 @@ func kindOf(mode fs.FileMode) Kind {
 		return KindFile
 	}
 	return KindOther
-}
-
-// Add folds another root's stats into s (rewrite-paths over several boxes reports one total).
-func (s *RewriteStats) Add(o RewriteStats) {
-	s.Scanned += o.Scanned
-	s.Text += o.Text
-	s.Binary += o.Binary
-	s.Large += o.Large
-	s.Changed += o.Changed
-	s.Occurrences += o.Occurrences
-	s.Errors += o.Errors
-	if s.ByCategory == nil {
-		s.ByCategory = map[string]int{}
-	}
-	for k, v := range o.ByCategory {
-		s.ByCategory[k] += v
-	}
 }

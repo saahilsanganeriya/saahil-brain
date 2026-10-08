@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -219,9 +218,10 @@ func cmdCutoverRewrite(args []string) int {
 	jobs := fs.Int("jobs", 4, "workers (1..8)")
 	var skip multiFlag
 	fs.Var(&skip, "skip", "top-level entry of <root> to leave untouched (repeatable), e.g. a box agents are still writing")
+	minAge := fs.Duration("min-age", 0, "leave files changed more recently than this untouched (an agent may be mid-edit), e.g. 30m")
 	pos, err := parseInterleaved(fs, args)
 	if err != nil || len(pos) != 1 || len(from) == 0 || *to == "" {
-		return fail("cutover rewrite-paths <root> --from <old-prefix> [--from ...] --to <new-prefix> [--apply] [--backup-dir D]")
+		return fail("cutover rewrite-paths <root> --from <old-prefix> [--from ...] --to <new-prefix> [--skip NAME]... [--min-age D] [--apply] [--backup-dir D]")
 	}
 	if *apply && *backupDir == "" {
 		*backupDir = filepath.Join(config.BrainRoot(), ".archive", "cutover", "rewrite-"+time.Now().UTC().Format("20060102T150405Z"))
@@ -233,35 +233,14 @@ func cmdCutoverRewrite(args []string) int {
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
 	report := func(c cutover.FileChange) { fmt.Fprintf(out, "%s\t%d\t%s\t%s\n", verb, c.Count, c.Category, c.Path) }
-	roots := []string{pos[0]}
-	if len(skip) > 0 {
-		entries, err := os.ReadDir(pos[0])
-		if err != nil {
-			return fail("%v", err)
-		}
-		roots = roots[:0]
-		for _, e := range entries {
-			if !slices.Contains(skip, e.Name()) {
-				roots = append(roots, filepath.Join(pos[0], e.Name()))
-			}
-		}
+	stats, err := cutover.Rewrite(cutover.RewriteOptions{Root: pos[0], From: from, To: *to, Apply: *apply, BackupDir: *backupDir,
+		Skip: skip, MinAge: *minAge, Workers: *jobs, Progress: os.Stderr, OnError: printErr}, report)
+	if err != nil {
+		out.Flush()
+		return fail("%s: %v", pos[0], err)
 	}
-	var stats cutover.RewriteStats
-	for _, r := range roots {
-		bk := *backupDir
-		if len(skip) > 0 && bk != "" {
-			bk = filepath.Join(bk, filepath.Base(r))
-		}
-		one, err := cutover.Rewrite(cutover.RewriteOptions{Root: r, From: from, To: *to, Apply: *apply, BackupDir: bk,
-			Workers: *jobs, Progress: os.Stderr, OnError: printErr}, report)
-		if err != nil {
-			out.Flush()
-			return fail("%s: %v", r, err)
-		}
-		stats.Add(one)
-	}
-	fmt.Fprintf(out, "\n%d entries scanned · %d text · %d binary · %d over 10 MB · %d errors\n", stats.Scanned, stats.Text,
-		stats.Binary, stats.Large, stats.Errors)
+	fmt.Fprintf(out, "\n%d entries scanned · %d text · %d binary · %d over 10 MB · %d changed within --min-age · %d errors\n",
+		stats.Scanned, stats.Text, stats.Binary, stats.Large, stats.Recent, stats.Errors)
 	fmt.Fprintf(out, "%d files/links %s (%d occurrences):\n", stats.Changed, verb, stats.Occurrences)
 	printCounts(out, stats.ByCategory)
 	if *apply {
