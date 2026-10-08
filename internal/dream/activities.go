@@ -104,7 +104,7 @@ func (a *Activities) Gate(_ context.Context, in GateInput) (GateResult, error) {
 	res.Counts.Sessions = len(res.Sessions)
 
 	captures, err := scan(st.Watermarks["captures"],
-		root{a.path("memory"), "memory"}, root{a.path("inbox"), "inbox"}, root{a.path(".import"), ".import"})
+		root{a.path("memory"), "memory"}, root{a.path("inbox"), "inbox"})
 	if err != nil {
 		return res, err
 	}

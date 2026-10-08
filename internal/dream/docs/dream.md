@@ -17,7 +17,7 @@ Material = `.md` files changed after the area's watermark in `.brain/dream-state
 | Area | Roots | Per-run cap | Consumed by |
 |---|---|---|---|
 | sessions | `sessions/` | 60 | learn (`distil`) |
-| captures | `memory/` (not `MEMORY.md`), `inbox/`, `.import/` | 40 | file (`file`) |
+| captures | `memory/` (not `MEMORY.md`), `inbox/` — the one-time `.import/` copies are filed by `brain file`, not the dream | 40 | file (`file`) |
 | docs | `work/`, plus the shadow root (saahil-docs, read-only) presented as `work/…` with `--shadow` | 10 big docs (≥ 20 KB) | summarise (`summarise`) |
 
 Oldest first; what is over the cap waits. A watermark advances only when its step ran (an `ok` answer, cached or
