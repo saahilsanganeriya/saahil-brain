@@ -59,8 +59,11 @@ func Post(env Env, in Input) error {
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil || !ok {
+	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if !ok {
+		return nil
 	}
 	if st.Counted == nil {
 		st.Counted = map[string]bool{}
