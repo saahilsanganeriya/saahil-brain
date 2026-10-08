@@ -161,6 +161,8 @@ func TestDigestWorkArrivesWithTheFirstPrompt(t *testing.T) {
 		"hot.md":                strings.Repeat("hot words here ", 700),
 		"work/slice-y/CARD.md":  "---\ntype: card\nstatus: live\nsummary: slice y\nhubs: [image-lane]\n---\n# Slice Y\n",
 		"work/slice-y/STATE.md": "# State\n\n" + strings.Repeat("state line of the slice run\n", 900),
+		"work/lane-a/CARD.md":   "---\ntype: card\nstatus: live\nsummary: lane a\n---\n# Lane A\n",
+		"work/lane-b/CARD.md":   "---\ntype: card\nstatus: live\nsummary: lane b\n---\n# Lane B\n",
 		"hubs/image-lane.md":    "---\nid: image-lane\ntype: hub\nstatus: current\nsummary: image lane\nbroader: [index]\n---\n## Start here\n\n" + long,
 	})
 	start := f.start(t, Input{SessionID: "s1", Event: "SessionStart"})
@@ -190,9 +192,12 @@ func TestDigestWorkArrivesWithTheFirstPrompt(t *testing.T) {
 	if st, _ := f.env.loadState("s1"); !slices.Equal(st.Work, []string{"slice-y"}) {
 		t.Errorf("state after resume and subagent: work %v, want [slice-y]", st.Work)
 	}
-	f.start(t, Input{SessionID: "s2", Event: "SessionStart"})
-	if got := f.prompt(t, "s2", "continue"); !strings.Contains(got, "Work ocr-census: STATE.md") {
-		t.Errorf("a first prompt naming nothing must fall back to the cwd's box:\n%s", got)
+	// the image-lane coordinator's first prompt on 2026-10-08 named eight boxes once each as reading, not its own
+	for session, prompt := range map[string]string{"s2": "continue", "s4": "Read slice-y, lane-a and lane-b first."} {
+		f.start(t, Input{SessionID: session, Event: "SessionStart"})
+		if got := f.prompt(t, session, prompt); !strings.Contains(got, "Work ocr-census: STATE.md") {
+			t.Errorf("%q names nothing or only a reading list: the cwd's box must be the work:\n%s", prompt, got)
+		}
 	}
 	if got := f.start(t, Input{ConversationID: "c3", Event: "sessionStart"}); !strings.Contains(got, "Work ocr-census: STATE.md") {
 		t.Errorf("a host with no prompt hook must get the work digest at start:\n%s", got)

@@ -159,31 +159,44 @@ func readPrompt(db *sql.DB, prompt string, boxes []string, nm *Names) (promptRea
 	return q, err
 }
 
+// boxName is a box the prompt names and how often.
+type boxName struct {
+	box   string
+	times int
+}
+
 // namedBoxes are the boxes the prompt names, most named first: by a path or box name in them, or by a CARD alias.
-func (q promptRead) namedBoxes() []string {
-	count, first := map[string]int{}, map[string]int{}
+func (q promptRead) namedBoxes() []boxName {
+	var out []boxName
 	note := func(box string) {
-		if _, ok := first[box]; !ok {
-			first[box] = len(first)
+		for i := range out {
+			if out[i].box == box {
+				out[i].times++
+				return
+			}
 		}
-		count[box]++
+		out = append(out, boxName{box, 1})
 	}
 	for _, id := range q.mentioned {
 		if b := rank.BoxOf(id); b != "" {
 			note(b)
 		}
 	}
-	for id, w := range q.hits {
-		if b := rank.BoxOf(id); b != "" && w >= boxNameHit && strings.HasSuffix(id, "/CARD.md") {
+	for _, id := range slices.Sorted(maps.Keys(q.hits)) {
+		if b := rank.BoxOf(id); b != "" && q.hits[id] >= boxNameHit && strings.HasSuffix(id, "/CARD.md") {
 			note(b)
 		}
 	}
-	boxes := slices.Collect(maps.Keys(count))
-	sort.Slice(boxes, func(i, j int) bool {
-		a, b := boxes[i], boxes[j]
-		return count[a] > count[b] || (count[a] == count[b] && first[a] < first[b])
-	})
-	return boxes
+	sort.SliceStable(out, func(i, j int) bool { return out[i].times > out[j].times })
+	return out
+}
+
+func boxesOf(names []boxName) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = n.box
+	}
+	return out
 }
 
 // pointers ranks for a read prompt. The gate passes when the prompt names something: a note by name, a path or a
@@ -237,7 +250,7 @@ func pointers(db *sql.DB, q promptRead, seeds Seeds, nm *Names) (Lookup, error) 
 	sort.SliceStable(cands, func(i, j int) bool {
 		return cands[i].score > cands[j].score || (cands[i].score == cands[j].score && cands[i].id < cands[j].id)
 	})
-	if cands, err = held(db, dedupe(cands), seeds, q.namedBoxes()); err != nil {
+	if cands, err = held(db, dedupe(cands), seeds, boxesOf(q.namedBoxes())); err != nil {
 		return lk, err
 	}
 	for i := 0; i < len(cands) && i < 10; i++ {

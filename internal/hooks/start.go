@@ -167,12 +167,15 @@ func composeDigest(env Env, header string, withHot bool, work []string, limit in
 	return d
 }
 
-// pickWork: the boxes the first prompt names, most named first, else the cwd's; ≤ 2, only boxes that exist.
-func pickWork(env Env, named, cwdBoxes []string, visible func(string) bool) []string {
+// pickWork: the boxes the first prompt names as its work, most named first, else the cwd's; ≤ 2, only boxes that
+// exist. A prompt names its work when it names a box the cwd also suggests, a box twice, or only one or two boxes;
+// more boxes named once each are a reading list.
+func pickWork(env Env, named []boxName, cwdBoxes []string, visible func(string) bool) []string {
 	var out []string
-	for _, box := range named {
-		if len(out) < maxWorks && env.workDir(box) != "" && (visible == nil || visible("work/"+box)) {
-			out = append(out, box)
+	for _, n := range named {
+		work := slices.Contains(cwdBoxes, n.box) || n.times > 1 || len(named) <= maxWorks
+		if work && len(out) < maxWorks && env.workDir(n.box) != "" && (visible == nil || visible("work/"+n.box)) {
+			out = append(out, n.box)
 		}
 	}
 	if len(out) > 0 {
