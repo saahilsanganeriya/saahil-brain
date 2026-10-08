@@ -48,6 +48,12 @@ var AllowedSteps = map[string]Step{
 	"cutover-manifest-after": {Args: []string{"cutover", "manifest", config.LaptopHome + "/brain/work", "--out",
 		cutoverDir + "/laptop-after.tsv", "--skip-hash-under", "**/artifacts/**", "--skip-hash-under", "**/.venv/**",
 		"--skip-hash-under", "**/venv/**"}, Timeout: 2 * time.Hour, Only: config.Laptop},
+	// the laptop's own copies get the same path rewrite as the devbox's, so the first work/ sync finds them identical;
+	// the live image-lane box is skipped on both machines
+	"cutover-rewrite-laptop": {Args: []string{"cutover", "rewrite-paths", config.LaptopHome + "/brain/work",
+		"--from", config.LaptopHome + "/Documents/work-repo/saahil-docs/", "--from", config.DevboxHome + "/Documents/work-repo/saahil-docs/",
+		"--to", config.LaptopHome + "/brain/work/", "--skip", "image-lane-redesign-2026-10-06", "--apply",
+		"--backup-dir", config.LaptopHome + "/brain/.archive/cutover/rewrite-backup-laptop"}, Timeout: 2 * time.Hour, Only: config.Laptop},
 	"cutover-compare": {Args: []string{"cutover", "compare", cutoverDir + "/laptop-before.tsv", cutoverDir + "/laptop-after.tsv",
 		"--allow-newer"}, Timeout: 30 * time.Minute, Only: config.Laptop},
 	"cutover-find-names": {Args: []string{"cutover", "find-names", config.LaptopHome + "/brain/work",

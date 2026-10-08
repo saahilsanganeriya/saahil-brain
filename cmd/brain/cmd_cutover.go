@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -216,6 +217,8 @@ func cmdCutoverRewrite(args []string) int {
 	apply := fs.Bool("apply", false, "write the changes (default: dry run, nothing written)")
 	backupDir := fs.String("backup-dir", "", "where originals and manifest.tsv go with --apply (default <brain>/.archive/cutover/rewrite-<UTC>)")
 	jobs := fs.Int("jobs", 4, "workers (1..8)")
+	var skip multiFlag
+	fs.Var(&skip, "skip", "top-level entry of <root> to leave untouched (repeatable), e.g. a box agents are still writing")
 	pos, err := parseInterleaved(fs, args)
 	if err != nil || len(pos) != 1 || len(from) == 0 || *to == "" {
 		return fail("cutover rewrite-paths <root> --from <old-prefix> [--from ...] --to <new-prefix> [--apply] [--backup-dir D]")
@@ -229,13 +232,33 @@ func cmdCutoverRewrite(args []string) int {
 	}
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
-	stats, err := cutover.Rewrite(cutover.RewriteOptions{Root: pos[0], From: from, To: *to, Apply: *apply, BackupDir: *backupDir,
-		Workers: *jobs, Progress: os.Stderr, OnError: printErr}, func(c cutover.FileChange) {
-		fmt.Fprintf(out, "%s\t%d\t%s\t%s\n", verb, c.Count, c.Category, c.Path)
-	})
-	if err != nil {
-		out.Flush()
-		return fail("%v", err)
+	report := func(c cutover.FileChange) { fmt.Fprintf(out, "%s\t%d\t%s\t%s\n", verb, c.Count, c.Category, c.Path) }
+	roots := []string{pos[0]}
+	if len(skip) > 0 {
+		entries, err := os.ReadDir(pos[0])
+		if err != nil {
+			return fail("%v", err)
+		}
+		roots = roots[:0]
+		for _, e := range entries {
+			if !slices.Contains(skip, e.Name()) {
+				roots = append(roots, filepath.Join(pos[0], e.Name()))
+			}
+		}
+	}
+	var stats cutover.RewriteStats
+	for _, r := range roots {
+		bk := *backupDir
+		if len(skip) > 0 && bk != "" {
+			bk = filepath.Join(bk, filepath.Base(r))
+		}
+		one, err := cutover.Rewrite(cutover.RewriteOptions{Root: r, From: from, To: *to, Apply: *apply, BackupDir: bk,
+			Workers: *jobs, Progress: os.Stderr, OnError: printErr}, report)
+		if err != nil {
+			out.Flush()
+			return fail("%s: %v", r, err)
+		}
+		stats.Add(one)
 	}
 	fmt.Fprintf(out, "\n%d entries scanned · %d text · %d binary · %d over 10 MB · %d errors\n", stats.Scanned, stats.Text,
 		stats.Binary, stats.Large, stats.Errors)

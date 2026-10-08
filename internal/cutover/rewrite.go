@@ -517,3 +517,20 @@ func kindOf(mode fs.FileMode) Kind {
 	}
 	return KindOther
 }
+
+// Add folds another root's stats into s (rewrite-paths over several boxes reports one total).
+func (s *RewriteStats) Add(o RewriteStats) {
+	s.Scanned += o.Scanned
+	s.Text += o.Text
+	s.Binary += o.Binary
+	s.Large += o.Large
+	s.Changed += o.Changed
+	s.Occurrences += o.Occurrences
+	s.Errors += o.Errors
+	if s.ByCategory == nil {
+		s.ByCategory = map[string]int{}
+	}
+	for k, v := range o.ByCategory {
+		s.ByCategory[k] += v
+	}
+}
