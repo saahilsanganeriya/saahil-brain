@@ -38,6 +38,7 @@ func cmdFile(args []string) int {
 	model := fset.String("model", "haiku", "haiku | opus")
 	budget := fset.Float64("budget", 15, "stop before a call would take this run past $N")
 	seed := fset.Bool("seed-hubs", false, "copy the seed hubs into <brain>/hubs/ where missing, then stop")
+	retry := fset.Bool("retry-skipped", false, "also send the memories two answers left out (use with --model opus)")
 	relink := fset.Bool("relink", false, "rewrite [[old-memory-name]] links in notes to the notes they became, then stop")
 	if err := fset.Parse(args); err != nil {
 		return 2
@@ -64,7 +65,7 @@ func cmdFile(args []string) int {
 		return fail("--model is haiku or opus; --batch is 1–20")
 	}
 	if *dryRun {
-		plan, err := filing.NewPlan(root, machines, *batch, *limit)
+		plan, err := filing.NewPlan(root, machines, *batch, *limit, *retry)
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -84,7 +85,7 @@ func cmdFile(args []string) int {
 	}
 	defer ledger.Close()
 	res, err := filing.Run(context.Background(), filing.Config{Root: root, Machines: machines, Batch: *batch,
-		Limit: *limit, Parallel: *parallel, Model: modelID, Runner: llm.DefaultClaude(),
+		Limit: *limit, Parallel: *parallel, RetryGaveUp: *retry, Model: modelID, Runner: llm.DefaultClaude(),
 		Ledger: ledger, Skill: string(skill), BudgetUSD: *budget, Now: time.Now()})
 	res.Skips = nil // the full list is in .brain/filing-report.json
 	out, _ := json.MarshalIndent(res, "", "  ")

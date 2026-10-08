@@ -61,7 +61,7 @@ func syntheticImport(t *testing.T) string {
 // files a folder index as a memory, or reports counts that do not add up to what was imported.
 func TestReconcileCountsCopiesOnce(t *testing.T) {
 	root := syntheticImport(t)
-	plan, err := NewPlan(root, []string{"devbox", "laptop"}, 20, 0)
+	plan, err := NewPlan(root, []string{"devbox", "laptop"}, 20, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}

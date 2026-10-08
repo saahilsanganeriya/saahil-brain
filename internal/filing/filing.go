@@ -111,7 +111,8 @@ var (
 )
 
 // NewPlan inventories the import of the given machines against its manifests and the filing state.
-func NewPlan(root string, machines []string, batch, limit int) (Plan, error) {
+// retryGaveUp includes memories two answers left out (a last pass, usually with a stronger model).
+func NewPlan(root string, machines []string, batch, limit int, retryGaveUp bool) (Plan, error) {
 	st, err := loadState(root)
 	if err != nil {
 		return Plan{}, err
@@ -192,7 +193,7 @@ func NewPlan(root string, machines []string, batch, limit int) (Plan, error) {
 		switch it.Attempt = st.Attempts[it.SHA]; {
 		case anyFiled(st, it.shas):
 			r.AlreadyFiled++
-		case it.Attempt >= maxAttempts:
+		case it.Attempt >= maxAttempts && !retryGaveUp:
 			skip(it.Path, reasonGaveUp)
 		default:
 			pending = append(pending, *it)
@@ -313,7 +314,9 @@ type Config struct {
 	Skill     string
 	BudgetUSD float64 // run cap; a batch is sent only while spent + its per-call budget fits
 	Parallel  int     // model calls in flight at once (results are still applied in batch order)
-	Now       time.Time
+	// RetryGaveUp sends memories two answers left out once more (a last pass, usually with Opus)
+	RetryGaveUp bool
+	Now         time.Time
 }
 
 type Result struct {
@@ -349,7 +352,7 @@ type material struct {
 
 // Run files every pending batch, saving the state after each, so a stop or crash resumes where it left off.
 func Run(ctx context.Context, cfg Config) (Result, error) {
-	plan, err := NewPlan(cfg.Root, cfg.Machines, cfg.Batch, cfg.Limit)
+	plan, err := NewPlan(cfg.Root, cfg.Machines, cfg.Batch, cfg.Limit, cfg.RetryGaveUp)
 	if err != nil {
 		return Result{}, err
 	}
