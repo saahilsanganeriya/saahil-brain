@@ -585,8 +585,8 @@ func (s *SQLiteStats) AddCounters(key string, cs []Counter) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT OR IGNORE INTO delta_applied(key, applied) VALUES(?, ?)`, key,
-		time.Now().UTC().Format(time.RFC3339))
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := tx.Exec(`INSERT OR IGNORE INTO delta_applied(key, applied) VALUES(?, ?)`, key, now)
 	if err != nil {
 		return false, err
 	}
@@ -599,6 +599,11 @@ func (s *SQLiteStats) AddCounters(key string, cs []Counter) (bool, error) {
 			ON CONFLICT(id) DO UPDATE SET %[1]s = %[1]s + excluded.%[1]s`, c.Field)
 		if _, err := tx.Exec(q, c.ID, c.Delta); err != nil {
 			return false, err
+		}
+		if c.Field == "helpful" {
+			if _, err := tx.Exec(`UPDATE node_stats SET last_helpful_at = ? WHERE id = ?`, now, c.ID); err != nil {
+				return false, err
+			}
 		}
 	}
 	return true, tx.Commit()

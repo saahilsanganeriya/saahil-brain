@@ -2,6 +2,7 @@ package delta
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -200,5 +201,27 @@ func TestDeltaNeverWritesUnderWork(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Join(root, "work")); len(entries) != 0 {
 		t.Fatalf("work/ is not empty: %v", entries)
+	}
+}
+
+// TestHelpfulCounterStampsItsTime catches helpful counters that never reach the L2 ranker's recency term (it reads
+// last_helpful_at): a helpful increment stamps the time; a harmful one on a new row leaves it empty.
+func TestHelpfulCounterStampsItsTime(t *testing.T) {
+	stats, err := OpenStats(filepath.Join(t.TempDir(), "brain.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stats.Close()
+	if _, err := stats.AddCounters("k1", []Counter{{ID: "lesson-a", Field: "helpful", Delta: 1}, {ID: "lesson-b", Field: "harmful", Delta: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	at := map[string]string{}
+	for _, id := range []string{"lesson-a", "lesson-b"} {
+		var s sql.NullString
+		stats.db.QueryRow(`SELECT last_helpful_at FROM node_stats WHERE id = ?`, id).Scan(&s)
+		at[id] = s.String
+	}
+	if _, err := time.Parse(time.RFC3339, at["lesson-a"]); err != nil || at["lesson-b"] != "" {
+		t.Fatalf("last_helpful_at: helpful %q, harmful %q", at["lesson-a"], at["lesson-b"])
 	}
 }
