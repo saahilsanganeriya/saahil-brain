@@ -3,6 +3,7 @@ package evals
 import (
 	"fmt"
 	"path"
+	"saahil.local/brain/internal/hooks"
 	"slices"
 	"sort"
 	"strings"
@@ -34,7 +35,13 @@ func (r SearchRanker) Pointers(prompt, _ string) []string {
 
 // NewRanker picks the ranker every eval measures. Wiring point: return the hook ranker (the `brain hook prompt` code
 // path, live mode, no injection) here once internal/hooks is merged.
-var NewRanker = func(ix *index.Index) Ranker { return SearchRanker{Index: ix} }
+var NewRanker = func(ix *index.Index) Ranker {
+	r, err := hooks.NewEvalRanker(hooks.DefaultEnv(), ix.DB())
+	if err != nil {
+		return SearchRanker{Index: ix}
+	}
+	return r
+}
 
 type Env struct {
 	Index  *index.Index

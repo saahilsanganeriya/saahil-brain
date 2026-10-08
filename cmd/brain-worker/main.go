@@ -72,6 +72,7 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 	dreamWorker := worker.New(c, dream.TaskQueue, worker.Options{})
 	dreamWorker.RegisterWorkflow(dream.DreamWorkflow)
 	dreamWorker.RegisterWorkflow(dream.DreamTickWorkflow)
+	dreamWorker.RegisterWorkflow(dream.EvalWorkflow)
 	dreamWorker.RegisterActivity(acts)
 	// One Opus call at a time and two Haiku calls bound spend rate and memory; the queues share nothing else.
 	opus := worker.New(c, dream.QueueOpus, worker.Options{MaxConcurrentActivityExecutionSize: 1})
