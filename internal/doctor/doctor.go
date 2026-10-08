@@ -15,6 +15,7 @@ const (
 	Warn Status = "warn"
 	Fail Status = "fail"
 	Skip Status = "skip" // the part is not installed on this machine (yet)
+	Info Status = "info" // measured and reported, not judged: never turns the doctor red
 )
 
 type Result struct {
