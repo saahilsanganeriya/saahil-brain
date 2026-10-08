@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // fakeClaude is a stand-in binary: it fails unless the flags the cost guard depends on are present and the input
@@ -63,4 +64,34 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"ok","total
 	if _, err := (Claude{Bin: bin, Login: true}).Run(context.Background(), Call{Skill: "S", Input: "in", Model: "m", MaxBudgetUSD: 1}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestRetryOfFailedKeyUnderStoreSchema catches the laptop's failed eval build: the store creates llm_calls with
+// ended NOT NULL, and retrying a key whose first attempt failed reset ended to NULL ('NOT NULL constraint failed').
+func TestRetryOfFailedKeyUnderStoreSchema(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "brain.db")
+	l, err := OpenLedger(db, filepath.Join(dir, "llm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.db.Exec(`DROP TABLE llm_calls`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.db.Exec(`CREATE TABLE llm_calls(key TEXT PRIMARY KEY, workflow TEXT NOT NULL, step TEXT NOT NULL, model TEXT NOT NULL,
+		cost_usd REAL NOT NULL DEFAULT 0, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
+		started TEXT NOT NULL DEFAULT '', ended TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := l.Begin("k", "eval", "human-judge", "m", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Finish("k", Result{}, "failed", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Begin("k", "eval", "human-judge", "m", now.Add(time.Minute)); err != nil {
+		t.Fatalf("retrying a failed key: %v", err)
+	}
+	l.Close()
 }

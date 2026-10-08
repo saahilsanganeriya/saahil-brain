@@ -17,7 +17,7 @@ import (
 const llmCallsDDL = `CREATE TABLE IF NOT EXISTS llm_calls(
 	key TEXT PRIMARY KEY, workflow TEXT NOT NULL, step TEXT NOT NULL, model TEXT NOT NULL,
 	cost_usd REAL NOT NULL DEFAULT 0, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
-	started TEXT NOT NULL, ended TEXT, status TEXT NOT NULL)`
+	started TEXT NOT NULL, ended TEXT NOT NULL DEFAULT '', status TEXT NOT NULL)`
 
 // Ledger records every call in llm_calls and keeps each finished result as a file, so a key seen before is answered
 // from disk for $0. Results live under .data/ (never in git); the prompt text is never stored, only its hash.
@@ -82,7 +82,7 @@ func (l *Ledger) Done(key string) (Result, bool, error) {
 
 func (l *Ledger) Begin(key, workflow, step, model string, now time.Time) error {
 	_, err := l.db.Exec(`INSERT INTO llm_calls(key, workflow, step, model, started, status) VALUES(?,?,?,?,?, 'running')
-		ON CONFLICT(key) DO UPDATE SET started = excluded.started, ended = NULL, status = 'running'`,
+		ON CONFLICT(key) DO UPDATE SET started = excluded.started, ended = '', status = 'running'`,
 		key, workflow, step, model, now.UTC().Format(time.RFC3339))
 	return err
 }
