@@ -5,6 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
 	"slices"
 	"sort"
 	"time"
@@ -13,13 +16,16 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 
+	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/dream"
 	"saahil.local/brain/internal/evals"
 	"saahil.local/brain/internal/index"
+	"saahil.local/brain/internal/llm"
 )
 
 func init() {
-	register("eval build", "build the eval sets from history into ~/brain/.brain/evals: brain eval build [--cut D] [--nav-from D]", cmdEvalBuild)
+	register("eval build", "build the eval sets from history into ~/brain/.brain/evals: brain eval build [--cut D] [--nav-from D] | --human [--dry-run]", cmdEvalBuild)
+	register("eval human", "owner-typed prompts → the file that answered: top-3 and within 3 calls, both machines merged [--split dev|test] [--no-write]", cmdEvalHuman)
 	register("eval navigation", "first prompt → files the session used: top-3 pointers and within 3 tool calls [--split dev|test]", cmdEvalOne("navigation"))
 	register("eval qa", "answer-from-brain: recall@3 of the right note, abstain on unknowns [--split dev|test]", cmdEvalOne("qa"))
 	register("eval mistakes", "repeat-mistake: does a pointer surface the lesson before a past correction", cmdEvalOne("mistakes"))
@@ -32,8 +38,20 @@ func cmdEvalBuild(args []string) int {
 	fs := flag.NewFlagSet("eval build", flag.ContinueOnError)
 	cut := fs.String("cut", evals.DefaultCut.Format(time.DateOnly), "repeat-mistake set: corrections in sessions from this date")
 	navFrom := fs.String("nav-from", evals.DefaultNavFrom.Format(time.DateOnly), "navigation set: sessions from this date")
+	human := fs.Bool("human", false, "build only this machine's human set (owner-typed prompts, judged by Opus)")
+	from := fs.String("from", evals.DefaultHumanFrom.Format(time.DateOnly), "human set: prompts from this date")
+	maxItems := fs.Int("max", 50, "human set: items kept")
+	judgeMax := fs.Int("judge-max", 120, "human set: prompts sent to the judge, at most")
+	dryRun := fs.Bool("dry-run", false, "human set: count the candidates; no judge calls, nothing written")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *human {
+		start, err := time.Parse(time.DateOnly, *from)
+		if err != nil {
+			return fail("--from: %v", err)
+		}
+		return buildHuman(evals.HumanBuildOptions{From: start, Now: time.Now(), Max: *maxItems, JudgeMax: *judgeMax, DryRun: *dryRun})
 	}
 	opt := evals.BuildOptions{Now: time.Now()}
 	var err error
@@ -77,6 +95,84 @@ func cmdEvalBuild(args []string) int {
 		sort.Strings(reasons)
 		for _, r := range reasons {
 			fmt.Printf("  skipped %5d  %s\n", m.Skipped[r], r)
+		}
+		return 0
+	})
+}
+
+func buildHuman(opt evals.HumanBuildOptions) int {
+	return withIndex(func(ix *index.Index) int {
+		if !opt.DryRun {
+			ledger, err := llm.OpenLedger(filepath.Join(ix.Root, ".index", "brain.db"), filepath.Join(ix.Root, ".data", "llm"))
+			if err != nil {
+				return fail("llm ledger: %v", err)
+			}
+			defer ledger.Close()
+			opt.Ledger, opt.Runner = ledger, llm.DefaultClaude()
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		set, err := evals.BuildHuman(ctx, ix, opt)
+		if err != nil {
+			return fail("eval build --human: %v", err)
+		}
+		m := set.Manifest
+		if opt.DryRun {
+			fmt.Printf("dry run, nothing written: the %s human set from %s\n", m.Machine, m.From)
+		} else {
+			fmt.Printf("built the %s human set in %s (prompts from %s, judge %s)\n", m.Machine,
+				filepath.Join(evals.Dir(ix.Root), "sets", "human-"+m.Machine+".jsonl"), m.From, m.Model)
+		}
+		fmt.Printf("  transcripts   %5d\n  owner prompts %5d\n  owner-typed   %5d\n  with a brain file read in the next 10 calls %d\n",
+			m.Transcripts, m.OwnerPrompts, m.Typed, m.WithCandidates)
+		if !opt.DryRun {
+			fmt.Printf("  judged        %5d  (none %d)\n  kept          %5d\n  judge calls   %5d  (cached %d)  cost $%.2f\n",
+				m.Judged, m.None, m.Kept, m.Calls, m.Cached, m.CostUSD)
+		}
+		reasons := make([]string, 0, len(m.Skipped))
+		for r := range m.Skipped {
+			reasons = append(reasons, r)
+		}
+		sort.Strings(reasons)
+		for _, r := range reasons {
+			fmt.Printf("  skipped %5d  %s\n", m.Skipped[r], r)
+		}
+		return 0
+	})
+}
+
+func cmdEvalHuman(args []string) int {
+	fs := flag.NewFlagSet("eval human", flag.ContinueOnError)
+	only := fs.String("split", "", "run only the dev or the test half of the set")
+	noWrite := fs.Bool("no-write", false, "print the numbers without writing reports")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *only != "" && !slices.Contains(evals.Splits, *only) {
+		return fail("--split: dev or test, not %q", *only)
+	}
+	return withIndex(func(ix *index.Index) int {
+		set, err := evals.LoadHuman(ix.Root, config.ThisMachine())
+		if err != nil {
+			return fail("%v", err)
+		}
+		env := evals.NewEnv(ix, evals.Sets{}, time.Now())
+		if *only != "" {
+			env.Only(*only)
+		}
+		run, err := env.Human(set, !*noWrite)
+		if err != nil {
+			return fail("eval human: %v", err)
+		}
+		fmt.Println(run.Headline())
+		for _, m := range append(run.Merged.Metrics, run.Merged.SplitMetrics...) {
+			fmt.Println(m.Line())
+		}
+		if run.Other == "" {
+			fmt.Printf("no %s rows yet: run `brain eval human` there\n", config.ThisMachine().Other())
+		}
+		if !*noWrite {
+			fmt.Printf("reports: %s\n", evals.ReportsDir(ix.Root, run.Merged.Ran))
 		}
 		return 0
 	})

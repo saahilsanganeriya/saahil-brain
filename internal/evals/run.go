@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"database/sql"
 	"fmt"
 	"path"
 	"slices"
@@ -50,6 +51,7 @@ type Env struct {
 	Ranker Ranker
 	Now    time.Time
 	sets   Sets
+	only   string // dev | test when Only picked one split
 	nodes  map[string]nodeFacts
 	exist  *existence
 	filed  map[string][]string // memory key (<project>/<file>) → notes filed from that memory
@@ -149,24 +151,29 @@ func (e *Env) targetsByPath(paths []string) targetSet {
 }
 
 func (e *Env) filedFrom() map[string][]string {
-	if e.filed != nil {
-		return e.filed
+	if e.filed == nil {
+		e.filed = filedNotes(e.Index.DB())
 	}
-	e.filed = map[string][]string{}
-	rows, err := e.Index.DB().Query(`SELECT src, dst FROM edge WHERE rel = 'sources' AND dst >= '.import/' AND dst < '.import0'`)
+	return e.filed
+}
+
+// filedNotes maps each memory key (<project>/<file>) to the notes whose sources name its .import copy.
+func filedNotes(db *sql.DB) map[string][]string {
+	out := map[string][]string{}
+	rows, err := db.Query(`SELECT src, dst FROM edge WHERE rel = 'sources' AND dst >= '.import/' AND dst < '.import0'`)
 	if err != nil {
-		return e.filed
+		return out
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var src, dst string
 		if rows.Scan(&src, &dst) == nil {
 			if k, ok := memoryKey(dst); ok {
-				e.filed[k] = append(e.filed[k], src)
+				out[k] = append(out[k], src)
 			}
 		}
 	}
-	return e.filed
+	return out
 }
 
 func (e *Env) targetsByID(ids []string) targetSet {

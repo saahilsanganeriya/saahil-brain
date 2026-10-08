@@ -61,6 +61,9 @@ var AllowedSteps = map[string]Step{
 	"cutover-find-names": {Args: []string{"cutover", "find-names", config.LaptopHome + "/brain/work",
 		config.LaptopHome + "/Documents", config.LaptopHome + "/.claude", "--out", cutoverDir + "/laptop-names.txt"},
 		Timeout: time.Hour, Only: config.Laptop},
+	// the laptop holds most owner-typed sessions; its prompts can only be re-read there
+	"eval-human-build": {Args: []string{"eval", "build", "--human"}, Timeout: 2 * time.Hour, Only: config.Laptop},
+	"eval-human":       {Args: []string{"eval", "human"}, Timeout: 30 * time.Minute, Only: config.Laptop},
 }
 
 const (
