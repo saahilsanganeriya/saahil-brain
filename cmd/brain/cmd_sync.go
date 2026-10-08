@@ -127,8 +127,17 @@ func cmdSync(args []string) int {
 	rec.Summary = lines[len(lines)-1]
 	// the full run is in unison-last.out; print the summary, not one line per file
 	skipped := 0
+	kinds := map[string]int{}
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
+		switch {
+		case strings.Contains(t, "<=?=>"):
+			kinds["conflict (both changed)"]++
+		case strings.Contains(t, "---->"):
+			kinds["laptop → devbox"]++
+		case strings.Contains(t, "<----"):
+			kinds["devbox → laptop"]++
+		}
 		switch {
 		case strings.HasPrefix(t, "skipped:"):
 			skipped++
@@ -137,6 +146,9 @@ func cmdSync(args []string) int {
 			strings.HasPrefix(t, "Nothing to do") || strings.Contains(t, "conflict"):
 			fmt.Println(t)
 		}
+	}
+	for k, v := range kinds {
+		fmt.Printf("%-24s %d\n", k, v)
 	}
 	fmt.Printf("%d per-file skip lines (full output: %s)\n", skipped, filepath.Join(config.StateDir(), "unison-last.out"))
 	if !*dry {
