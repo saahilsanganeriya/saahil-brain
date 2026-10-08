@@ -25,6 +25,7 @@ type existence struct {
 	root    string
 	db      *sql.DB
 	touched map[string]time.Time // node path → end of the earliest session that read or wrote it
+	ended   map[string]time.Time // session note path → when its session ended
 	paths   map[string]string    // node id → path, "" for nodes without a file (tickets, PRs, links)
 	times   map[string]fileDates
 }
@@ -35,7 +36,8 @@ type fileDates struct {
 }
 
 func newExistence(root string, db *sql.DB) (*existence, error) {
-	x := &existence{root: root, db: db, touched: map[string]time.Time{}, paths: map[string]string{}, times: map[string]fileDates{}}
+	x := &existence{root: root, db: db, touched: map[string]time.Time{}, ended: map[string]time.Time{}, paths: map[string]string{},
+		times: map[string]fileDates{}}
 	err := filepath.WalkDir(filepath.Join(root, "sessions"), func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
 			return err
@@ -52,6 +54,9 @@ func newExistence(root string, db *sql.DB) (*existence, error) {
 		}
 		if !ok || yaml.Unmarshal(fm, &s) != nil || s.Ended.IsZero() {
 			return nil
+		}
+		if rel, err := filepath.Rel(root, p); err == nil {
+			x.ended[filepath.ToSlash(rel)] = s.Ended
 		}
 		for _, f := range append(s.Touched, s.Produced...) {
 			if t, seen := x.touched[f]; !seen || s.Ended.Before(t) {
@@ -70,12 +75,34 @@ func newExistence(root string, db *sql.DB) (*existence, error) {
 // deleted file) is dated by the mtime the index recorded; a file on a filesystem without birth times is kept, since
 // nothing says it is new.
 func (x *existence) before(p string, t time.Time) bool {
+	d := x.dates(p)
+	if d.keep || t.IsZero() {
+		return true
+	}
+	first, seen := x.touched[p]
+	return (!d.born.IsZero() && d.born.Before(t)) || d.modified.Before(t) || (seen && first.Before(t))
+}
+
+// unchangedBefore reports whether p's text today is its text at t: last modified before t. A file with no
+// modification time is not.
+func (x *existence) unchangedBefore(p string, t time.Time) bool {
+	d := x.dates(p)
+	return !d.modified.IsZero() && d.modified.Before(t)
+}
+
+// sessionEndedBefore reports whether the session of the note at p had ended, and so been filed, before t.
+func (x *existence) sessionEndedBefore(p string, t time.Time) bool {
+	ended, ok := x.ended[p]
+	return ok && ended.Before(t)
+}
+
+func (x *existence) dates(p string) fileDates {
 	d, ok := x.times[p]
 	if !ok {
 		born, modified := fileTimes(x.abs(p))
 		switch {
 		case born.IsZero() && !modified.IsZero():
-			d.keep = true
+			d.keep, d.modified = true, modified
 		case modified.IsZero():
 			var ns int64
 			if x.db.QueryRow(`SELECT mtime FROM node WHERE path = ? AND kind != 'section' LIMIT 1`, p).Scan(&ns) == nil && ns > 0 {
@@ -87,11 +114,7 @@ func (x *existence) before(p string, t time.Time) bool {
 		}
 		x.times[p] = d
 	}
-	if d.keep || t.IsZero() {
-		return true
-	}
-	first, seen := x.touched[p]
-	return (!d.born.IsZero() && d.born.Before(t)) || d.modified.Before(t) || (seen && first.Before(t))
+	return d
 }
 
 // nodeBefore is before for a node id (a section by its document's file); nodes without a file are always kept.

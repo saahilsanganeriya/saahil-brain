@@ -726,7 +726,7 @@ func Prompt(env Env, in Input) ([]byte, error) {
 	session := in.session()
 	st, ok := env.loadState(session)
 	if !ok {
-		if box := workByFolder(env, in.cwd(), nil); box != "" {
+		if box := workByFolder(env, in.cwd(), nil, nil); box != "" {
 			st.Work, st.Hubs = []string{box}, hubsByName(env.Root, box)
 		}
 	}

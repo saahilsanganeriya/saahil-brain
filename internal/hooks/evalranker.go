@@ -41,7 +41,7 @@ func (r *EvalRanker) Pointers(prompt, cwd string, hide func(id string) bool) []s
 // what a pre-session index would not hold, the session's work box and hubs included.
 func (r *EvalRanker) Lookup(prompt, cwd string, hide func(id string) bool) (Lookup, error) {
 	seeds := Seeds{Folder: folderName(cwd), Hide: hide}
-	if box := workByFolder(r.env, cwd, nil); box != "" && (hide == nil || !hide("work/"+box)) {
+	if box := workByFolder(r.env, cwd, nil, nil); box != "" && (hide == nil || !hide("work/"+box)) {
 		seeds.Work, seeds.Hubs = []string{box}, rank.Visible(hubsByName(r.env.Root, box), hide)
 	}
 	return Pointers(r.db, prompt, seeds, r.names)
