@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"saahil.local/brain/internal/bridge"
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/rpc"
 )
@@ -49,9 +50,25 @@ func unisonArgs(root string) []string {
 
 func cmdSync(args []string) int {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
-	dry := fs.Bool("dry-run", false, "show what would change (unison -testserver is not used; this lists the plan)")
+	dry := fs.Bool("dry-run", false, "list what would change, change nothing")
+	setup := fs.Bool("setup", false, "laptop: install unison (Homebrew) if missing")
+	enable := fs.Bool("enable", false, "laptop: load the hourly sync LaunchAgent")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *setup || *enable {
+		if config.ThisMachine() != config.Laptop {
+			return fail("--setup/--enable run on the laptop (brain peer step sync-setup|sync-enable)")
+		}
+		if err := bridge.EnsureUnison(); err != nil {
+			return fail("%v", err)
+		}
+		if *enable {
+			if err := bridge.EnableSync(); err != nil {
+				return fail("%v", err)
+			}
+		}
+		return 0
 	}
 	if config.ThisMachine() == config.Devbox {
 		// the laptop has no sshd: ask it to run the sync through the bridge

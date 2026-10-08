@@ -160,17 +160,24 @@ func SelfUpdate() error {
 
 const SyncLabel = "com.saahil.brain-sync"
 
-// InstallSync makes sure unison exists (Homebrew) and loads an hourly `brain sync` LaunchAgent.
-func InstallSync() error {
-	if config.ThisMachine() != config.Laptop {
-		return nil
-	}
+// EnsureUnison installs unison with Homebrew when the laptop lacks it.
+func EnsureUnison() error {
 	if _, err := exec.LookPath("unison"); err != nil {
 		brew := "/opt/homebrew/bin/brew"
 		if out, err := exec.Command(brew, "install", "unison").CombinedOutput(); err != nil {
 			return fmt.Errorf("brew install unison: %v %s", err, tail(out))
 		}
 		fmt.Println("installed unison with Homebrew")
+	}
+	out, _ := exec.Command("unison", "-version").Output()
+	fmt.Print(string(out))
+	return nil
+}
+
+// EnableSync loads the hourly `brain sync` LaunchAgent (it also runs once at load).
+func EnableSync() error {
+	if config.ThisMachine() != config.Laptop {
+		return fmt.Errorf("the sync agent runs on the laptop")
 	}
 	spec := agentSpec{Label: SyncLabel, Args: []string{filepath.Join(config.BinDir(), "brain"), "sync"}, Throttle: 60,
 		Log: filepath.Join(config.Home(), "Library", "Logs", "brain-sync.log"), Home: config.Home()}

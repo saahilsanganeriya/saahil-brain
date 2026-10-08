@@ -29,12 +29,15 @@ var AllowedSteps = map[string]Step{
 	"doctor":  {Args: []string{"doctor", "--json"}, Timeout: 5 * time.Minute},
 	"install": {Args: []string{"install"}, Timeout: 10 * time.Minute},
 	"index":   {Args: []string{"index"}, Timeout: 30 * time.Minute},
-	"sync":    {Args: []string{"sync"}, Timeout: 30 * time.Minute},
+	"sync":    {Args: []string{"sync"}, Timeout: 30 * time.Minute, Only: config.Laptop},
 	"update":  {Args: []string{"self-update"}, Timeout: 5 * time.Minute, Only: config.Laptop},
 	// read-only views and the shadow-phase setup
 	"agents-list":   {Args: []string{"agents", "list"}, Timeout: 2 * time.Minute},
 	"init":          {Args: []string{"init"}, Timeout: time.Minute},
 	"import-memory": {Args: []string{"import", "memory"}, Timeout: 10 * time.Minute},
+	"sync-setup":    {Args: []string{"sync", "--setup"}, Timeout: 15 * time.Minute, Only: config.Laptop},
+	"sync-dry-run":  {Args: []string{"sync", "--dry-run"}, Timeout: 30 * time.Minute, Only: config.Laptop},
+	"sync-enable":   {Args: []string{"sync", "--enable"}, Timeout: 5 * time.Minute, Only: config.Laptop},
 }
 
 type Job struct {
