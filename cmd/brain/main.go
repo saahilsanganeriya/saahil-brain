@@ -51,7 +51,7 @@ func dispatch(args []string) int {
 
 // runCommand answers -h/--help itself: a command that parses no flags would otherwise run (and write) on --help.
 func runCommand(c command, rest []string) int {
-	if len(rest) > 0 && (rest[0] == "-h" || rest[0] == "--help" || rest[0] == "help") {
+	if len(rest) > 0 && (rest[0] == "-h" || rest[0] == "--help") {
 		fmt.Printf("brain %s — %s\n", c.path, c.summary)
 		return 0
 	}
