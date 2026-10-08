@@ -1,5 +1,6 @@
 // Package hooks serves the read path's hooks: `hook start` (the start digest), `hook prompt` (≤ 3 pointers or
-// nothing) and `hook post` (opened/followed counts for what a session was shown).
+// nothing), `hook post` (opened/followed counts for what a session was shown, and brain pulls) and `hook end` /
+// `hook compact` (ignored counts).
 //
 // Until the cut-over (no <brain>/.brain/live) every hook runs in SHADOW: it computes what it would inject, logs
 // that to the lookups table and injects nothing. A lookups row never holds prompt text: `candidates` and `chosen`

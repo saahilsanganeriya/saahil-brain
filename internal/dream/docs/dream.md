@@ -5,10 +5,13 @@
 named `dream/<UTC hour>`; `brain dream run --now [--shadow]` starts one directly under the same id.
 
 ```
-gate ─► snapshot ─► reconcile ─► capture ─► learn ─► file ─► curate.link ─► curate.hubs ─► summarise ─► render ─► check ─► verify ─► reindex ─► commit
-det      git+tar     det          brain CLI   distil   file    link           hubs           summarise    brain CLI  lint      verify    brain CLI   state+report+git
-                                              Opus     Haiku   Opus           Opus           Haiku                   (revert)  Opus
+gate ─► snapshot ─► reconcile ─► capture ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs ─► summarise ─► render ─► check ─► verify ─► reindex ─► commit
+det      git+tar     det          brain CLI   distil   det        file    link           hubs           summarise    brain CLI  lint      verify    brain CLI   state+report+git
+                                              Opus     (index)    Haiku   Opus           Opus           Haiku                   (revert)  Opus
 ```
+
+`demote` sets `node_stats.demoted_at` on a node shown 10 times as a pointer and never opened or followed, and clears
+it when the node is opened (`rank.Demote`). It is a ranking prior: it changes no file and no status.
 
 ## Gate
 

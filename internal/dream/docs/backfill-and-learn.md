@@ -27,7 +27,7 @@ plan (det) ──► batch child × ⌈boxes/8⌉, one at a time ──► repor
 
 ```
 signals (code: note header, transcript tool errors and test runs, lookups shown/opened)
-  └► anything to judge? ─► judge (Haiku, judge skill) ─► helpful/harmful counters on pointers really shown
+  └► anything to judge? ─► judge (Haiku, judge skill) ─► delta counter ops (helpful/harmful + why) on notes really shown
        └► corrected, judged failure, or tests failing at the end? ─► reflect (Opus, distil) ─► edits
 ```
 

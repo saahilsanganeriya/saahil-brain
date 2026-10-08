@@ -87,9 +87,16 @@ SQLite via `modernc.org/sqlite` (no cgo), FTS5. Tables (owned by `internal/store
 title, summary, status, hubs, scope, as_of, updated, size, sha256, mtime, canonical_of)`, `edge(src, dst, rel, why,
 source)`, `fts(id, title, aliases, summary, body)`, `section(doc, idx, heading, line_start, line_end, bytes,
 summary)`, `node_stats(id, shown, opened, followed, helpful, harmful, owner_confirmed, last_shown_at,
-last_helpful_at)`, `lookups(time, session, hook, candidates, chosen, abstained, ms)` — never the prompt text,
-`llm_calls(key, workflow, step, model, cost_usd, tokens_in, tokens_out, started, ended, status)` (idempotency key
-unique), `meta(key, value)`.
+last_helpful_at, ignored, demoted_at)`, `lookups(time, session, hook, candidates, chosen, abstained, ms)` — never the
+prompt text, `llm_calls(key, workflow, step, model, cost_usd, tokens_in, tokens_out, started, ended, status)`
+(idempotency key unique), `meta(key, value)`.
+
+The usage funnel. The hooks write `shown` (prompt), `opened` and `followed` (post), and `ignored` (end and compact).
+Each counts once per session. A read is Read, Grep or Glob, a Bash read (cat, sed without -i, head, tail, less, rg,
+grep) or brain show/sections. The learn step's judge writes `helpful` and `harmful` through the delta `counter` op.
+The dream sets `demoted_at` on a node shown 10 times and never opened (an L1 ranking prior of −0.15, not a status
+change) and clears it when the node is opened. Lookup rows by hook: `start` and `prompt` (as above), `post`
+(`["opened"]` or `["followed"]`, the id), `pull` (`["brain_<verb>"]`, once per session), `end` (`["ignored"]`, the ids).
 
 Never ranked: `status ∈ {superseded, retired}`, `canonical_of != ''` (byte copies), `type ∈ {session, day}`, paths
 under `log/` or `.archive/`.
