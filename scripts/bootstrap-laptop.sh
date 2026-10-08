@@ -17,14 +17,14 @@ want=$(awk '{print $1}' "$tmp/brain.sha256")
 got=$(shasum -a 256 "$tmp/brain" | awk '{print $1}')
 [ "$want" = "$got" ] || { echo "sha256 mismatch: got $got want $want" >&2; exit 1; }
 install -m 755 "$tmp/brain" "$HOME/.local/bin/brain"
-(umask 077; ssh "${ssh_opts[@]}" "$host" 'cat ~/.config/brain/bridge.token' > "$HOME/.config/brain/bridge.token")
+(umask 077; ssh -n "${ssh_opts[@]}" "$host" 'cat ~/.config/brain/bridge.token' > "$HOME/.config/brain/bridge.token")
 "$HOME/.local/bin/brain" version
 "$HOME/.local/bin/brain" bridge install
 echo "waiting for the tunnel…"
 for i in $(seq 1 20); do
-  if ssh "${ssh_opts[@]}" "$host" '/home/test-user/.local/bin/brain peer status' >/dev/null 2>&1; then
+  if ssh -n "${ssh_opts[@]}" "$host" '/home/test-user/.local/bin/brain peer status' >/dev/null 2>&1; then
     echo "BRIDGE OK: the devbox reaches this laptop through the bridge"
-    ssh "${ssh_opts[@]}" "$host" '/home/test-user/.local/bin/brain agents list'
+    ssh -n "${ssh_opts[@]}" "$host" '/home/test-user/.local/bin/brain agents list'
     exit 0
   fi
   sleep 3
