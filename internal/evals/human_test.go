@@ -38,7 +38,9 @@ func toolTurn(t *testing.T, at string, tools ...map[string]any) string {
 	return jsonLine(t, map[string]any{"type": "assistant", "timestamp": at, "message": map[string]any{"content": blocks}})
 }
 
-func use(name string, input map[string]any) map[string]any { return map[string]any{"name": name, "input": input} }
+func use(name string, input map[string]any) map[string]any {
+	return map[string]any{"name": name, "input": input}
+}
 
 // humanFixture is the navigation fixture plus one devbox transcript whose owner prompts cover every rule of the human
 // set: kept prompts, each kind of non-typed turn, a judged 'none', a read past the 10-call window, and a file born
@@ -55,7 +57,9 @@ func humanFixture(t *testing.T) (*index.Index, string) {
 	}
 	stubFileTimes(t, map[string]time.Time{"new-report.md": time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)})
 
-	read := func(rel string) map[string]any { return use("Read", map[string]any{"file_path": filepath.Join(docs, rel)}) }
+	read := func(rel string) map[string]any {
+		return use("Read", map[string]any{"file_path": filepath.Join(docs, rel)})
+	}
 	ls := use("Bash", map[string]any{"command": "ls"})
 	brief := "Please carry out this task from my Orca coordinator. You are working inside Orca. === TASK === shard plan " + promptMarker
 	lines := []string{
@@ -70,11 +74,11 @@ func humanFixture(t *testing.T) (*index.Index, string) {
 			"content": []map[string]any{{"type": "text", "text": "The rollout plan sets eight shards."}}}}),
 		jsonLine(t, map[string]any{"type": "user", "isSidechain": true, "origin": map[string]string{"kind": "human"},
 			"message": map[string]any{"content": "a subagent turn that is no owner prompt at all here"}}),
-		ownerTurn(t, "2026-10-05T10:10:00Z", "<command-name>/clear</command-name>"), // turn 2
-		ownerTurn(t, "2026-10-05T10:20:00Z", "SELF-CHECK (owner automation, every 30 min). Count live workers and continue."), // turn 3
-		ownerTurn(t, "2026-10-05T10:30:00Z", "ok go on"),                                                                      // turn 4
+		ownerTurn(t, "2026-10-05T10:10:00Z", "<command-name>/clear</command-name>"),                                                                              // turn 2
+		ownerTurn(t, "2026-10-05T10:20:00Z", "SELF-CHECK (owner automation, every 30 min). Count live workers and continue."),                                    // turn 3
+		ownerTurn(t, "2026-10-05T10:30:00Z", "ok go on"),                                                                                                         // turn 4
 		ownerTurn(t, "2026-10-05T10:40:00Z", `<pasted_content id="2">a long paste of somebody else's words that the owner did not type</pasted_content id="2">`), // turn 5
-		ownerTurn(t, "2026-10-05T11:00:00Z", "tell me about the sourdough starter hydration notes in box b"), // turn 6
+		ownerTurn(t, "2026-10-05T11:00:00Z", "tell me about the sourdough starter hydration notes in box b"),                                                     // turn 6
 		toolTurn(t, "2026-10-05T11:01:00Z", read("box-b/baking.md")),
 		jsonLine(t, map[string]any{"type": "attachment", "timestamp": "2026-10-05T11:10:00Z", "attachment": map[string]any{
 			"type": "queued_command", "prompt": "check the nimbus flag status in staging before the canary", "origin": map[string]string{"kind": "human"}}}), // turn 7
