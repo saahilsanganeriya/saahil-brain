@@ -14,6 +14,8 @@ type Opts struct {
 	Deep  bool     // add personalized PageRank from the best matches and Seeds
 	Seeds []string // node ids of the active work, hubs or notes
 	Types []string // keep only these node types
+	// Hide drops nodes a pre-session index would not hold (offline evals replay a past session); nil keeps all.
+	Hide func(id string) bool
 }
 
 type Hit struct {
@@ -123,7 +125,7 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
-	cands, err := bm25Candidates(db, matchQuery(Salient(words, df, maxTerms, termBudget)))
+	cands, err := bm25Candidates(db, matchQuery(Salient(words, df, maxTerms, termBudget)), opts.Hide)
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +141,12 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 			cands[i].Relevance *= artifactRelevance
 		}
 	}
-	if cands, err = addMentions(db, cands, q, opts.Seeds); err != nil {
+	if cands, err = addMentions(db, cands, q, opts.Seeds, opts.Hide); err != nil {
 		return nil, err
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].Relevance > cands[j].Relevance })
 	if opts.Deep {
-		if cands, err = addProximity(db, cands, opts.Seeds); err != nil {
+		if cands, err = addProximity(db, cands, opts.Seeds, opts.Hide); err != nil {
 			return nil, err
 		}
 	}
@@ -154,7 +156,7 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 // addMentions puts the documents q names by path at full relevance plus wMention, a named folder's anchor
 // documents at anchorRel, and the folders and documents named like a named file (briefs/fix-7266.md →
 // evidence/fix-7266/) above every text match, by the match's strength.
-func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, error) {
+func addMentions(db *sql.DB, cands []cand, q string, seeds []string, hide func(string) bool) ([]cand, error) {
 	var boxes []string
 	for _, s := range seeds {
 		if b := BoxOf(s); b != "" {
@@ -162,6 +164,7 @@ func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, er
 		}
 	}
 	named, err := Mentions(db, q, boxes)
+	named = Visible(named, hide)
 	if err != nil || len(named) == 0 {
 		return cands, err
 	}
@@ -171,7 +174,7 @@ func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, er
 		if b := BoxOf(id); b != "" && !slices.Contains(boxes, b) {
 			boxes = append(boxes, b)
 		}
-		anchors, err := Anchors(db, id, anchorsPerDir)
+		anchors, err := Anchors(db, id, anchorsPerDir, hide)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +191,10 @@ func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, er
 		return nil, err
 	}
 	for id, strength := range own {
-		anchors, err := Anchors(db, id, anchorsPerDir)
+		if hidden(hide, id) {
+			continue
+		}
+		anchors, err := Anchors(db, id, anchorsPerDir, hide)
 		if err != nil {
 			return nil, err
 		}
@@ -230,30 +236,46 @@ func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, er
 	return cands, rows.Err()
 }
 
-func bm25Candidates(db *sql.DB, match string) ([]cand, error) {
+func bm25Candidates(db *sql.DB, match string, hide func(string) bool) ([]cand, error) {
 	if match == "" {
 		return nil, nil
+	}
+	limit := candidates
+	if hide != nil {
+		limit = ftsTop // hidden rows must not take the places of rows a pre-session index would rank
 	}
 	// rank inside FTS first: joining every match through the exclusions before the sort costs 100+ ms on a common word
 	rows, err := db.Query(`SELECT `+hitCols+`, m.b FROM (SELECT rowid AS r, bm25(fts, 0.0, 10.0, 8.0, 4.0, 1.0) AS b
 		FROM fts WHERE fts MATCH ? ORDER BY b LIMIT ?) m JOIN node n ON n.rowid = m.r `+rankable+` ORDER BY m.b LIMIT ?`,
-		match, ftsTop, candidates)
+		match, ftsTop, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []cand
-	for rows.Next() {
+	for rows.Next() && len(out) < candidates {
 		c, err := scanCand(rows, true)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, c)
+		if !hidden(hide, c.ID) {
+			out = append(out, c)
+		}
 	}
 	return out, rows.Err()
 }
 
-func addProximity(db *sql.DB, cands []cand, extraSeeds []string) ([]cand, error) {
+func hidden(hide func(string) bool, id string) bool { return hide != nil && hide(id) }
+
+// Visible keeps the ids hide does not drop, in place.
+func Visible(ids []string, hide func(string) bool) []string {
+	if hide == nil {
+		return ids
+	}
+	return slices.DeleteFunc(ids, hide)
+}
+
+func addProximity(db *sql.DB, cands []cand, extraSeeds []string, hide func(string) bool) ([]cand, error) {
 	seeds := map[string]float64{}
 	for i := 0; i < len(cands) && i < pprSeeds; i++ {
 		seeds[cands[i].ID] += cands[i].Relevance
@@ -304,7 +326,7 @@ func addProximity(db *sql.DB, cands []cand, extraSeeds []string) ([]cand, error)
 	}
 	var extra []scored
 	for id, p := range ppr {
-		if !have[id] {
+		if !have[id] && !hidden(hide, id) {
 			extra = append(extra, scored{id, p})
 		}
 	}

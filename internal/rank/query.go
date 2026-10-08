@@ -271,8 +271,8 @@ func anchorRank(kind, typ, p string) int {
 }
 
 // Anchors lists a folder's rankable documents (and those of its plans/ folder) in anchorRank order, newest first
-// within a rank, at most n.
-func Anchors(db *sql.DB, dir string, n int) ([]string, error) {
+// within a rank, at most n, without those hide drops.
+func Anchors(db *sql.DB, dir string, n int, hide func(string) bool) ([]string, error) {
 	rows, err := db.Query(`SELECT n.id, n.kind, n.type, n.path FROM edge e JOIN node n ON n.id = e.src `+rankable+`
 		AND e.rel = 'part_of' AND (e.dst = ?1 OR e.dst = ?1 || '/plans') ORDER BY n.mtime DESC, n.id LIMIT 400`, dir)
 	if err != nil {
@@ -289,7 +289,9 @@ func Anchors(db *sql.DB, dir string, n int) ([]string, error) {
 		if err := rows.Scan(&id, &kind, &typ, &p); err != nil {
 			return nil, err
 		}
-		docs = append(docs, doc{id, anchorRank(kind, typ, p)})
+		if !hidden(hide, id) {
+			docs = append(docs, doc{id, anchorRank(kind, typ, p)})
+		}
 	}
 	sort.SliceStable(docs, func(i, j int) bool { return docs[i].rank < docs[j].rank })
 	var out []string

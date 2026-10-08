@@ -1,6 +1,10 @@
 package hooks
 
-import "database/sql"
+import (
+	"database/sql"
+
+	"saahil.local/brain/internal/rank"
+)
 
 // EvalRanker is the prompt hook's ranking for offline evals: the same name dictionary, the same seeds a session
 // without a start record gets (the work matched from its folder), live mode, nothing injected or recorded.
@@ -21,8 +25,8 @@ func NewEvalRanker(env Env, db *sql.DB) (*EvalRanker, error) {
 	return &EvalRanker{env: env, db: db, names: nm}, nil
 }
 
-func (r *EvalRanker) Pointers(prompt, cwd string) []string {
-	lk, err := r.Lookup(prompt, cwd)
+func (r *EvalRanker) Pointers(prompt, cwd string, hide func(id string) bool) []string {
+	lk, err := r.Lookup(prompt, cwd, hide)
 	if err != nil {
 		return nil
 	}
@@ -33,11 +37,12 @@ func (r *EvalRanker) Pointers(prompt, cwd string) []string {
 	return ids
 }
 
-// Lookup is the whole ranking for a prompt (candidates, best score, abstention), for diagnosing an eval.
-func (r *EvalRanker) Lookup(prompt, cwd string) (Lookup, error) {
-	seeds := Seeds{Folder: folderName(cwd)}
-	if box := workByFolder(r.env, cwd, nil); box != "" {
-		seeds.Work, seeds.Hubs = []string{box}, hubsByName(r.env.Root, box)
+// Lookup is the whole ranking for a prompt (candidates, best score, abstention), for diagnosing an eval. hide drops
+// what a pre-session index would not hold, the session's work box and hubs included.
+func (r *EvalRanker) Lookup(prompt, cwd string, hide func(id string) bool) (Lookup, error) {
+	seeds := Seeds{Folder: folderName(cwd), Hide: hide}
+	if box := workByFolder(r.env, cwd, nil); box != "" && (hide == nil || !hide("work/"+box)) {
+		seeds.Work, seeds.Hubs = []string{box}, rank.Visible(hubsByName(r.env.Root, box), hide)
 	}
 	return Pointers(r.db, prompt, seeds, r.names)
 }

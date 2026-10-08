@@ -16,7 +16,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"saahil.local/brain/internal/config"
 	"sort"
 	"strings"
 	"time"
@@ -279,6 +278,7 @@ type BuildOptions struct {
 type builder struct {
 	ix      *index.Index
 	root    string
+	exist   *existence
 	skipped map[string]int
 }
 
@@ -291,9 +291,12 @@ func Build(ix *index.Index, opt BuildOptions) (Sets, error) {
 	if opt.NavFrom.IsZero() {
 		opt.NavFrom = DefaultNavFrom
 	}
-	b := &builder{ix: ix, root: ix.Root, skipped: map[string]int{}}
+	exist, err := newExistence(ix.Root, ix.DB())
+	if err != nil {
+		return Sets{}, err
+	}
+	b := &builder{ix: ix, root: ix.Root, exist: exist, skipped: map[string]int{}}
 	sets := Sets{}
-	var err error
 	if sets.Navigation, sets.Mistakes, err = b.sessions(opt.NavFrom, opt.Cut); err != nil {
 		return sets, err
 	}
@@ -372,9 +375,10 @@ func (b *builder) sessions(navFrom, cut time.Time) ([]NavItem, []MistakeItem, er
 	return nav, mistakes, nil
 }
 
-// targets resolves a session's files to indexed docs and artifacts (a byte copy counts as its canonical); generic
-// files, folders, other sessions, files the index never saw (repo code) and files the session itself created (they did
-// not exist when its first prompt was typed, so no brain could have pointed at them) are dropped.
+// targets resolves a session's files to indexed docs and data files (a byte copy counts as its canonical); generic
+// files, folders (a bulk folder's summary node too: no session reads a folder as a file), other sessions, files the
+// index never saw (repo code) and files the session itself created (they did not exist when its first prompt was
+// typed, so no brain could have pointed at them) are dropped.
 func (b *builder) targets(files []string, started time.Time) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -388,13 +392,13 @@ func (b *builder) targets(files []string, started time.Time) []string {
 		}
 		var kind, typ, p, canonical string
 		if b.ix.DB().QueryRow(`SELECT kind, type, path, canonical_of FROM node WHERE id = ?`, id).Scan(&kind, &typ, &p, &canonical) != nil ||
-			(kind != "doc" && kind != "artifact") || typ == "session" {
+			(kind != "doc" && kind != "artifact") || typ == "session" || typ == "bulk" || typ == "repo" {
 			continue
 		}
 		if canonical != "" {
 			_ = b.ix.DB().QueryRow(`SELECT path FROM node WHERE id = ?`, canonical).Scan(&p)
 		}
-		if born := birthTime(b.absPath(p)); !born.IsZero() && !started.IsZero() && !born.Before(started) {
+		if !b.exist.before(p, started) {
 			b.skipped["navigation: target created by the session itself"]++
 			continue
 		}
@@ -692,14 +696,4 @@ func readLines[T any](p string, out *[]T) error {
 		*out = append(*out, it)
 	}
 	return nil
-}
-
-// absPath is a node path on this machine's disk: work/… lives in the shadow saahil-docs until the cut-over fills <brain>/work.
-func (b *builder) absPath(p string) string {
-	if rest, ok := strings.CutPrefix(p, "work/"); ok {
-		if _, err := os.Stat(filepath.Join(config.BrainRoot(), ".brain", "live")); err != nil {
-			return filepath.Join(config.LaptopHome, "Documents", "work-repo", "saahil-docs", rest)
-		}
-	}
-	return filepath.Join(config.BrainRoot(), p)
 }

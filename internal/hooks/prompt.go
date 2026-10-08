@@ -96,6 +96,8 @@ type Lookup struct {
 type Seeds struct {
 	Work, Hubs []string
 	Folder     string
+	// Hide drops nodes a pre-session index would not hold (offline evals replay a past session); nil keeps all.
+	Hide func(id string) bool
 }
 
 type cand struct {
@@ -135,6 +137,7 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	if err != nil {
 		return lk, err
 	}
+	mentioned = rank.Visible(mentioned, seeds.Hide)
 	own, related, err := sessionFolders(db, seeds, mentioned)
 	if err != nil {
 		return lk, err
@@ -146,11 +149,11 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	for _, w := range seeds.Work {
 		folders["work/"+w] = max(folders["work/"+w], workFolder)
 	}
-	named, err := fetch(db, hits)
+	named, err := fetch(db, hits, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
-	direct, err := pointed(db, mentioned, folders, own)
+	direct, err := pointed(db, mentioned, folders, own, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
@@ -159,7 +162,7 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 		return lk, nil
 	}
 	terms := nm.salientTerms(text, phrases)
-	textCands, err := query(db, terms)
+	textCands, err := query(db, terms, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
@@ -226,14 +229,20 @@ func sessionFolders(db *sql.DB, seeds Seeds, mentioned []string) (own, related m
 	if own, err = rank.MatchFolders(db, boxes, []string{seeds.Folder}); err != nil {
 		return nil, nil, err
 	}
-	related, err = rank.MatchFolders(db, boxes, stems)
-	return own, related, err
+	if related, err = rank.MatchFolders(db, boxes, stems); err != nil {
+		return nil, nil, err
+	}
+	if seeds.Hide != nil {
+		maps.DeleteFunc(own, func(id string, _ float64) bool { return seeds.Hide(id) })
+		maps.DeleteFunc(related, func(id string, _ float64) bool { return seeds.Hide(id) })
+	}
+	return own, related, nil
 }
 
 // pointed loads the documents the prompt names (mention 1), those they link to (linkShare), and the anchor
 // documents of named or session folders (folder strength, less for each later anchor); own marks what came from
 // a folder or document named like the session.
-func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([]cand, error) {
+func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64, hide func(string) bool) ([]cand, error) {
 	mention, folder, isOwn := map[string]float64{}, map[string]float64{}, map[string]bool{}
 	for _, id := range mentioned {
 		if isDir(db, id) {
@@ -250,7 +259,7 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([
 			isOwn[dir] = isOwn[dir] || mine
 			continue
 		}
-		anchors, err := rank.Anchors(db, dir, anchorsPer)
+		anchors, err := rank.Anchors(db, dir, anchorsPer, hide)
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +291,7 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([
 	for id, w := range folder {
 		ids[id] = max(ids[id], w)
 	}
-	out, err := fetch(db, ids)
+	out, err := fetch(db, ids, hide)
 	for i := range out {
 		out[i].alias = 0
 		// a document the prompt spells is already in hand; own is what the session's name adds
@@ -298,10 +307,12 @@ func isDir(db *sql.DB, id string) bool {
 }
 
 // fetch loads the named nodes that may be ranked, strongest names first.
-func fetch(db *sql.DB, hits map[string]float64) ([]cand, error) {
+func fetch(db *sql.DB, hits map[string]float64, hide func(string) bool) ([]cand, error) {
 	ids := make([]string, 0, len(hits))
 	for id := range hits {
-		ids = append(ids, id)
+		if hide == nil || !hide(id) {
+			ids = append(ids, id)
+		}
 	}
 	sort.Slice(ids, func(i, j int) bool {
 		return hits[ids[i]] > hits[ids[j]] || (hits[ids[i]] == hits[ids[j]] && ids[i] < ids[j])
@@ -331,23 +342,30 @@ func fetch(db *sql.DB, hits map[string]float64) ([]cand, error) {
 }
 
 // query ranks by BM25 over title, aliases and summary (DESIGN §5) for any of the terms.
-func query(db *sql.DB, terms []string) ([]cand, error) {
+func query(db *sql.DB, terms []string, hide func(string) bool) ([]cand, error) {
 	if len(terms) == 0 {
 		return nil, nil
 	}
+	limit := textCands
+	if hide != nil {
+		limit = ftsTop // hidden rows must not take the places of rows a pre-session index would rank
+	}
 	rows, err := db.Query(`SELECT `+candCols+`, m.b FROM (SELECT rowid AS r, bm25(fts, 0.0, 10.0, 8.0, 4.0, 0.0) AS b
 		FROM fts WHERE fts MATCH ? ORDER BY b LIMIT ?) m JOIN node n ON n.rowid = m.r `+rankable+` ORDER BY m.b LIMIT ?`,
-		matchExpr(terms), ftsTop, textCands)
+		matchExpr(terms), ftsTop, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []cand
-	for rows.Next() {
+	for rows.Next() && len(out) < textCands {
 		var c cand
 		var b float64
 		if err := rows.Scan(&c.id, &c.kind, &c.typ, &c.path, &c.title, &c.summary, &c.hubs, &c.shown, &b); err != nil {
 			return nil, err
+		}
+		if hide != nil && hide(c.id) {
+			continue
 		}
 		c.rel = -b / (-b + relHalf)
 		out = append(out, c)
@@ -455,6 +473,9 @@ func hop(db *sql.DB, cands []cand, seeds Seeds) ([]cand, error) {
 		if err := rows.Scan(&src, &dst, &rel); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if seeds.Hide != nil && (seeds.Hide(src) || seeds.Hide(dst)) {
+			continue
 		}
 		if _, ok := weight[src]; ok {
 			links = append(links, link{src, dst, rel})
