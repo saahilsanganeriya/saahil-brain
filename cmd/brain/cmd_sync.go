@@ -129,6 +129,13 @@ func cmdSync(args []string) int {
 	cmd := exec.Command(unison, uargs...)
 	out, _ := cmd.CombinedOutput()
 	rec.Ended, rec.ExitCode = time.Now().UTC(), cmd.ProcessState.ExitCode()
+	// exit 2 is a file that failed to transfer, usually one a live agent wrote during the run: one more pass carries it
+	if rec.ExitCode == 2 && !*dry {
+		fmt.Println("unison exit 2 (a file failed to transfer, often one written during the run): one more pass")
+		cmd = exec.Command(unison, uargs...)
+		out, _ = cmd.CombinedOutput()
+		rec.Ended, rec.ExitCode = time.Now().UTC(), cmd.ProcessState.ExitCode()
+	}
 	_ = os.WriteFile(filepath.Join(config.StateDir(), "unison-last.out"), out, 0o600)
 	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(out), "\r", "\n")), "\n")
 	rec.Summary = lines[len(lines)-1]
