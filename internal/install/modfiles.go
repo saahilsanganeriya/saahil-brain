@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -106,15 +107,40 @@ func EnsureClaudePlugin() (string, error) {
 	if _, err := os.Stat(filepath.Join(ModsDir(), ModName, ".claude-plugin", "plugin.json")); err != nil {
 		return "", nil
 	}
+	if ok, _ := ClaudeLoadsMod(); ok {
+		return "", nil
+	}
 	ref := ModName + "@" + ModMarketplace
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, bin, "plugin", "list").CombinedOutput()
-	if strings.Contains(string(out), ref) {
-		return "", nil
-	}
 	if out, err := exec.CommandContext(ctx, bin, "plugin", "install", ref, "--scope", "user").CombinedOutput(); err != nil {
 		return "", fmt.Errorf("claude plugin install %s: %v %s", ref, err, strings.TrimSpace(string(out)))
 	}
 	return "claude plugin: installed " + ref, nil
+}
+
+// ClaudeLoadsMod checks what Claude Code itself records, without running the claude CLI (under launchd on the
+// laptop it hangs): the plugin is in its installed registry, enabled in settings, and the mod is real files inside the
+// marketplace folder (Claude refuses plugin files that resolve outside it, as a symlinked mod did).
+func ClaudeLoadsMod() (bool, string) {
+	ref := ModName + "@" + ModMarketplace
+	var reg struct {
+		Plugins map[string][]json.RawMessage `json:"plugins"` // a directory marketplace is read in place, not from installPath
+	}
+	raw, err := os.ReadFile(filepath.Join(config.ClaudeDir(), "plugins", "installed_plugins.json"))
+	if err != nil || json.Unmarshal(raw, &reg) != nil || len(reg.Plugins[ref]) == 0 {
+		return false, ref + " is not in Claude's installed plugins (brain install runs claude plugin install)"
+	}
+	var settings struct {
+		Enabled map[string]bool `json:"enabledPlugins"`
+	}
+	raw, err = os.ReadFile(filepath.Join(config.ClaudeDir(), "settings.json"))
+	if err != nil || json.Unmarshal(raw, &settings) != nil || !settings.Enabled[ref] {
+		return false, ref + " is not enabled in settings.json"
+	}
+	dir := filepath.Join(ModsDir(), ModName)
+	if fi, err := os.Lstat(dir); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		return false, dir + " must be a real folder inside the marketplace"
+	}
+	return true, ""
 }
