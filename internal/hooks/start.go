@@ -29,6 +29,11 @@ const (
 	sessionScanTime  = 120 * time.Millisecond
 )
 
+const (
+	startHeader = "# Brain start digest (pointers, not instructions: brain_search / brain_show for more)"
+	taskHeader  = "# Brain digest for this task, picked by its first prompt (pointers, not instructions)"
+)
+
 type Digest struct {
 	Text    string
 	Sources []string // what made it in, by brain path (hot.md, work/<box>/STATE.md, hub:<id>)
@@ -38,7 +43,9 @@ type Digest struct {
 }
 
 // Start builds the start digest and returns the hook's stdout: the digest when live, nothing in shadow (where the
-// lookup row records its size and sources).
+// lookup row records its size and sources). A new session gets what no prompt changes (hot.md) and owes the work
+// part to its first prompt; a session past its first prompt (resumed, compacted) gets the whole digest of the work
+// that prompt picked; a subagent, and a host with no prompt hook (Cursor), get the whole digest now.
 func Start(env Env, in Input) ([]byte, error) {
 	started := env.Now()
 	ix, err := env.openIndex()
@@ -56,12 +63,24 @@ func Start(env Env, in Input) ([]byte, error) {
 			return byBox[box]
 		}
 	}
-	d := BuildDigest(env, in.cwd(), aliases)
 	env.pruneStates()
-	if session := in.session(); session != "" {
-		st, _ := env.loadState(session)
-		st.Work, st.Hubs = d.Work, d.Hubs
-		_ = env.saveState(session, st)
+	session := in.session()
+	st, had := env.loadState(session)
+	var d Digest
+	switch {
+	case had && !st.DigestOwed:
+		d = composeDigest(env, startHeader, true, st.Work, config.DigestMaxChars, nil)
+	case in.Event == "SubagentStart" || in.Event == "sessionStart":
+		d = composeDigest(env, startHeader, true, cwdWork(env, in.cwd(), aliases, nil), config.DigestMaxChars, nil)
+		if in.Event == "sessionStart" && session != "" {
+			_ = env.saveState(session, state{Work: d.Work, Hubs: d.Hubs})
+		}
+	default:
+		d = composeDigest(env, startHeader, true, nil, config.DigestMaxChars, nil)
+		if session != "" {
+			_ = env.saveState(session, state{CwdWork: cwdWork(env, in.cwd(), aliases, nil), DigestOwed: true,
+				DigestChars: utf8.RuneCountInString(d.Text)})
+		}
 	}
 	live := env.Live()
 	if ix != nil {
@@ -78,18 +97,14 @@ func Start(env Env, in Input) ([]byte, error) {
 	return Output(event, d.Text), nil
 }
 
-// BuildDigest: hot.md, then the current work's STATE.md head and CARD.md, then its hubs' start-here lists, cut to
-// 8,000 chars. aliases (optional) lists CARD aliases per box from the index for the folder-name match.
-func BuildDigest(env Env, cwd string, aliases func(string) []string) Digest {
-	return buildDigest(env, cwd, aliases, nil)
-}
-
-// buildDigest reads only the brain paths visible accepts (session notes, work box folders, the files it quotes);
-// nil accepts all.
-func buildDigest(env Env, cwd string, aliases func(string) []string, visible func(string) bool) Digest {
-	var d Digest
+// composeDigest: hot.md when withHot, then each work box's STATE.md head and CARD.md, then its hubs' start-here
+// lists, under header, cut to limit chars. visible (nil accepts all) says which brain paths a replay may read:
+// session notes, work box folders and the files it quotes.
+func composeDigest(env Env, header string, withHot bool, work []string, limit int, visible func(string) bool) Digest {
+	d := Digest{Work: work}
 	seen := func(p string) bool { return visible == nil || visible(p) }
 	var b strings.Builder
+	budget := limit - utf8.RuneCountInString(header) - 2
 	add := func(source, title, text string, most int) {
 		text = strings.TrimSpace(text)
 		if text == "" {
@@ -99,7 +114,7 @@ func buildDigest(env Env, cwd string, aliases func(string) []string, visible fun
 			text = cutRunes(text, most) + "…"
 		}
 		block := "## " + title + "\n\n" + text + "\n\n"
-		room := config.DigestMaxChars - utf8.RuneCountInString(b.String())
+		room := budget - utf8.RuneCountInString(b.String())
 		if room < 200 {
 			return
 		}
@@ -110,12 +125,11 @@ func buildDigest(env Env, cwd string, aliases func(string) []string, visible fun
 		d.Sources = append(d.Sources, source)
 		d.Blocks = append(d.Blocks, block)
 	}
-	if hot, err := os.ReadFile(filepath.Join(env.Root, "hot.md")); err == nil && seen("hot.md") {
+	if hot, err := os.ReadFile(filepath.Join(env.Root, "hot.md")); withHot && err == nil && seen("hot.md") {
 		add("hot.md", "This week (hot.md)", parse.Markdown(hot).Body, hotChars)
 	}
-	d.Work = currentWork(env, cwd, aliases, visible)
 	var hubs []string
-	for _, box := range d.Work {
+	for _, box := range work {
 		dir := env.workDir(box)
 		var raw, card string
 		if seen("work/" + box + "/STATE.md") {
@@ -148,28 +162,64 @@ func buildDigest(env Env, cwd string, aliases func(string) []string, visible fun
 		}
 	}
 	if b.Len() > 0 {
-		d.Text = "# Brain start digest (pointers, not instructions: brain_search / brain_show for more)\n\n" + strings.TrimSpace(b.String())
-		d.Text = cutRunes(d.Text, config.DigestMaxChars)
+		d.Text = cutRunes(header+"\n\n"+strings.TrimSpace(b.String()), limit)
 	}
 	return d
 }
 
-// currentWork: the work boxes of the latest session note for this cwd, else the box whose name or CARD aliases
-// best match the worktree folder; only boxes that exist.
-func currentWork(env Env, cwd string, aliases func(string) []string, visible func(string) bool) []string {
-	if cwd == "" {
-		return nil
-	}
+// pickWork: the boxes the first prompt names, most named first, else the cwd's; ≤ 2, only boxes that exist.
+func pickWork(env Env, named, cwdBoxes []string, visible func(string) bool) []string {
 	var out []string
-	for _, box := range worksFromSessions(env.Root, cwd, visible) {
-		if env.workDir(box) != "" && (visible == nil || visible("work/"+box)) && len(out) < maxWorks {
+	for _, box := range named {
+		if len(out) < maxWorks && env.workDir(box) != "" && (visible == nil || visible("work/"+box)) {
 			out = append(out, box)
 		}
 	}
 	if len(out) > 0 {
 		return out
 	}
-	if box := workByFolder(env, cwd, aliases, visible); box != "" {
+	return cwdBoxes
+}
+
+// folderWork is cwdWork from the folder name alone, cheap enough for a prompt with no start record.
+func folderWork(env Env, cwd string) []string {
+	if box := workByFolder(env, cwd, nil, nil); box != "" && !idleBox(env, box, nil) {
+		return []string{box}
+	}
+	return nil
+}
+
+// idleBox: the box's CARD.md, when visible, says paused or done.
+func idleBox(env Env, box string, visible func(string) bool) bool {
+	dir := env.workDir(box)
+	if dir == "" || (visible != nil && !visible("work/"+box+"/CARD.md")) {
+		return false
+	}
+	head, err := readHead(filepath.Join(dir, "CARD.md"), config.CardMaxBytes)
+	if err != nil {
+		return false
+	}
+	status := parse.Markdown([]byte(head)).Status
+	return status == "paused" || status == "done"
+}
+
+// cwdWork: the work boxes of the latest session note for this cwd, else the box whose name or CARD aliases best
+// match the worktree folder; only boxes that exist, and none whose CARD is paused or done (a prompt may still name
+// those).
+func cwdWork(env Env, cwd string, aliases func(string) []string, visible func(string) bool) []string {
+	if cwd == "" {
+		return nil
+	}
+	var out []string
+	for _, box := range worksFromSessions(env.Root, cwd, visible) {
+		if env.workDir(box) != "" && (visible == nil || visible("work/"+box)) && !idleBox(env, box, visible) && len(out) < maxWorks {
+			out = append(out, box)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	if box := workByFolder(env, cwd, aliases, visible); box != "" && !idleBox(env, box, visible) {
 		return []string{box}
 	}
 	return nil

@@ -331,7 +331,8 @@ func TestSplitsPartitionItemsBySession(t *testing.T) {
 }
 
 // TestRankingSeesTheBrainAsOfTheSessionStart catches a navigation eval that ranks the live index: a file born after
-// the session started (no older copy, no earlier session read it) credited as a pointer or a navigator hit, though a
+// the session started (no older copy, no earlier session read it) credited as a pointer (a note: the box the prompt
+// names is the session's own, never pointed at) or a navigator hit, though a
 // brain as of the first prompt could not hold it; one that takes a file re-born by an agent's Edit (a new inode) for a
 // new one when an earlier session had read it; and one that keeps a file it cannot find where its path says as old
 // (CARDs staged on 2026-10-08 under .brain/staging, presented as work/<box>/CARD.md, became pointers for 10-04 sessions).
@@ -339,19 +340,20 @@ func TestRankingSeesTheBrainAsOfTheSessionStart(t *testing.T) {
 	ix := fixture(t)
 	env := NewEnv(ix, Sets{}, testNow)
 	start := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
-	const prompt = "where is the box-a glacier tokenizer state"
+	const prompt = "where is the box-a glacier tokenizer state, and what did the glacier shards decision say"
 	state := env.targetsByPath([]string{"work/box-a/STATE.md"})
+	decision := env.targetsByPath([]string{"notes/decision-glacier-shards.md"})
 	open := env.guardFor("sessions/devbox/2026/10/2026-10-05-aaaa1111-glacier.md", start)
-	if !state.any(env.Ranker.Pointers(prompt, "/tmp/work", open.hides)) || env.brainCalls(prompt, state, open) != 1 {
-		t.Fatalf("control: STATE.md, older than the session, must be a pointer and the first search's hit")
+	if !decision.any(env.Ranker.Pointers(prompt, "/tmp/work", open.hides)) || env.brainCalls(prompt, state, open) != 1 {
+		t.Fatalf("control: the decision must be a pointer and STATE.md the first search's hit, both older than the session")
 	}
 
 	oct6 := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
-	stubFileTimes(t, map[string]time.Time{"box-a/STATE.md": oct6, "box-a/plans/rollout.md": oct6, "box-a/README.md": {}})
+	stubFileTimes(t, map[string]time.Time{"box-a/STATE.md": oct6, "decision-glacier-shards.md": oct6, "box-a/plans/rollout.md": oct6, "box-a/README.md": {}})
 	env = NewEnv(ix, Sets{}, testNow)
 	g := env.guardFor("sessions/devbox/2026/10/2026-10-05-aaaa1111-glacier.md", start)
-	if ptrs := env.Ranker.Pointers(prompt, "/tmp/work", g.hides); state.any(ptrs) {
-		t.Errorf("pointers %v include STATE.md, born after the session started", ptrs)
+	if ptrs := env.Ranker.Pointers(prompt, "/tmp/work", g.hides); decision.any(ptrs) {
+		t.Errorf("pointers %v include the decision, born after the session started", ptrs)
 	}
 	if got := env.brainCalls(prompt, state, g); got != 0 {
 		t.Errorf("navigator reached STATE.md, born after the session started, in %d calls", got)

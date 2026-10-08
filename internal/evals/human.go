@@ -745,7 +745,11 @@ func (e *Env) humanRows(items []HumanItem) ([]HumanRow, error) {
 		r.Pointers = e.Ranker.Pointers(q, it.CWD, g.hides)
 		r.Top3 = t.any(r.Pointers)
 		r.Calls = e.brainCalls(q, t, g)
-		l0, err := e.levelZero(it.CWD, g)
+		first := q // the work digest follows the session's first prompt, not this turn's
+		if it.Turn > 0 {
+			first = taskText(ps[0])
+		}
+		l0, err := e.levelZero(it.CWD, first, g)
 		if err != nil {
 			return nil, fmt.Errorf("%s: L0: %w", it.ID, err)
 		}

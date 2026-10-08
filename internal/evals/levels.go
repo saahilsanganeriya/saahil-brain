@@ -37,14 +37,15 @@ func reach(t targetSet, l0, pointers []string, l2Calls int) (calls int, level st
 }
 
 // levelZero lists what a session that started at g.start held at L0: the ids linked from MEMORY.md as it would have
-// rendered then, and from the start digest the start hook would have built for its cwd.
-func (e *Env) levelZero(cwd string, g leakGuard) ([]string, error) {
+// rendered then, and from the digest the hooks would have built by its first prompt (the work that prompt names,
+// else its cwd's).
+func (e *Env) levelZero(cwd, prompt string, g leakGuard) ([]string, error) {
 	memory, err := e.memoryIndexAsOf(g)
 	if err != nil {
 		return nil, err
 	}
 	links := linkedIDs(e.Index, "memory/MEMORY.md", memory, memory)
-	d := hooks.DigestAsOf(e.hooks, cwd, e.digestVisible(g))
+	d := hooks.DigestAsOf(e.hooks, e.Index.DB(), cwd, prompt, e.digestVisible(g))
 	for i, source := range d.Sources {
 		if hub, ok := strings.CutPrefix(source, "hub:"); ok {
 			source = "hubs/" + hub + ".md"

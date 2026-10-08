@@ -11,14 +11,17 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/rank"
 )
 
 // Ranking for L1 (DESIGN §5). The alias gate comes first: a prompt that names nothing the brain knows by alias,
-// hub id or title gets no pointers. Then BM25 over title, aliases and summary, one graph hop from the named nodes,
-// the best matches, the active work and its hubs, scope fit and a type prior.
+// hub id, title or path gets no pointers. Then BM25 over title, aliases and summary, one graph hop from the named
+// nodes, the best matches, the active work and its hubs, scope fit and a type prior. What the session already holds
+// never takes a slot (its own work box, the brief it was pasted from), facts rank above raw work docs, and another
+// box's work doc needs the prompt to name it or to be the single best match.
 const (
 	ftsTop        = 300
 	textCands     = 40
@@ -42,6 +45,8 @@ const (
 	anchorStep  = 0.15 // each later anchor of a folder counts this much less
 	anchorsPer  = 3
 	exploreFrac = 0.85 // the explore slot takes a note scoring ≥ this share of the threshold
+	nameHit     = 0.3  // a name hit this strong names its node: a multi-word name, or one rare word
+	boxNameHit  = 0.8  // a CARD alias hit this strong names its box: a multi-word alias with a rare word
 )
 
 // Threshold is the score the best pointer must reach or the hook abstains. Calibrated on the 209 real prompts
@@ -92,10 +97,9 @@ type Lookup struct {
 	Abstained  bool
 }
 
-// Seeds are the session's context: its work boxes and their hubs, and its folder's name (a worktree's slug).
+// Seeds are the session's context: its work boxes (picked by its first prompt) and their hubs.
 type Seeds struct {
 	Work, Hubs []string
-	Folder     string
 	// Hide drops nodes a pre-session index would not hold (offline evals replay a past session); nil keeps all.
 	Hide func(id string) bool
 }
@@ -106,7 +110,6 @@ type cand struct {
 	rel                                       float64 // saturated BM25, 0 for graph-only candidates
 	alias, prox, scope                        float64
 	mention, folder                           float64
-	own                                       bool // named like the session's folder
 	echo                                      bool // the prompt holds its text
 	via, viaRel                               string
 	score                                     float64
@@ -128,42 +131,86 @@ const rankable = `
 const candCols = `n.id, n.kind, n.type, n.path, n.title, n.summary, n.hubs, coalesce(s.shown, 0)`
 
 // Pointers ranks the index for a prompt and picks ≤ 3 pointers, or abstains. nm is the alias gate's dictionary.
-// The gate passes when the prompt names something (a note by alias, a path, a work box) or the session's folder
-// names a folder or doc; the work box the session runs in only adds its anchors.
 func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error) {
+	q, err := readPrompt(db, prompt, seeds.Work, nm)
+	if err != nil {
+		return Lookup{}, err
+	}
+	return pointers(db, q, seeds, nm)
+}
+
+// promptRead is what a prompt names: nodes by name (alias, id, title), and paths and box names it spells.
+type promptRead struct {
+	text      string
+	hits      map[string]float64
+	phrases   []string
+	mentioned []string
+}
+
+// readPrompt reads the names a prompt spells; a relative path is tried under boxes and the boxes the prompt names.
+func readPrompt(db *sql.DB, prompt string, boxes []string, nm *Names) (promptRead, error) {
+	q := promptRead{text: cleanPrompt(prompt)}
+	if nm != nil {
+		// names count in prose only: inside a path they are folder names, which mentions and folders already read
+		q.hits, q.phrases = nm.match(tokenRE.FindAllString(strings.ToLower(pathRE.ReplaceAllString(q.text, " ")), -1))
+	}
+	var err error
+	q.mentioned, err = rank.Mentions(db, q.text, boxes)
+	return q, err
+}
+
+// namedBoxes are the boxes the prompt names, most named first: by a path or box name in them, or by a CARD alias.
+func (q promptRead) namedBoxes() []string {
+	count, first := map[string]int{}, map[string]int{}
+	note := func(box string) {
+		if _, ok := first[box]; !ok {
+			first[box] = len(first)
+		}
+		count[box]++
+	}
+	for _, id := range q.mentioned {
+		if b := rank.BoxOf(id); b != "" {
+			note(b)
+		}
+	}
+	for id, w := range q.hits {
+		if b := rank.BoxOf(id); b != "" && w >= boxNameHit && strings.HasSuffix(id, "/CARD.md") {
+			note(b)
+		}
+	}
+	boxes := slices.Collect(maps.Keys(count))
+	sort.Slice(boxes, func(i, j int) bool {
+		a, b := boxes[i], boxes[j]
+		return count[a] > count[b] || (count[a] == count[b] && first[a] < first[b])
+	})
+	return boxes
+}
+
+// pointers ranks for a read prompt. The gate passes when the prompt names something: a note by name, a path or a
+// work box.
+func pointers(db *sql.DB, q promptRead, seeds Seeds, nm *Names) (Lookup, error) {
 	var lk Lookup
-	text := cleanPrompt(prompt)
-	// names count in prose only: inside a path they are folder names, which mentions and folders already read
-	hits, phrases := nm.match(tokenRE.FindAllString(strings.ToLower(pathRE.ReplaceAllString(text, " ")), -1))
-	mentioned, err := rank.Mentions(db, text, seeds.Work)
+	mentioned := rank.Visible(q.mentioned, seeds.Hide)
+	folders, err := relatedFolders(db, seeds, mentioned)
 	if err != nil {
 		return lk, err
-	}
-	mentioned = rank.Visible(mentioned, seeds.Hide)
-	own, related, err := sessionFolders(db, seeds, mentioned)
-	if err != nil {
-		return lk, err
-	}
-	folders := maps.Clone(related)
-	for id, w := range own {
-		folders[id] = max(folders[id], w)
 	}
 	for _, w := range seeds.Work {
 		folders["work/"+w] = max(folders["work/"+w], workFolder)
 	}
-	named, err := fetch(db, hits, seeds.Hide)
+	named, err := fetch(db, q.hits, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
-	direct, err := pointed(db, mentioned, folders, own, seeds.Hide)
+	direct, err := pointed(db, mentioned, folders, seeds.Hide)
 	if err != nil {
 		return lk, err
 	}
-	if spelled := len(named) > 0 || len(mentioned) > 0 || len(own) > 0 || len(related) > 0; !spelled || len(named)+len(direct) == 0 {
+	if len(named)+len(mentioned) == 0 || len(named)+len(direct) == 0 {
 		lk.Abstained = true
 		return lk, nil
 	}
-	terms := nm.salientTerms(text, phrases)
+	terms := nm.salientTerms(q.text, q.phrases)
 	textCands, err := query(db, terms, seeds.Hide)
 	if err != nil {
 		return lk, err
@@ -190,40 +237,38 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	sort.SliceStable(cands, func(i, j int) bool {
 		return cands[i].score > cands[j].score || (cands[i].score == cands[j].score && cands[i].id < cands[j].id)
 	})
-	cands = dedupe(cands)
-	if err := markEchoes(db, cands, text); err != nil {
+	if cands, err = held(db, dedupe(cands), seeds, q.namedBoxes()); err != nil {
 		return lk, err
 	}
 	for i := 0; i < len(cands) && i < 10; i++ {
 		lk.Candidates = append(lk.Candidates, cands[i].id)
 	}
+	if err := markEchoes(db, cands, q.text); err != nil {
+		return lk, err
+	}
+	var answers []cand
 	for _, c := range cands {
 		if c.answer() {
-			lk.Best = round3(c.score)
-			break
+			answers = append(answers, c)
 		}
+	}
+	if len(answers) > 0 {
+		lk.Best = round3(answers[0].score)
 	}
 	if lk.Best < Threshold {
 		lk.Abstained = true
 		return lk, nil
 	}
-	var chosen []cand
-	for _, c := range cands {
-		if c.answer() && c.score >= Threshold && len(chosen) < config.MaxPointers {
-			chosen = append(chosen, c)
-		}
-	}
-	chosen = ownSlot(chosen, cands)
-	chosen = explore(chosen, cands)
+	chosen := explore(choose(answers), answers)
 	for _, c := range chosen {
 		lk.Chosen = append(lk.Chosen, Pointer{ID: c.id, Path: c.path, Line: oneLine(c), Edge: bestEdge(c, seeds), Score: round3(c.score)})
 	}
 	return lk, nil
 }
 
-// sessionFolders finds folders and documents, in the session's work box or a box the prompt names, named like the
-// session's folder (own) or like a file the prompt names (related), by strength.
-func sessionFolders(db *sql.DB, seeds Seeds, mentioned []string) (own, related map[string]float64, err error) {
+// relatedFolders finds folders and documents, in the session's work box or a box the prompt names, named like a
+// file the prompt names, by strength.
+func relatedFolders(db *sql.DB, seeds Seeds, mentioned []string) (map[string]float64, error) {
 	boxes := slices.Clone(seeds.Work)
 	var stems []string
 	for _, id := range mentioned {
@@ -232,24 +277,20 @@ func sessionFolders(db *sql.DB, seeds Seeds, mentioned []string) (own, related m
 		}
 		stems = append(stems, strings.TrimSuffix(path.Base(id), path.Ext(id)))
 	}
-	if own, err = rank.MatchFolders(db, boxes, []string{seeds.Folder}); err != nil {
-		return nil, nil, err
-	}
-	if related, err = rank.MatchFolders(db, boxes, stems); err != nil {
-		return nil, nil, err
+	related, err := rank.MatchFolders(db, boxes, stems)
+	if err != nil {
+		return nil, err
 	}
 	if seeds.Hide != nil {
-		maps.DeleteFunc(own, func(id string, _ float64) bool { return seeds.Hide(id) })
 		maps.DeleteFunc(related, func(id string, _ float64) bool { return seeds.Hide(id) })
 	}
-	return own, related, nil
+	return related, nil
 }
 
 // pointed loads the documents the prompt names (mention 1), those they link to (linkShare), and the anchor
-// documents of named or session folders (folder strength, less for each later anchor); own marks what came from
-// a folder or document named like the session.
-func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64, hide func(string) bool) ([]cand, error) {
-	mention, folder, isOwn := map[string]float64{}, map[string]float64{}, map[string]bool{}
+// documents of named or session folders (folder strength, less for each later anchor).
+func pointed(db *sql.DB, mentioned []string, folders map[string]float64, hide func(string) bool) ([]cand, error) {
+	mention, folder := map[string]float64{}, map[string]float64{}
 	for _, id := range mentioned {
 		if isDir(db, id) {
 			folders[id] = 1
@@ -259,10 +300,8 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64, hi
 	}
 	named := slices.Collect(maps.Keys(mention))
 	for dir, strength := range folders {
-		_, mine := own[dir]
 		if !isDir(db, dir) {
 			folder[dir] = max(folder[dir], strength)
-			isOwn[dir] = isOwn[dir] || mine
 			continue
 		}
 		anchors, err := rank.Anchors(db, dir, anchorsPer, hide)
@@ -271,7 +310,6 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64, hi
 		}
 		for i, a := range anchors {
 			folder[a] = max(folder[a], strength*(1-anchorStep*float64(i)))
-			isOwn[a] = isOwn[a] || mine
 		}
 	}
 	for _, id := range named {
@@ -300,9 +338,7 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64, hi
 	out, err := fetch(db, ids, hide)
 	for i := range out {
 		out[i].alias = 0
-		// a document the prompt spells is already in hand; own is what the session's name adds
 		out[i].mention, out[i].folder = mention[out[i].id], folder[out[i].id]
-		out[i].own = isOwn[out[i].id] && !slices.Contains(mentioned, out[i].id)
 	}
 	return out, err
 }
@@ -427,7 +463,6 @@ func merge(text, named []cand) []cand {
 			text[i].rel = math.Max(text[i].rel, c.rel)
 			text[i].mention = math.Max(text[i].mention, c.mention)
 			text[i].folder = math.Max(text[i].folder, c.folder)
-			text[i].own = text[i].own || c.own
 			continue
 		}
 		at[c.id] = len(text)
@@ -617,20 +652,72 @@ func dedupe(cands []cand) []cand {
 	return out
 }
 
-// ownSlot gives the last slot to the best candidate named like the session when none of the chosen is: a brief's
-// reading list is shared by its sibling workers, the session's own folder or file is not, and three pointers that
-// say one thing waste two.
-func ownSlot(chosen, cands []cand) []cand {
-	if len(chosen) < config.MaxPointers || slices.ContainsFunc(chosen, func(c cand) bool { return c.own }) {
-		return chosen
-	}
+// loadedFiles reach every session at L0 already.
+var loadedFiles = map[string]bool{"memory/MEMORY.md": true, "BRAIN.md": true, "hot.md": true}
+
+// held drops what the session already holds or should not see: its own work boxes (the digest carries them), the
+// files every session loads, and boxes whose CARD is paused or done unless the prompt names them.
+func held(db *sql.DB, cands []cand, seeds Seeds, named []string) ([]cand, error) {
+	var boxes []any
+	seen := map[string]bool{}
 	for _, c := range cands {
-		if c.own && c.answer() && c.score >= Threshold {
-			chosen[len(chosen)-1] = c
-			return chosen
+		card := "work/" + rank.BoxOf(c.path) + "/CARD.md"
+		if rank.BoxOf(c.path) != "" && !seen[card] && (seeds.Hide == nil || !seeds.Hide(card)) {
+			seen[card] = true
+			boxes = append(boxes, card)
 		}
 	}
-	return chosen
+	idle := map[string]bool{}
+	if len(boxes) > 0 {
+		rows, err := db.Query(`SELECT path FROM node WHERE status IN ('paused', 'done') AND path IN (`+
+			strings.TrimSuffix(strings.Repeat("?,", len(boxes)), ",")+`)`, boxes...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			idle[rank.BoxOf(p)] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return slices.DeleteFunc(cands, func(c cand) bool {
+		b := rank.BoxOf(c.path)
+		return loadedFiles[c.path] || slices.Contains(seeds.Work, b) || (idle[b] && !slices.Contains(named, b))
+	}), nil
+}
+
+// fact: a claim or procedure the brain learned, the kind of pointer a session cannot find in its own files.
+var fact = map[string]bool{"lesson": true, "anti-pattern": true, "playbook": true, "decision": true, "finding": true}
+
+func (c cand) tier() int {
+	switch {
+	case strings.HasPrefix(c.path, "notes/") && fact[c.typ]:
+		return 0
+	case !strings.HasPrefix(c.path, "work/"):
+		return 1
+	}
+	return 2
+}
+
+// choose takes ≤ 3 answers at or above the threshold, facts first; a work doc only when the prompt names it (its
+// path or a real name of it) or it is the single best match.
+func choose(answers []cand) []cand {
+	var chosen []cand
+	for _, c := range answers {
+		named := c.mention >= 1 || c.alias >= nameHit
+		if c.score >= Threshold && (c.tier() < 2 || named || c.id == answers[0].id) {
+			chosen = append(chosen, c)
+		}
+	}
+	sort.SliceStable(chosen, func(i, j int) bool { return chosen[i].tier() < chosen[j].tier() })
+	return chosen[:min(len(chosen), config.MaxPointers)]
 }
 
 // explore gives the last slot to a note shown fewer than three times, so new notes get a chance (DESIGN §5), when
@@ -641,9 +728,6 @@ func explore(chosen, cands []cand) []cand {
 		if under(c) {
 			return chosen
 		}
-	}
-	if len(chosen) == config.MaxPointers && chosen[len(chosen)-1].own {
-		return chosen
 	}
 	picked := map[string]bool{}
 	for _, c := range chosen {
@@ -679,8 +763,8 @@ func oneLine(c cand) string {
 	return text
 }
 
-// bestEdge names how the pointer connects to this session: its hub or work, the seed it was reached from, else
-// its own hub or folder.
+// bestEdge names how the pointer connects to this session: its hub, the seed it was reached from, else its own hub
+// or folder.
 func bestEdge(c cand, seeds Seeds) string {
 	hubs := strings.Split(c.hubs, ",")
 	for _, h := range seeds.Hubs {
@@ -688,11 +772,6 @@ func bestEdge(c cand, seeds Seeds) string {
 			if have == h {
 				return "hub " + h
 			}
-		}
-	}
-	for _, w := range seeds.Work {
-		if strings.HasPrefix(c.path, "work/"+w+"/") {
-			return "work " + w
 		}
 	}
 	if c.via != "" && c.prox > 0.3 {
@@ -719,8 +798,8 @@ func (lk Lookup) Text() string {
 	return cutRunes(strings.TrimRight(b.String(), "\n"), config.PointerMaxTokens*4)
 }
 
-// Prompt runs the UserPromptSubmit hook: pointers when live; in shadow only the lookup row. The prompt text is
-// never written anywhere.
+// Prompt runs the UserPromptSubmit hook: pointers when live, and on a session's first prompt the work part of its
+// digest; in shadow only the lookup rows. The prompt text is never written anywhere.
 func Prompt(env Env, in Input) ([]byte, error) {
 	started := env.Now()
 	ix, err := env.openIndex()
@@ -730,54 +809,87 @@ func Prompt(env Env, in Input) ([]byte, error) {
 	defer ix.Close()
 	session := in.session()
 	st, ok := env.loadState(session)
-	if !ok {
-		if box := workByFolder(env, in.cwd(), nil, nil); box != "" {
-			st.Work, st.Hubs = []string{box}, hubsByName(env.Root, box)
-		}
+	withHot := false
+	if !ok && env.statePath(session) != "" {
+		// no start record (its hook ran out of time, or the host has none): this prompt owes the whole digest
+		st, withHot = state{DigestOwed: true, CwdWork: folderWork(env, in.cwd())}, true
 	}
 	nm, stale := env.loadNames(ix.DB())
 	if stale && env.Rebuild != nil {
 		env.Rebuild()
 	}
-	lk := Lookup{Abstained: true}
-	if nm != nil {
-		if lk, err = Pointers(ix.DB(), in.Prompt, Seeds{Work: st.Work, Hubs: st.Hubs, Folder: folderName(in.cwd())}, nm); err != nil {
-			return nil, err
-		}
-	}
+	owed := st.DigestOwed
+	d, lk, err := env.turn(ix.DB(), nm, in.Prompt, &st, withHot)
 	if err != nil {
 		return nil, err
 	}
 	live := env.Live()
-	if err := record(ix.DB(), env, session, lk, live, env.Now().Sub(started)); err != nil {
+	if err := record(ix.DB(), env, session, owed, d, lk, live, env.Now().Sub(started)); err != nil {
 		return nil, err
 	}
-	if len(lk.Chosen) > 0 && session != "" {
+	if len(lk.Chosen) > 0 {
 		if st.Shown == nil {
 			st.Shown = map[string]string{}
 		}
 		for _, p := range lk.Chosen {
 			st.Shown[p.ID] = env.absPath(p.Path)
 		}
+	}
+	if session != "" && (owed || len(lk.Chosen) > 0) {
 		_ = env.saveState(session, st)
 	}
-	if !live || lk.Text() == "" {
+	text := strings.TrimSpace(d.Text + "\n\n" + lk.Text())
+	if !live || text == "" {
 		return nil, nil
 	}
 	event := in.Event
 	if event == "" {
 		event = "UserPromptSubmit"
 	}
-	return Output(event, lk.Text()), nil
+	return Output(event, text), nil
 }
 
-// record writes the lookup row and, when live, bumps node_stats.shown for what was injected.
-func record(db *sql.DB, env Env, session string, lk Lookup, live bool, took time.Duration) error {
+// turn is one prompt's work. A first prompt picks the session's work (the boxes it names, else the cwd's) and builds
+// the digest's work part in what start left of the L0 budget; every prompt then gets its pointers.
+func (e Env) turn(db *sql.DB, nm *Names, prompt string, st *state, withHot bool) (Digest, Lookup, error) {
+	boxes := st.Work
+	if st.DigestOwed {
+		boxes = st.CwdWork
+	}
+	q, err := readPrompt(db, prompt, boxes, nm)
+	if err != nil {
+		return Digest{}, Lookup{}, err
+	}
+	var d Digest
+	if st.DigestOwed {
+		header := taskHeader
+		if withHot {
+			header = startHeader
+		}
+		d = composeDigest(e, header, withHot, pickWork(e, q.namedBoxes(), st.CwdWork, nil), config.DigestMaxChars-st.DigestChars, nil)
+		st.Work, st.Hubs, st.DigestOwed, st.CwdWork, st.DigestChars = d.Work, d.Hubs, false, nil, 0
+	}
+	lk := Lookup{Abstained: true}
+	if nm != nil {
+		lk, err = pointers(db, q, Seeds{Work: st.Work, Hubs: st.Hubs}, nm)
+	}
+	return d, lk, err
+}
+
+// record writes the lookup rows (the digest a first prompt owed, then the pointers) and, when live, bumps
+// node_stats.shown for what was injected.
+func record(db *sql.DB, env Env, session string, owed bool, d Digest, lk Lookup, live bool, took time.Duration) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if owed {
+		digest := map[string]any{"chars": utf8.RuneCountInString(d.Text), "sources": nonNil(d.Sources)}
+		if err := logLookup(tx, env.Now(), session, "digest", nonNil(d.Sources), digest, d.Text == "", 0); err != nil {
+			return err
+		}
+	}
 	chosen := []string{}
 	for _, p := range lk.Chosen {
 		chosen = append(chosen, p.ID)

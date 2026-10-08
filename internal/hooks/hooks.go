@@ -1,10 +1,11 @@
 // Package hooks serves the read path's hooks: `hook start` (the start digest), `hook prompt` (≤ 3 pointers or
-// nothing), `hook post` (opened/followed counts for what a session was shown, and brain pulls) and `hook end` /
-// `hook compact` (ignored counts).
+// nothing, and on a session's first prompt the work part of its digest), `hook post` (opened/followed counts for
+// what a session was shown, and brain pulls) and `hook end` / `hook compact` (ignored counts).
 //
 // Until the cut-over (no <brain>/.brain/live) every hook runs in SHADOW: it computes what it would inject, logs
 // that to the lookups table and injects nothing. A lookups row never holds prompt text: `candidates` and `chosen`
-// are JSON arrays of node ids (for start: of the digest's sources, and `chosen` is {"chars": N, "sources": [...]}).
+// are JSON arrays of node ids (for start, and for the digest a first prompt adds, logged as hook "digest": of the
+// digest's sources, and `chosen` is {"chars": N, "sources": [...]}).
 package hooks
 
 import (
@@ -126,6 +127,10 @@ type state struct {
 	Hubs    []string          `json:"hubs,omitempty"`
 	Shown   map[string]string `json:"shown,omitempty"`   // node id → absolute path
 	Counted map[string]bool   `json:"counted,omitempty"` // "opened:<id>", "followed:<id>": once per session
+	// Until the first prompt: the boxes the cwd suggests, and the L0 chars start already gave.
+	DigestOwed  bool     `json:"digest_owed,omitempty"`
+	CwdWork     []string `json:"cwd_work,omitempty"`
+	DigestChars int      `json:"digest_chars,omitempty"`
 }
 
 var sessionRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
