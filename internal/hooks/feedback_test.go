@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"saahil.local/brain/internal/rank"
@@ -151,5 +152,30 @@ func TestDemotedNoteScoresItsPrior(t *testing.T) {
 	}
 	if got := score() - before; math.Abs(got-rank.DemotedPrior) > 0.0015 {
 		t.Fatalf("demoted note moved %.3f, want %.3f", got, rank.DemotedPrior)
+	}
+}
+
+// TestReplayRecountsATranscript catches a replay that misreads Claude Code's transcript format (pointer attachments,
+// tool_use blocks) and so reports an empty funnel, or that credits the old Read/Grep/Glob rule with a Bash read.
+func TestReplayRecountsATranscript(t *testing.T) {
+	f := newFixture(t, true, nil)
+	p := filepath.Join(f.env.Root, "notes", "finding-ocr-recall.md")
+	line := func(v any) string { b, _ := json.Marshal(v); return string(b) + "\n" }
+	transcript := line(map[string]any{"type": "attachment", "sessionId": "s1", "attachment": map[string]any{
+		"type": "hook_additional_context", "hookEvent": "UserPromptSubmit", "content": []string{
+			"Brain pointers (brain_show <id> opens one; ignore them if unrelated):\n" +
+				"- finding-ocr-recall — PaddleOCR recall is 0.91 [hub image-lane]\n- decision-paddle-first — PaddleOCR first [hub image-lane]"}}}) +
+		line(map[string]any{"type": "assistant", "sessionId": "s1", "cwd": f.cwd, "message": map[string]any{"content": []any{
+			map[string]any{"type": "tool_use", "name": "Bash", "input": map[string]string{"command": "sed -n 1,20p " + p}},
+			map[string]any{"type": "tool_use", "name": "mcp__saahil-brain__brain_search", "input": map[string]string{"query": "ocr"}},
+		}}})
+	var fun Funnel
+	pathOf := func(id string) string { return "notes/" + id + ".md" }
+	if err := Replay(f.env, strings.NewReader(transcript), pathOf, &fun); err != nil {
+		t.Fatal(err)
+	}
+	want := Funnel{Transcripts: 1, Sessions: 1, Shown: 2, Opened: 1, Ignored: 1, Pulled: 1}
+	if fun != want {
+		t.Fatalf("funnel %+v, want %+v", fun, want)
 	}
 }
