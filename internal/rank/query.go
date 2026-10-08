@@ -177,14 +177,22 @@ func Mentions(db *sql.DB, text string, boxes []string) ([]string, error) {
 		}
 	}
 	for _, p := range rel {
+		// a brief may spell its box as a placeholder ("BOX/plans/SPEC.md"): retry without the first segment
+		tries := []string{p}
+		if _, rest, ok := strings.Cut(p, "/"); ok && rest != "" {
+			tries = append(tries, rest)
+		}
+	box:
 		for _, b := range boxes {
-			id, err := lookupPath(db, workDir+b+"/"+p)
-			if err != nil {
-				return nil, err
-			}
-			if id != "" {
-				add(id)
-				break
+			for _, t := range tries {
+				id, err := lookupPath(db, workDir+b+"/"+t)
+				if err != nil {
+					return nil, err
+				}
+				if id != "" {
+					add(id)
+					break box
+				}
 			}
 		}
 	}
@@ -283,3 +291,116 @@ func Anchors(db *sql.DB, dir string, n int) ([]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// ---- folders a session's name points at ----
+
+var (
+	yearRE = regexp.MustCompile(`^(19|20)\d\d$`)
+	dateRE = regexp.MustCompile(`(19|20)\d\d-?[01]\d-?[0-3]\d(T\d+Z?)?`)
+)
+
+// folderNoise are words every worktree or folder path carries.
+var folderNoise = map[string]bool{"saahil": true, "docs": true, "worktree": true, "worktrees": true, "workspaces": true,
+	"main": true, "data": true, "acquisition": true, "md": true}
+
+var camelRE = regexp.MustCompile(`(\p{Ll})(\p{Lu})`)
+
+// FolderWords are a folder or file name's words for matching names: camelCase split, lowercase, without noise,
+// stopwords, dates and years, keeping ids like 7266, b2, the 5 of cascade-5 or the e of e-design.
+func FolderWords(name string) []string {
+	var out []string
+	name = dateRE.ReplaceAllString(camelRE.ReplaceAllString(name, "$1 $2"), " ")
+	for _, w := range TokenRE.FindAllString(strings.ToLower(name), -1) {
+		if folderNoise[w] || (len(w) > 1 && stopwords[w]) || yearRE.MatchString(w) {
+			continue
+		}
+		if !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+const (
+	maxFolderDepth = 3 // below the box: work/<box>/a/b/c
+	maxSameName    = 3 // a brief, its evidence folder and its scratch folder share a name; more is a pattern
+)
+
+// MatchFolders finds the folders and documents inside the given boxes whose name (a document's without its
+// extension) is spelled by one of the names (a worktree, a brief's file name): every word of the folder's name is
+// among the name's words, one of them is distinctive (has a digit or four letters), and no other folder or document
+// in the box has the same name more than twice. The strength is ½ plus half the share of the name's words the
+// folder covers.
+func MatchFolders(db *sql.DB, boxes []string, names []string) (map[string]float64, error) {
+	out := map[string]float64{}
+	var nameWords [][]string
+	var distinctive []string
+	for _, n := range names {
+		if w := FolderWords(n); len(w) > 0 {
+			nameWords = append(nameWords, w)
+			distinctive = append(distinctive, slices.DeleteFunc(slices.Clone(w), func(w string) bool { return !isDistinctive(w) })...)
+		}
+	}
+	if len(distinctive) == 0 {
+		return out, nil
+	}
+	// a folder matches only if one of its words is a distinctive name word: a substring test skips the rest cheaply
+	maybe := func(name string) bool {
+		name = strings.ToLower(name)
+		return slices.ContainsFunc(distinctive, func(w string) bool { return strings.Contains(name, w) })
+	}
+	for _, box := range boxes {
+		prefix := workDir + box + "/"
+		// unary + keeps the planner on the path range, not node_kind (every dir and doc)
+		rows, err := db.Query(`SELECT path FROM node WHERE +kind IN ('dir', 'doc') AND path > ? AND path < ?`, prefix, workDir+box+"0")
+		if err != nil {
+			return nil, err
+		}
+		var dirs []string
+		count := map[string]int{}
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			count[stem(p)]++
+			if strings.Count(p[len(prefix):], "/") < maxFolderDepth {
+				dirs = append(dirs, p)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		for _, d := range dirs {
+			if count[stem(d)] > maxSameName || !maybe(stem(d)) {
+				continue
+			}
+			dw := FolderWords(stem(d))
+			if !slices.ContainsFunc(dw, isDistinctive) {
+				continue
+			}
+			for _, nw := range nameWords {
+				if !subset(dw, nw) {
+					continue
+				}
+				out[d] = max(out[d], 0.5+0.5*float64(len(dw))/float64(len(nw)))
+			}
+		}
+	}
+	return out, nil
+}
+
+func subset(a, b []string) bool {
+	for _, w := range a {
+		if !slices.Contains(b, w) {
+			return false
+		}
+	}
+	return len(a) > 0
+}
+
+func stem(p string) string { b := path.Base(p); return strings.TrimSuffix(b, path.Ext(b)) }
+
+func isDistinctive(w string) bool { return len(w) >= 4 || strings.ContainsAny(w, "0123456789") }

@@ -35,9 +35,9 @@ func (r *EvalRanker) Pointers(prompt, cwd string) []string {
 
 // Lookup is the whole ranking for a prompt (candidates, best score, abstention), for diagnosing an eval.
 func (r *EvalRanker) Lookup(prompt, cwd string) (Lookup, error) {
-	var seeds Seeds
+	seeds := Seeds{Folder: folderName(cwd)}
 	if box := workByFolder(r.env, cwd, nil); box != "" {
-		seeds = Seeds{Work: []string{box}, Hubs: hubsByName(r.env.Root, box)}
+		seeds.Work, seeds.Hubs = []string{box}, hubsByName(r.env.Root, box)
 	}
 	return Pointers(r.db, prompt, seeds, r.names)
 }
