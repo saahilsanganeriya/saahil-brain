@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
 // migrations are applied in order; the index of the last applied one is meta.schema_version. Append, never edit.
+// An ADD COLUMN goes alone in its entry: rerun over a column that is already there (meta lost), it counts as done.
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS node(
 		id TEXT PRIMARY KEY, kind TEXT NOT NULL, type TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '',
@@ -39,6 +41,9 @@ var migrations = []string{
 		cost_usd REAL NOT NULL DEFAULT 0, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
 		started TEXT NOT NULL DEFAULT '', ended TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '');`,
 	`CREATE INDEX IF NOT EXISTS node_path ON node(path);`,
+	// usage feedback: pointers shown and never opened (hooks), and the dream's demotion of never-opened nodes
+	`ALTER TABLE node_stats ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;`,
+	`ALTER TABLE node_stats ADD COLUMN demoted_at TEXT NOT NULL DEFAULT '';`,
 }
 
 var SchemaVersion = strconv.Itoa(len(migrations))
@@ -84,7 +89,7 @@ func (s *Store) migrate() error {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(migrations[i]); err != nil {
+		if _, err := tx.Exec(migrations[i]); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			tx.Rollback()
 			return err
 		}

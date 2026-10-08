@@ -63,3 +63,38 @@ func TestOpenAdoptsTablesOthersCreated(t *testing.T) {
 		t.Fatalf("ledger rows + nodes = %d (err %v), want 1", n, err)
 	}
 }
+
+// TestNodeStatsGainsFeedbackColumnsKeepingRows catches a migration that loses the counters a live index already
+// holds, or leaves an old index without the ignored count and the dream's demotion mark the hooks now write.
+func TestNodeStatsGainsFeedbackColumnsKeepingRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "brain.db")
+	pre, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// rebuild node_stats as the first migration made it, and mark the index as that old
+	for _, q := range []string{`DROP TABLE node_stats`, `CREATE TABLE node_stats(id TEXT PRIMARY KEY, shown INTEGER NOT NULL DEFAULT 0,
+		opened INTEGER NOT NULL DEFAULT 0, followed INTEGER NOT NULL DEFAULT 0, helpful INTEGER NOT NULL DEFAULT 0,
+		harmful INTEGER NOT NULL DEFAULT 0, owner_confirmed INTEGER NOT NULL DEFAULT 0, last_shown_at TEXT NOT NULL DEFAULT '',
+		last_helpful_at TEXT NOT NULL DEFAULT '')`,
+		`INSERT INTO node_stats(id, shown, opened) VALUES ('lesson-kept', 12, 3)`,
+		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`} {
+		if _, err := pre.DB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pre.Close()
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("migrate an index with counters: %v", err)
+	}
+	defer st.Close()
+	var shown, opened, ignored int
+	var demoted string
+	err = st.DB.QueryRow(`SELECT shown, opened, ignored, demoted_at FROM node_stats WHERE id = 'lesson-kept'`).
+		Scan(&shown, &opened, &ignored, &demoted)
+	if err != nil || shown != 12 || opened != 3 || ignored != 0 || demoted != "" {
+		t.Fatalf("after migration: shown %d opened %d ignored %d demoted %q (err %v)", shown, opened, ignored, demoted, err)
+	}
+}
