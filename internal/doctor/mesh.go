@@ -21,6 +21,7 @@ func init() {
 	Register(Check{Name: "mesh.sessions", Run: checkSessions})
 	Register(Check{Name: "brain.skeleton", Run: checkSkeleton})
 	Register(Check{Name: "sync.last", Run: checkSync})
+	Register(Check{Name: "sync.conflicts", Run: checkConflicts})
 }
 
 func checkPeer(ctx context.Context) (Status, string) {
@@ -136,4 +137,26 @@ func checkSync(ctx context.Context) (Status, string) {
 		return Fail, detail
 	}
 	return OK, detail
+}
+
+// checkConflicts counts sync conflict copies left in the brain (Unison's and the cut-over reconcile's).
+func checkConflicts(context.Context) (Status, string) {
+	var found []string
+	root := config.BrainRoot()
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data") {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {
+			found = append(found, strings.TrimPrefix(p, root+"/"))
+		}
+		return nil
+	})
+	if len(found) == 0 {
+		return OK, "0 conflict copies in the brain"
+	}
+	return Fail, fmt.Sprintf("%d conflict copies: %s", len(found), strings.Join(found[:min(len(found), 5)], ", "))
 }

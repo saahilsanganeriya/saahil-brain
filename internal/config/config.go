@@ -113,3 +113,10 @@ const (
 	ModelJudgment = "claude-opus-5-5"
 	ModelBulk     = "claude-haiku-5-5"
 )
+
+// IsSyncConflictCopy names a conflict copy left by a sync: Unison's "<file> (conflict…_on_<date>…)", the cut-over
+// reconcile's "<file>.conflict-<machine>-<time>", or Unison's temporary ".unison.*" files.
+func IsSyncConflictCopy(name string) bool {
+	return strings.Contains(name, " (conflict") || strings.Contains(name, ".conflict-laptop-") ||
+		strings.Contains(name, ".conflict-devbox-") || strings.HasPrefix(name, ".unison.")
+}

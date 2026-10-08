@@ -1,12 +1,15 @@
 package dream
 
 import (
+	"io/fs"
+
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"saahil.local/brain/skills"
 	"sort"
 	"strings"
 	"time"
@@ -21,7 +24,7 @@ import (
 // as they are. The delta is applied in dry run and comes back as whole-file edits, so the workflow's ApplyEdits keeps
 // doing the backups, caps and reverts; a refused delete comes back as a delete edit, which the workflow counts.
 func (a *Activities) SkillStep(ctx context.Context, in LLMStepInput) (LLMStepResult, error) {
-	skill, err := os.ReadFile(filepath.Join(a.Cfg.SkillsDir, in.Skill+".md"))
+	skill, err := a.readSkill(in.Skill)
 	if errors.Is(err, os.ErrNotExist) {
 		return LLMStepResult{Status: "skipped", Reason: "skill missing: " + in.Skill + ".md"}, nil
 	}
@@ -270,4 +273,17 @@ func anyIn(list []string, set map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+// readSkill reads <SkillsDir>/<name>.md when a skills folder is configured (tests, trying a skill out), else the skill
+// embedded in this binary, so the worker's skills are always the version its code expects.
+func (a *Activities) readSkill(name string) ([]byte, error) {
+	if a.Cfg.SkillsDir != "" {
+		return os.ReadFile(filepath.Join(a.Cfg.SkillsDir, name+".md"))
+	}
+	b, err := skills.FS.ReadFile(name + ".md")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, os.ErrNotExist
+	}
+	return b, err
 }

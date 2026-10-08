@@ -456,8 +456,7 @@ func (a *Activities) Reconcile(_ context.Context) (StepOutcome, error) {
 		if d.IsDir() && p != a.Cfg.BrainRoot && strings.HasPrefix(d.Name(), ".") {
 			return filepath.SkipDir
 		}
-		name := strings.ToLower(d.Name())
-		if !d.IsDir() && (strings.Contains(name, "conflict") || strings.HasPrefix(name, ".unison.")) {
+		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {
 			n++
 		}
 		return nil
@@ -564,8 +563,7 @@ type payloadFile struct {
 }
 
 func (a *Activities) LLMStep(ctx context.Context, in LLMStepInput) (LLMStepResult, error) {
-	skillPath := filepath.Join(a.Cfg.SkillsDir, in.Skill+".md")
-	skill, err := os.ReadFile(skillPath)
+	skill, err := a.readSkill(in.Skill)
 	if errors.Is(err, os.ErrNotExist) {
 		return LLMStepResult{Status: "skipped", Reason: "skill missing: " + in.Skill + ".md"}, nil
 	}

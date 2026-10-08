@@ -23,7 +23,7 @@ import (
 func main() {
 	llmKind := flag.String("llm", "claude", "claude | fake (fake: no model, empty edits — tests and shadow checks)")
 	claudeBin := flag.String("claude-bin", filepath.Join(config.BinDir(), "claude"), "the claude CLI")
-	skills := flag.String("skills", filepath.Join(config.Home(), "Documents", "saahil-brain", "skills"), "skills dir")
+	skills := flag.String("skills", "", "skills folder (default: the skills embedded in this binary)")
 	brainBin := flag.String("brain-bin", filepath.Join(config.BinDir(), "brain"), "the brain CLI")
 	shadowDocs := flag.String("shadow-docs", filepath.Join(config.Home(), "Documents", "work-repo", "saahil-docs"),
 		"read-only doc root presented as work/ (until the cut-over)")

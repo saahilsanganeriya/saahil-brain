@@ -158,7 +158,7 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 	r.record(StepRecord{Name: "snapshot", Status: "ok", Reason: snap.Commit}, began)
 
 	r.outcome("reconcile", workflow.ExecuteActivity(r.det, a.Reconcile))
-	r.brain("capture", []string{"sessions", "capture"}, "--missing")
+	r.brain("capture", []string{"session", "backfill"}, "--machine", "devbox")
 	r.llm(learnStep, r.gate.Sessions)
 	r.llm(fileStep, r.gate.Captures)
 	r.llm(linkStep, nil)
