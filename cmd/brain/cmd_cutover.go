@@ -21,6 +21,7 @@ func init() {
 	register("cutover compare", "prove a move: <before.tsv> <after.tsv> [--allow-newer]; exit 1 on any missing file", cmdCutoverCompare)
 	register("cutover reconcile", "laptop vs devbox text conflicts: <laptop.tsv> <devbox.tsv> --out R.md [--apply --machine M --root DIR]", cmdCutoverReconcile)
 	register("cutover rewrite-paths", "old saahil-docs paths → new in text files and symlinks: <root> --from P... --to P [--apply] [--backup-dir D]", cmdCutoverRewrite)
+	register("cutover restore-mtimes", "put back the mtimes a rewrite recorded, on files unchanged since: <root> --backup-dir D", cmdCutoverRestoreMtimes)
 	register("cutover lift-state", "a STATE.md over the cap: map its sections, or move it to log/ and lift the chosen ones: <box> [--keep HEADING]... [--note F] [--apply]", cmdCutoverLiftState)
 	register("cutover find-names", "every non-history name, text mention and link target of saahil-docs: <root>... [--out F]", cmdCutoverFindNames)
 }
@@ -354,5 +355,20 @@ func cmdCutoverLiftState(args []string) int {
 		return 0
 	}
 	fmt.Printf("lifted %s: %d bytes now; the old %d bytes are in %s\n", plan.State, len(plan.Lifted), plan.Bytes, plan.Log)
+	return 0
+}
+
+func cmdCutoverRestoreMtimes(args []string) int {
+	fs := flag.NewFlagSet("cutover restore-mtimes", flag.ContinueOnError)
+	backupDir := fs.String("backup-dir", "", "the rewrite's backup dir (holds manifest.tsv)")
+	pos, err := parseInterleaved(fs, args)
+	if err != nil || len(pos) != 1 || *backupDir == "" {
+		return fail("cutover restore-mtimes <root> --backup-dir D")
+	}
+	restored, changed, missing, err := cutover.RestoreMtimes(pos[0], *backupDir)
+	fmt.Printf("%s: %d mtimes restored · %d files changed since the rewrite (kept) · %d missing\n", pos[0], restored, changed, missing)
+	if err != nil {
+		return fail("%v", err)
+	}
 	return 0
 }

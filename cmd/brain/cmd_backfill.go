@@ -34,6 +34,7 @@ func cmdBackfillRun(args []string) int {
 	boxes := fs.String("boxes", "", "comma-separated box names (default: every box)")
 	budget := fs.Float64("budget", dream.BackfillBudgetUSD, "USD cap on every backfill call, earlier runs included")
 	dry := fs.Bool("dry-run", false, "list every box with its planned action; no model, no Temporal")
+	includePaused := fs.Bool("include-paused", false, "also write campaign notes for quiet boxes whose CARD says paused")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -42,7 +43,7 @@ func cmdBackfillRun(args []string) int {
 		only = strings.Split(*boxes, ",")
 	}
 	if *dry {
-		return backfillDryRun(only, *budget)
+		return backfillDryRun(only, *budget, *includePaused)
 	}
 	c, err := dialDream()
 	if err != nil {
@@ -51,7 +52,7 @@ func cmdBackfillRun(args []string) int {
 	defer c.Close()
 	id := "backfill/" + time.Now().UTC().Format("2006-01-02T150405Z")
 	run, err := c.ExecuteWorkflow(context.Background(), client.StartWorkflowOptions{ID: id, TaskQueue: dream.TaskQueue},
-		dream.BackfillWorkflow, dream.BackfillInput{Boxes: only, BudgetUSD: *budget})
+		dream.BackfillWorkflow, dream.BackfillInput{Boxes: only, BudgetUSD: *budget, IncludePaused: *includePaused})
 	if err != nil {
 		return fail("start %s: %v", id, err)
 	}
@@ -65,9 +66,9 @@ func cmdBackfillRun(args []string) int {
 }
 
 // backfillDryRun plans in-process: the plan is read-only code, so it needs neither the worker nor Temporal.
-func backfillDryRun(only []string, budget float64) int {
+func backfillDryRun(only []string, budget float64, includePaused bool) int {
 	root, now := config.BrainRoot(), time.Now().UTC()
-	live, plan, err := backfill.Plan(root, shadowDocs(), only, now)
+	live, plan, err := backfill.Plan(root, shadowDocs(), only, now, includePaused)
 	if err != nil {
 		return fail("plan: %v", err)
 	}

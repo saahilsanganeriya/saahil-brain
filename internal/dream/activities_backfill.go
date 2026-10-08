@@ -99,8 +99,9 @@ func (a *Activities) hubSet() ([]filing.HubEntry, map[string]bool, error) {
 // ---- plan and report ----
 
 type PlanInput struct {
-	Boxes []string
-	Now   time.Time
+	Boxes         []string
+	Now           time.Time
+	IncludePaused bool
 }
 
 type PlanResult struct {
@@ -109,7 +110,7 @@ type PlanResult struct {
 }
 
 func (a *Activities) BackfillPlan(_ context.Context, in PlanInput) (PlanResult, error) {
-	live, boxes, err := backfill.Plan(a.Cfg.BrainRoot, a.shadowRoot(), in.Boxes, in.Now)
+	live, boxes, err := backfill.Plan(a.Cfg.BrainRoot, a.shadowRoot(), in.Boxes, in.Now, in.IncludePaused)
 	return PlanResult{Live: live, Boxes: boxes}, err
 }
 

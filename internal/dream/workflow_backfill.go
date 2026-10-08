@@ -19,6 +19,8 @@ type BackfillInput struct {
 	Boxes     []string `json:"boxes,omitempty"` // empty: every box
 	BudgetUSD float64  `json:"budget_usd"`      // total across every backfill run (ledger workflow="backfill")
 	DryRun    bool     `json:"dry_run"`
+	// IncludePaused also writes notes for quiet boxes whose CARD says paused (parked or stalled campaigns)
+	IncludePaused bool `json:"include_paused,omitempty"`
 
 	// carried across continue-as-new
 	Live    bool               `json:"live,omitempty"`
@@ -48,7 +50,7 @@ func BackfillWorkflow(ctx workflow.Context, in BackfillInput) (backfill.Report, 
 		in.Report = &backfill.Report{ID: "backfill-" + runID(now, workflow.GetInfo(ctx).WorkflowExecution.RunID),
 			DryRun: in.DryRun, BudgetUSD: in.BudgetUSD, Started: now}
 		var plan PlanResult
-		if err := workflow.ExecuteActivity(det, a.BackfillPlan, PlanInput{Boxes: in.Boxes, Now: now}).Get(ctx, &plan); err != nil {
+		if err := workflow.ExecuteActivity(det, a.BackfillPlan, PlanInput{Boxes: in.Boxes, Now: now, IncludePaused: in.IncludePaused}).Get(ctx, &plan); err != nil {
 			return *in.Report, err
 		}
 		in.Live, in.Report.Live = plan.Live, plan.Live

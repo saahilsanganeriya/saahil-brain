@@ -107,7 +107,7 @@ func walkBox(abs string, visit func(rel string, fi fs.FileInfo)) {
 			}
 			return filepath.SkipDir
 		}
-		if d.Type().IsRegular() && !strings.HasPrefix(d.Name(), ".") {
+		if d.Type().IsRegular() && !strings.HasPrefix(d.Name(), ".") && rel != "CARD.md" { // the brain's own card is no work
 			if fi, err := d.Info(); err == nil {
 				n++
 				visit(rel, fi)
@@ -413,7 +413,8 @@ var finishedRE = regexp.MustCompile(`(?i)\b(finished|landed|merged|complete[d]?|
 
 // Plan decides per box: write a CARD unless the box's CARD is newer than every file in it; a finished campaign also
 // gets its notes (repeated runs answer those from the ledger for $0).
-func Plan(root, shadow string, only []string, now time.Time) (bool, []Planned, error) {
+// includePaused also takes a quiet box whose CARD says paused (a parked or stalled campaign) as a campaign.
+func Plan(root, shadow string, only []string, now time.Time, includePaused bool) (bool, []Planned, error) {
 	live := Live(root)
 	boxes, err := Enumerate(WorkRoot(root, shadow, live), only)
 	if err != nil {
@@ -426,7 +427,8 @@ func Plan(root, shadow string, only []string, now time.Time) (bool, []Planned, e
 		p.Finished = now.Sub(b.Newest) > StaleAfter && finishedRE.Match(state)
 		if fi, err := os.Stat(CardPath(root, b.Name, live)); err == nil && fi.ModTime().After(b.Newest) {
 			card, _ := readCapped(CardPath(root, b.Name, live), config.CardMaxBytes)
-			p.Finished = p.Finished || parse.Markdown(card).Status == "done"
+			status := parse.Markdown(card).Status
+			p.Finished = p.Finished || status == "done" || (includePaused && status == "paused")
 			p.Action, p.Reason = "skip", "CARD is newer than every file in the box"
 			if p.Finished {
 				p.Action, p.Reason = "campaign", "CARD is current; finished campaign"

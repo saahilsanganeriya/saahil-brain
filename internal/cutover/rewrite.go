@@ -435,6 +435,10 @@ func replaceFile(path string, content []byte, read fs.FileInfo) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	// a path fix is not an edit: keep the file's modification time (activity, eval dating and staleness read it)
+	if err := os.Chtimes(tmp.Name(), read.ModTime(), read.ModTime()); err != nil {
+		return err
+	}
 	now, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -534,4 +538,36 @@ func kindOf(mode fs.FileMode) Kind {
 		return KindFile
 	}
 	return KindOther
+}
+
+// RestoreMtimes puts back the modification time a rewrite recorded (manifest.tsv in its backup dir, paths relative to
+// root) on each file still byte-identical to what the rewrite wrote; a file changed since keeps its own.
+func RestoreMtimes(root, backupDir string) (restored, changed, missing int, err error) {
+	raw, err := os.ReadFile(filepath.Join(backupDir, "manifest.tsv"))
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		cols := strings.Split(line, "\t")
+		if strings.HasPrefix(line, "#") || len(cols) < 6 || cols[1] != "file" {
+			continue
+		}
+		abs := filepath.Join(root, filepath.FromSlash(cols[0]))
+		mtime, perr := time.Parse(time.RFC3339Nano, cols[3])
+		data, rerr := os.ReadFile(abs)
+		switch {
+		case perr != nil || errors.Is(rerr, fs.ErrNotExist):
+			missing++
+		case rerr != nil:
+			return restored, changed, missing, rerr
+		case hashBytes(data) != cols[5]:
+			changed++
+		default:
+			if err := os.Chtimes(abs, mtime, mtime); err != nil {
+				return restored, changed, missing, err
+			}
+			restored++
+		}
+	}
+	return restored, changed, missing, nil
 }

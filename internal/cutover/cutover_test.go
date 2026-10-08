@@ -270,8 +270,8 @@ func TestRewriteKeepsBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewritten := readFile(t, path)
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o750 || rewritten != "path "+newPrefix+"box/x\n" {
-		t.Fatalf("mode %v content %q", info.Mode(), rewritten)
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o750 || rewritten != "path "+newPrefix+"box/x\n" || !info.ModTime().Equal(t0) {
+		t.Fatalf("mode %v mtime %v content %q (a path fix keeps the mtime)", info.Mode(), info.ModTime(), rewritten)
 	}
 	saved := filepath.Join(backup, "files", "box/run.sh")
 	if info, _ := os.Stat(saved); readFile(t, saved) != original || !info.ModTime().Equal(t0) {
@@ -344,5 +344,30 @@ func TestVenvShebangRewritten(t *testing.T) {
 	stats, _ := Rewrite(opt, func(FileChange) {})
 	if stats.Errors != 1 || readFile(t, filepath.Join(long, "venv/bin/pip")) != "#!"+oldPrefix+"venv/bin/python3\n" {
 		t.Fatalf("an over-long shebang must be refused: %+v", stats)
+	}
+}
+
+// TestRestoreMtimes: the cut-over's rewrite stamped 16,000 files with that day's mtime, so every box looked active and
+// files looked new; the restore puts the recorded mtime back only where the file is still what the rewrite wrote.
+func TestRestoreMtimes(t *testing.T) {
+	root, backup := t.TempDir(), t.TempDir()
+	writeTree(t, root, map[string]string{"a.md": "new a\n", "b.md": "edited since\n"})
+	manifest := "# path\tkind\toccurrences\tmtime_before\tsha256_before\tsha256_after\ttarget_before\ttarget_after\n" +
+		"a.md\tfile\t1\t" + t0.Format(time.RFC3339Nano) + "\t-\t" + sha("new a\n") + "\t-\t-\n" +
+		"b.md\tfile\t1\t" + t0.Format(time.RFC3339Nano) + "\t-\t" + sha("what the rewrite wrote\n") + "\t-\t-\n" +
+		"gone.md\tfile\t1\t" + t0.Format(time.RFC3339Nano) + "\t-\t" + sha("x") + "\t-\t-\n"
+	_ = os.WriteFile(filepath.Join(backup, "manifest.tsv"), []byte(manifest), 0o644)
+	now := time.Now()
+	for _, f := range []string{"a.md", "b.md"} {
+		_ = os.Chtimes(filepath.Join(root, f), now, now)
+	}
+	restored, changed, missing, err := RestoreMtimes(root, backup)
+	if err != nil || restored != 1 || changed != 1 || missing != 1 {
+		t.Fatalf("restored %d changed %d missing %d err %v", restored, changed, missing, err)
+	}
+	a, _ := os.Stat(filepath.Join(root, "a.md"))
+	b, _ := os.Stat(filepath.Join(root, "b.md"))
+	if !a.ModTime().Equal(t0) || b.ModTime().Equal(t0) {
+		t.Fatal("only the file unchanged since the rewrite gets its old mtime back")
 	}
 }
