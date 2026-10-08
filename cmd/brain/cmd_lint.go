@@ -32,6 +32,12 @@ func cmdLint(args []string) int {
 	}
 	var r lint.Report
 	for _, p := range paths {
+		// a relative path that does not exist here names a file inside the brain (the dream passes notes/x.md)
+		if !filepath.IsAbs(p) {
+			if _, err := os.Stat(p); err != nil {
+				p = filepath.Join(config.BrainRoot(), p)
+			}
+		}
 		one, err := lintPath(p)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "brain: lint %s: %v\n", p, err)

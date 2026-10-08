@@ -491,6 +491,7 @@ func (a *Activities) BrainCommand(ctx context.Context, in BrainCommandInput) (St
 	}
 	cmd := exec.CommandContext(ctx, a.Cfg.BrainBin, append(in.Command, in.Args...)...)
 	cmd.Env = append(os.Environ(), "BRAIN_ROOT="+a.Cfg.BrainRoot)
+	cmd.Dir = a.Cfg.BrainRoot // step arguments are brain-relative paths (lint gets notes/x.md)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err = cmd.Run()
