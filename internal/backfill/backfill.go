@@ -379,7 +379,8 @@ func normalizeKeyFiles(body string, b Box) string {
 	return strings.Join(out, "\n")
 }
 
-// KeyFiles are the box-relative paths in backticks under the card's "## Key files" heading.
+// KeyFiles are the box-relative paths under the card's "## Key files" heading: the FIRST backticked token of each line
+// (the rest of a line is its description, which may quote a sha or another file name).
 func KeyFiles(body, box string) []string {
 	var out []string
 	in := false
@@ -391,7 +392,7 @@ func KeyFiles(body, box string) []string {
 		if !in {
 			continue
 		}
-		for _, m := range backticked.FindAllStringSubmatch(line, -1) {
+		if m := backticked.FindStringSubmatch(line); m != nil {
 			p, _, _ := strings.Cut(m[1], "#")
 			out = append(out, strings.TrimPrefix(p, "work/"+box+"/"))
 		}

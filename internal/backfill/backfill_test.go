@@ -17,7 +17,7 @@ func TestCardKeyFilesNormalized(t *testing.T) {
 	}
 	var lines []string
 	for i := range 9 {
-		lines = append(lines, fmt.Sprintf("- `f%d.md` — file %d", i, i))
+		lines = append(lines, fmt.Sprintf("- `f%d.md` — file %d, see `abc1234` and the old `gone.md`", i, i))
 	}
 	body := "## What it is\nx\n## Key files\n- `missing.md` — gone\n- `artifacts/` — bulk\n" + strings.Join(lines, "\n") + "\n## Next\ny\n"
 	got := normalizeKeyFiles(body, Box{Name: "box", Abs: dir})
