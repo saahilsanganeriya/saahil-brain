@@ -72,7 +72,7 @@ type Entry struct {
 	Target string // Link: presented path when inside a root, else the canonical absolute path
 }
 
-type Stats struct{ Dirs, Ignored int }
+type Stats struct{ Ignored int }
 
 var skipDirs = map[string]bool{"node_modules": true, "venv": true, "__pycache__": true, "site-packages": true}
 
@@ -125,7 +125,6 @@ func (w *walker) dir(abs, presented string, list []os.DirEntry) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
-	w.stats.Dirs++
 	for _, de := range list {
 		name := de.Name()
 		childAbs, childPath := filepath.Join(abs, name), path.Join(presented, name)
@@ -354,22 +353,6 @@ func Presented(roots []Root, abs string) (string, bool) {
 	}
 	rel, _ := filepath.Rel(config.Canonical(roots[best].Abs), abs)
 	return path.Join(roots[best].Prefix, filepath.ToSlash(rel)), true
-}
-
-// Absolute maps a node path back to the file it came from.
-func Absolute(roots []Root, presented string) (string, bool) {
-	best := -1
-	for i, r := range roots {
-		if (r.Prefix == "" || presented == r.Prefix || strings.HasPrefix(presented, r.Prefix+"/")) &&
-			(best < 0 || len(r.Prefix) > len(roots[best].Prefix)) {
-			best = i
-		}
-	}
-	if best < 0 {
-		return "", false
-	}
-	rel := strings.TrimPrefix(strings.TrimPrefix(presented, roots[best].Prefix), "/")
-	return filepath.Join(roots[best].Abs, filepath.FromSlash(rel)), true
 }
 
 // Content is a loaded file: Data is capped, SHA covers the whole file (empty for data files too big to hash).

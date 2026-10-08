@@ -1,8 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -20,7 +22,7 @@ func init() {
 	register("search", "rank notes and docs: brain search <q> [--deep] [--json] [--limit N] [--type t,…] [--seed id,…]", cmdSearch)
 	register("show", "a node and its edges: brain show <id|path>", cmdShow)
 	register("sections", "a big doc's sections with line ranges: brain sections <id|path>", cmdSections)
-	register("neighbors", "nodes within N hops: brain neighbors <id|path> [--depth 2]", cmdNeighbors)
+	register("neighbors", "nodes within N hops (default 2): brain neighbors <id|path> [--depth N]", cmdNeighbors)
 	register("pagerank", "recompute global PageRank without rescanning", cmdPageRank)
 }
 
@@ -38,12 +40,13 @@ func parseAll(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-func openIndex() (*index.Index, int) {
+func withIndex(run func(*index.Index) int) int {
 	ix, err := index.Open(index.DefaultRoot())
 	if err != nil {
-		return nil, fail("open index: %v", err)
+		return fail("open index: %v", err)
 	}
-	return ix, 0
+	defer ix.Close()
+	return run(ix)
 }
 
 func cmdIndex(args []string) int {
@@ -53,12 +56,10 @@ func cmdIndex(args []string) int {
 	if _, err := parseAll(fs, args); err != nil {
 		return 2
 	}
-	ix, code := openIndex()
-	if ix == nil {
-		return code
-	}
-	defer ix.Close()
-	if !*stats || *full {
+	return withIndex(func(ix *index.Index) int {
+		if *stats && !*full {
+			return printStats(ix)
+		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		st, err := ix.Update(ctx, *full)
@@ -67,11 +68,11 @@ func cmdIndex(args []string) int {
 		}
 		fmt.Printf("indexed %d paths: %d changed, %d deleted, %d other files ignored; pagerank %d iterations; %s\n",
 			st.Walked, st.Changed, st.Deleted, st.Ignored, st.PageRankIters, st.Took.Round(time.Millisecond))
-	}
-	if *stats {
-		return printStats(ix)
-	}
-	return 0
+		if *stats {
+			return printStats(ix)
+		}
+		return 0
+	})
 }
 
 func printStats(ix *index.Index) int {
@@ -126,29 +127,27 @@ func cmdSearch(args []string) int {
 	types := fs.String("type", "", "comma-separated node types")
 	seeds := fs.String("seed", "", "comma-separated seed ids (work box, hub, note)")
 	pos, err := parseAll(fs, args)
-	if err != nil {
-		return 2
+	if err != nil || len(pos) == 0 {
+		return fail("search <query> [--deep] [--json] [--limit N]")
 	}
-	if len(pos) == 0 {
-		return fail("search <query>")
-	}
-	ix, code := openIndex()
-	if ix == nil {
-		return code
-	}
-	defer ix.Close()
-	hits, err := ix.Search(strings.Join(pos, " "), index.SearchOpts{Limit: *limit, Deep: *deep, Types: split(*types), Seeds: split(*seeds)})
-	if err != nil {
-		return fail("search: %v", err)
-	}
-	if *asJSON {
-		_ = json.NewEncoder(os.Stdout).Encode(hits)
+	return withIndex(func(ix *index.Index) int {
+		hits, err := ix.Search(strings.Join(pos, " "), index.SearchOpts{Limit: *limit, Deep: *deep, Types: split(*types), Seeds: split(*seeds)})
+		if err != nil {
+			return fail("search: %v", err)
+		}
+		if *asJSON {
+			_ = json.NewEncoder(os.Stdout).Encode(hits)
+			return 0
+		}
+		for i, h := range hits {
+			line := h.Title
+			if h.Summary != "" && h.Summary != h.Title {
+				line += " — " + h.Summary
+			}
+			fmt.Printf("%2d. %.3f  %s  [%s]\n    %.200s\n", i+1, h.Score, h.ID, h.Type, line)
+		}
 		return 0
-	}
-	for i, h := range hits {
-		fmt.Printf("%2d. %.3f  %s  [%s]\n    %s\n", i+1, h.Score, h.ID, h.Type, oneLine(h.Title, h.Summary))
-	}
-	return 0
+	})
 }
 
 func split(s string) []string {
@@ -158,133 +157,88 @@ func split(s string) []string {
 	return strings.Split(s, ",")
 }
 
-func oneLine(title, summary string) string {
-	s := title
-	if summary != "" && summary != title {
-		s += " — " + summary
-	}
-	if len(s) > 200 {
-		s = s[:200] + "…"
-	}
-	return s
-}
-
-func oneArg(name string, args []string) (string, bool) {
+// withRef runs a command that takes exactly one node id or path.
+func withRef(name string, args []string, run func(*index.Index, string) error) int {
 	if len(args) != 1 {
-		fail("%s <id|path>", name)
-		return "", false
+		return fail("%s <id|path>", name)
 	}
-	return args[0], true
+	return withIndex(func(ix *index.Index) int {
+		if err := run(ix, args[0]); err != nil {
+			return fail("%s %s: %v", name, args[0], err)
+		}
+		return 0
+	})
 }
 
 func cmdShow(args []string) int {
-	ref, ok := oneArg("show", args)
-	if !ok {
-		return 2
-	}
-	ix, code := openIndex()
-	if ix == nil {
-		return code
-	}
-	defer ix.Close()
-	n, err := ix.Show(ref)
-	if err != nil {
-		return fail("show %s: %v", ref, err)
-	}
-	fmt.Printf("%s\n  kind %s · type %s · %d bytes · pagerank %.3g\n  path %s\n  title %s\n", n.ID, n.Kind, n.Type, n.Size, n.PageRank, n.Path, n.Title)
-	for _, kv := range [][2]string{{"summary", n.Summary}, {"status", n.Status}, {"hubs", n.Hubs}, {"scope", n.Scope},
-		{"as_of", n.AsOf}, {"canonical_of", n.CanonicalOf}} {
-		if kv[1] != "" {
-			fmt.Printf("  %s %s\n", kv[0], kv[1])
+	return withRef("show", args, func(ix *index.Index, ref string) error {
+		n, err := ix.Show(ref)
+		if err != nil {
+			return err
 		}
-	}
-	if secs, _ := ix.Sections(n.ID); len(secs) > 0 {
-		fmt.Printf("  sections %d (brain sections %s)\n", len(secs), n.ID)
-	}
-	for _, e := range n.Out {
-		fmt.Printf("  → %-10s %s%s\n", e.Rel, e.Dst, why(e.Why))
-	}
-	for _, e := range n.In {
-		fmt.Printf("  ← %-10s %s%s\n", e.Rel, e.Src, why(e.Why))
-	}
-	return 0
-}
-
-func why(s string) string {
-	if s == "" {
-		return ""
-	}
-	return " (" + s + ")"
+		fmt.Printf("%s\n  kind %s · type %s · %d bytes · pagerank %.3g\n  path %s\n  title %s\n", n.ID, n.Kind, n.Type, n.Size, n.PageRank, n.Path, n.Title)
+		for _, kv := range [][2]string{{"summary", n.Summary}, {"status", n.Status}, {"hubs", n.Hubs}, {"scope", n.Scope},
+			{"as_of", n.AsOf}, {"canonical_of", n.CanonicalOf}} {
+			if kv[1] != "" {
+				fmt.Printf("  %s %s\n", kv[0], kv[1])
+			}
+		}
+		if secs, _ := ix.Sections(n.ID); len(secs) > 0 {
+			fmt.Printf("  sections %d (brain sections %s)\n", len(secs), n.ID)
+		}
+		for _, e := range n.Out {
+			fmt.Printf("  → %-10s %s %s\n", e.Rel, e.Dst, e.Why)
+		}
+		for _, e := range n.In {
+			fmt.Printf("  ← %-10s %s %s\n", e.Rel, e.Src, e.Why)
+		}
+		return nil
+	})
 }
 
 func cmdSections(args []string) int {
-	ref, ok := oneArg("sections", args)
-	if !ok {
-		return 2
-	}
-	ix, code := openIndex()
-	if ix == nil {
-		return code
-	}
-	defer ix.Close()
-	secs, err := ix.Sections(ref)
-	if err != nil {
-		return fail("sections %s: %v", ref, err)
-	}
-	if len(secs) == 0 {
-		fmt.Println("no sections (only docs over 50 KB are mapped)")
-		return 0
-	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tlines\tKB\theading")
-	for _, s := range secs {
-		fmt.Fprintf(tw, "%d\t%d-%d\t%.1f\t%s\n", s.Idx, s.LineStart, s.LineEnd, float64(s.Bytes)/1024, s.Heading)
-	}
-	tw.Flush()
-	return 0
+	return withRef("sections", args, func(ix *index.Index, ref string) error {
+		secs, err := ix.Sections(ref)
+		if err != nil || len(secs) == 0 {
+			return cmp.Or(err, errors.New("no sections (only markdown over 50 KB is mapped)"))
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "#\tlines\tKB\theading")
+		for _, s := range secs {
+			fmt.Fprintf(tw, "%d\t%d-%d\t%.1f\t%s\n", s.Idx, s.LineStart, s.LineEnd, float64(s.Bytes)/1024, s.Heading)
+		}
+		return tw.Flush()
+	})
 }
 
 func cmdNeighbors(args []string) int {
 	fs := flag.NewFlagSet("neighbors", flag.ContinueOnError)
-	depth := fs.Int("depth", 1, "hops")
+	depth := fs.Int("depth", 2, "hops")
 	pos, err := parseAll(fs, args)
 	if err != nil {
 		return 2
 	}
-	ref, ok := oneArg("neighbors", pos)
-	if !ok {
-		return 2
-	}
-	ix, code := openIndex()
-	if ix == nil {
-		return code
-	}
-	defer ix.Close()
-	nbs, err := ix.Neighbors(ref, *depth)
-	if err != nil {
-		return fail("neighbors %s: %v", ref, err)
-	}
-	for _, nb := range nbs {
-		arrow := "←"
-		if nb.Outgoing {
-			arrow = "→"
+	return withRef("neighbors", pos, func(ix *index.Index, ref string) error {
+		nbs, err := ix.Neighbors(ref, *depth)
+		for _, nb := range nbs {
+			arrow := "←"
+			if nb.Outgoing {
+				arrow = "→"
+			}
+			fmt.Printf("%d %s %-10s %s  %s\n", nb.Depth, arrow, nb.Rel, nb.ID, nb.Title)
 		}
-		fmt.Printf("%d %s %-10s %s  %s\n", nb.Depth, arrow, nb.Rel, nb.ID, nb.Title)
-	}
-	return 0
+		return err
+	})
 }
 
 func cmdPageRank([]string) int {
-	ix, code := openIndex()
-	if ix == nil {
-		return code
-	}
-	defer ix.Close()
-	start := time.Now()
-	iters, err := ix.RecomputePageRank(context.Background())
-	if err != nil {
-		return fail("pagerank: %v", err)
-	}
-	fmt.Printf("pagerank: %d iterations in %s\n", iters, time.Since(start).Round(time.Millisecond))
-	return 0
+	return withIndex(func(ix *index.Index) int {
+		start := time.Now()
+		iters, err := ix.RecomputePageRank(context.Background())
+		if err != nil {
+			return fail("pagerank: %v", err)
+		}
+		fmt.Printf("pagerank: %d iterations in %s\n", iters, time.Since(start).Round(time.Millisecond))
+		return 0
+	})
 }

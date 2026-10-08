@@ -474,63 +474,24 @@ func derive(tx *sql.Tx) error {
 	return nil
 }
 
+// deriveDirs keeps one dir node per folder above an indexed file, each part_of its parent. In SQL,
+// rtrim(p, replace(p, '/', ”)) is p up to its last slash.
 func deriveDirs(tx *sql.Tx) error {
-	want := map[string]bool{}
-	rows, err := tx.Query(`SELECT path FROM node WHERE kind IN ('doc', 'artifact', 'link')`)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			rows.Close()
+	for _, q := range []string{
+		`CREATE TEMP TABLE dirs AS WITH RECURSIVE d(p) AS (
+			SELECT DISTINCT rtrim(rtrim(path, replace(path, '/', '')), '/') FROM node WHERE kind IN ('doc', 'artifact', 'link')
+			UNION SELECT rtrim(rtrim(p, replace(p, '/', '')), '/') FROM d WHERE p != '')
+		 SELECT p, rtrim(rtrim(p, replace(p, '/', '')), '/') AS parent FROM d WHERE p != ''`,
+		`DELETE FROM edge WHERE source = 'derived:dir' AND src NOT IN (SELECT p FROM dirs)`,
+		`DELETE FROM node WHERE kind = 'dir' AND id NOT IN (SELECT p FROM dirs)`,
+		`INSERT OR IGNORE INTO node(id, kind, type, path, title)
+			SELECT p, 'dir', CASE WHEN parent = 'work' THEN 'work' ELSE 'dir' END, p,
+				CASE WHEN parent = '' THEN p ELSE substr(p, length(parent) + 2) END FROM dirs`,
+		`INSERT OR IGNORE INTO edge(src, dst, rel, source) SELECT p, parent, 'part_of', 'derived:dir' FROM dirs WHERE parent != ''`,
+		`DROP TABLE dirs`,
+	} {
+		if _, err := tx.Exec(q); err != nil {
 			return err
-		}
-		for d := path.Dir(p); d != "." && d != "/" && !want[d]; d = path.Dir(d) {
-			want[d] = true
-		}
-	}
-	rows.Close()
-	have := map[string]bool{}
-	rows, err = tx.Query(`SELECT id FROM node WHERE kind = 'dir'`)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		have[id] = true
-	}
-	rows.Close()
-	for d := range have {
-		if !want[d] {
-			if _, err := tx.Exec(`DELETE FROM node WHERE id = ?`, d); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(`DELETE FROM edge WHERE source = 'derived:dir' AND src = ?`, d); err != nil {
-				return err
-			}
-		}
-	}
-	for d := range want {
-		if have[d] {
-			continue
-		}
-		typ := "dir"
-		if strings.Count(d, "/") == 1 && strings.HasPrefix(d, "work/") {
-			typ = "work"
-		}
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO node(id, kind, type, path, title) VALUES (?, 'dir', ?, ?, ?)`,
-			d, typ, d, path.Base(d)); err != nil {
-			return err
-		}
-		if parent := path.Dir(d); parent != "." {
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO edge(src, dst, rel, source) VALUES (?, ?, 'part_of', 'derived:dir')`, d, parent); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

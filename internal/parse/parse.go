@@ -30,15 +30,15 @@ type Heading struct {
 }
 
 type Doc struct {
-	ID, Type, Status, Title, Summary, Scope, AsOf, Updated string
-	Hubs, Aliases                                          []string
-	Authored                                               []Rel
-	Headings                                               []Heading
-	Links                                                  []Link
-	Mentions                                               []string // pr:owner/repo#n, ticket:KEY-n, code:path@sha
-	Body                                                   string   // text without frontmatter
-	lines                                                  []string
-	bodyLine                                               int // first line after frontmatter, 1-based
+	Type, Status, Title, Summary, Scope, AsOf, Updated string
+	Hubs, Aliases                                      []string
+	Authored                                           []Rel
+	Headings                                           []Heading
+	Links                                              []Link
+	Mentions                                           []string // pr:owner/repo#n, ticket:KEY-n, code:path@sha
+	Body                                               string   // text without frontmatter
+	lines                                              []string
+	bodyLine                                           int // first line after frontmatter, 1-based
 }
 
 type Section struct {
@@ -310,7 +310,7 @@ func strs(v any) []string {
 
 func (d *Doc) applyFrontmatter(fm map[string]any) {
 	str := func(k string) string { s, _ := fm[k].(string); return s }
-	d.ID, d.Type, d.Status, d.Scope = str("id"), str("type"), str("status"), str("scope")
+	d.Type, d.Status, d.Scope = str("type"), str("status"), str("scope")
 	d.Title, d.AsOf, d.Updated = str("title"), str("as_of"), str("updated")
 	if d.Type == "" {
 		d.Type = str("metadata.type") // Claude memory files
