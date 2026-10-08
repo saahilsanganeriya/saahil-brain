@@ -321,6 +321,7 @@ func RenderCard(raw []byte, b Box, hubs map[string]bool) (content, status string
 			probs = append(probs, fmt.Sprintf("hub %q is not one of the input hubs", h))
 		}
 	}
+	ans.Body = normalizeKeyFiles(ans.Body, b)
 	keys := KeyFiles(ans.Body, b.Name)
 	if len(keys) > maxKeyFiles {
 		probs = append(probs, fmt.Sprintf("%d key files (≤ %d)", len(keys), maxKeyFiles))
@@ -345,6 +346,37 @@ func RenderCard(raw []byte, b Box, hubs map[string]bool) (content, status string
 		return "", "", errors.New(strings.Join(probs, "; "))
 	}
 	return content, c.Status, nil
+}
+
+// normalizeKeyFiles enforces the key-file rules by code instead of refusing a good CARD (as summaries and evidence are):
+// under "## Key files" a line whose path is missing, outside the box or a history copy is dropped, and at most
+// maxKeyFiles lines with a valid path are kept.
+func normalizeKeyFiles(body string, b Box) string {
+	var out []string
+	in, kept := false, 0
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "## ") {
+			in = strings.HasPrefix(strings.ToLower(line), "## key files")
+			out = append(out, line)
+			continue
+		}
+		m := backticked.FindStringSubmatch(line)
+		if !in || m == nil {
+			out = append(out, line)
+			continue
+		}
+		k, _, _ := strings.Cut(m[1], "#")
+		k = strings.TrimPrefix(k, "work/"+b.Name+"/")
+		data, err := readCapped(filepath.Join(b.Abs, k), 4096)
+		bad := err != nil || strings.HasPrefix(filepath.Clean(k), "..") || strings.Contains("/"+k, "/.archive/") ||
+			strings.Contains("/"+k, "/log/") || parse.Markdown(data).Status == "superseded"
+		if bad || kept >= maxKeyFiles {
+			continue
+		}
+		kept++
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 // KeyFiles are the box-relative paths in backticks under the card's "## Key files" heading.
