@@ -29,7 +29,7 @@ const (
 	mergeStepName = "curate.merge"
 	// with no change the step still runs once a day; the same input is then a $0 ledger answer
 	mergeEvery     = 24 * time.Hour
-	maxMergeGroups = 10 // per run; the rest are found again by the next merge
+	maxMergeGroups = 20 // per run (the 2026-10-08 sweep merged 15 in one call); the rest are found again next run
 	questionChars  = 400
 )
 
@@ -212,7 +212,9 @@ func (a *Activities) MergeDone(_ context.Context, in MergeDoneInput) (MergeDoneR
 	return out, err
 }
 
-func ownerQuestionsPath(root string) string { return filepath.Join(root, ".brain", "owner-questions.jsonl") }
+func ownerQuestionsPath(root string) string {
+	return filepath.Join(root, ".brain", "owner-questions.jsonl")
+}
 
 func readOwnerQuestions(root string) ([]OwnerQuestion, error) {
 	raw, err := os.ReadFile(ownerQuestionsPath(root))
@@ -413,10 +415,11 @@ func (a *Activities) mergeCall(ctx context.Context, in MergeStepInput, skill, st
 
 // settlePlan keeps what the applier and the owner's rules allow: ids that are current global notes, each in one group
 // at most; the newest note kept; a supersede or narrow only when the newer note is dated after the older (equal or
-// missing dates go to the owner); a stale note replaced only by one dated no earlier.
+// missing dates go to the owner); a stale note replaced only by one dated no earlier. A note this plan supersedes takes
+// no further part; a group's kept note stays current, so it may still be narrowed or asked about.
 func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 	var out MergePlan
-	taken := map[string]bool{}
+	grouped, gone := map[string]bool{}, map[string]bool{}
 	known := func(id string) bool { _, ok := notes[id]; return ok }
 	for _, g := range p.Duplicates {
 		if len(out.Duplicates) == maxMergeGroups {
@@ -424,7 +427,7 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 		}
 		var members []string
 		for _, id := range append([]string{g.Keep}, g.Supersede...) {
-			if known(id) && !taken[id] && !slices.Contains(members, id) {
+			if known(id) && !grouped[id] && !slices.Contains(members, id) {
 				members = append(members, id)
 			}
 		}
@@ -439,8 +442,9 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 		}
 		group := DuplicateGroup{Keep: keep, Why: g.Why}
 		for _, id := range members {
-			taken[id] = true
+			grouped[id] = true
 			if id != keep {
+				gone[id] = true
 				group.Supersede = append(group.Supersede, id)
 			}
 		}
@@ -449,7 +453,7 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 	asked := map[string]bool{}
 	for _, c := range p.Conflicts {
 		k := pairKey(c.Newer, c.Older)
-		if c.Newer == c.Older || !known(c.Newer) || !known(c.Older) || taken[c.Newer] || taken[c.Older] || asked[k] {
+		if c.Newer == c.Older || !known(c.Newer) || !known(c.Older) || gone[c.Newer] || gone[c.Older] || asked[k] {
 			continue
 		}
 		switch c.Resolution {
@@ -463,16 +467,16 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 		}
 		asked[k] = true
 		if c.Resolution == "supersede" {
-			taken[c.Older] = true
+			gone[c.Older] = true
 		}
 		out.Conflicts = append(out.Conflicts, c)
 	}
 	for _, s := range p.Stale {
-		if s.ID == s.ReplacedBy || !known(s.ID) || !known(s.ReplacedBy) || taken[s.ID] ||
+		if s.ID == s.ReplacedBy || !known(s.ID) || !known(s.ReplacedBy) || gone[s.ID] || gone[s.ReplacedBy] ||
 			notes[s.ReplacedBy].AsOf < notes[s.ID].AsOf {
 			continue
 		}
-		taken[s.ID] = true
+		gone[s.ID] = true
 		out.Stale = append(out.Stale, s)
 	}
 	return out
