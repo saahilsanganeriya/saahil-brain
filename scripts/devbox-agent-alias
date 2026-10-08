@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# devbox-agent → brain: each old subcommand, same arguments; a bare agent name is a devbox agent (as before).
+cmd=${1:-help}; shift $(( $# > 0 ))
+case $cmd in
+  note) n=${1:-}; shift $(( $# > 0 )); [[ $n == *:* ]] || n=devbox:$n; exec brain agents note "$n" "$@" ;;
+  list|screen|attach|new|goal|resume|move|stop|box) exec brain agents "$cmd" "$@" ;;
+  login|up|down|status|sync|resize) exec brain machine "$cmd" "$@" ;;
+  *) exec brain agents ;;
+esac
