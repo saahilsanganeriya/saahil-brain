@@ -26,8 +26,8 @@ func cmdView(args []string) int {
 	if err != nil {
 		return fail("view: %v", err)
 	}
-	fmt.Printf("view %s: %d links made · %d kept · %d stale removed (open it as an Obsidian vault; read only)\n",
-		*dir, st.Linked, st.Kept, st.Removed)
+	fmt.Printf("view %s: %d note/hub/memory copies (%d rewritten) · %d links made · %d kept · %d stale removed (open it as an Obsidian vault; read only)\n",
+		*dir, st.Copies, st.Rendered, st.Linked, st.Kept, st.Removed)
 	return 0
 }
 

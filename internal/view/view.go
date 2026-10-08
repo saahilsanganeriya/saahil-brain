@@ -26,7 +26,7 @@ var Top = []string{"BRAIN.md", "sessions", "journal", "inbox"}
 var rendered = []string{"notes", "hubs", "memory"}
 
 type Stats struct {
-	Linked, Kept, Removed, Rendered int
+	Linked, Kept, Removed, Rendered, Copies int
 }
 
 // Build creates or refreshes dir from the brain at root: symlinks for the top entries and work/'s markdown, read-only
@@ -52,11 +52,12 @@ func Build(root, dir string) (Stats, error) {
 	}
 
 	for _, name := range rendered {
-		n, err := renderFolder(filepath.Join(root, name), filepath.Join(dir, name), name != "memory")
+		n, copies, err := renderFolder(filepath.Join(root, name), filepath.Join(dir, name), name != "memory")
 		if err != nil {
 			return st, err
 		}
 		st.Rendered += n
+		st.Copies += copies
 	}
 
 	want := map[string]string{} // view path → brain file
@@ -147,21 +148,21 @@ const readOnly = 0o444
 
 // renderFolder mirrors src's markdown files into dst as read-only copies (notes rendered with their links as
 // [[wikilinks]]); it replaces a symlink left by an earlier view and removes only read-only files it made before.
-func renderFolder(src, dst string, asNotes bool) (int, error) {
+func renderFolder(src, dst string, asNotes bool) (rewritten, copies int, err error) {
 	if fi, err := os.Lstat(dst); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
 		if err := os.Remove(dst); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return 0, nil
+			return 0, 0, nil
 		}
-		return 0, err
+		return 0, 0, err
 	}
 	seen, n := map[string]bool{}, 0
 	for _, e := range entries {
@@ -185,10 +186,10 @@ func renderFolder(src, dst string, asNotes bool) (int, error) {
 		}
 		tmp := at + ".tmp"
 		if err := os.WriteFile(tmp, out, readOnly); err != nil {
-			return n, err
+			return n, len(seen), err
 		}
 		if err := os.Rename(tmp, at); err != nil {
-			return n, err
+			return n, len(seen), err
 		}
 		n++
 	}
@@ -198,7 +199,7 @@ func renderFolder(src, dst string, asNotes bool) (int, error) {
 			_ = os.Remove(filepath.Join(dst, e.Name()))
 		}
 	}
-	return n, nil
+	return n, len(seen), nil
 }
 
 // Obsidian renders a note for the viewer: its typed links become [[wikilinks]] in the properties and in a Links
