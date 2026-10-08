@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,5 +47,32 @@ func TestBatchCrossReferencesSurvive(t *testing.T) {
 	n, err := Parse(b)
 	if err != nil || len(n.Related) != 2 {
 		t.Fatalf("finding-b related = %+v err=%v", n.Related, err)
+	}
+}
+
+// Catches the second filing defect seen on real batches: a good note rejected only because its summary ran past
+// 160 chars, or because it cited one evidence path that does not exist next to one that does.
+func TestNewNoteSummaryCutAndMissingEvidenceDropped(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"notes", "hubs"} {
+		_ = os.MkdirAll(filepath.Join(root, d), 0o755)
+	}
+	_ = os.WriteFile(filepath.Join(root, "src.md"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "hubs", "git.md"), Render(Note{ID: "git", Type: "hub", Status: "current",
+		Summary: "git", Broader: []string{"index"}}), 0o644)
+	n := note("finding-long", "git")
+	n.Summary = strings.Repeat("word ", 50)
+	n.Evidence = []string{"src.md", "missing.md"}
+	rep, err := Apply(context.Background(), root, Delta{Ops: []Op{{Op: "add_note", Note: n}}}, Options{Now: time.Now()})
+	if err != nil || len(rep.Rejected) != 0 || rep.Normalized != 2 {
+		t.Fatalf("rejected=%+v normalized=%d err=%v", rep.Rejected, rep.Normalized, err)
+	}
+	b, _ := os.ReadFile(filepath.Join(root, "notes", "finding-long.md"))
+	got, _ := Parse(b)
+	if r := []rune(got.Summary); len(r) > 160 || !strings.HasSuffix(got.Summary, "…") {
+		t.Fatalf("summary %d runes: %q", len(r), got.Summary)
+	}
+	if len(got.Evidence) != 1 || got.Evidence[0] != "src.md" {
+		t.Fatalf("evidence = %v", got.Evidence)
 	}
 }

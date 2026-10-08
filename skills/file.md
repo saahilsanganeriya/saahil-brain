@@ -49,7 +49,7 @@ ONE JSON object, nothing else. Schema:
 | `id` | `<type>-<slug>`: lowercase letters, digits and hyphens, ≤ 60 chars, starts with its type |
 | `type` | `finding decision concept system person example idea experiment lesson anti-pattern playbook` |
 | `status` | `current` |
-| `summary` | the fact itself, ≤ 160 chars — it becomes a line of MEMORY.md |
+| `summary` | the fact itself, ≤ 160 characters HARD LIMIT (count them; a longer summary is cut mid-thought) — it becomes a line of MEMORY.md |
 | `scope` | `global` (every repo and session) · `hub` (within its hubs' topic) · `work` (one work box only) |
 | `hubs` | 1–3 ids, ONLY from the input `hubs` list |
 | `evidence` | ≥ 1 brain-relative path (`path#heading` for one section) on finding, decision and lesson |
@@ -57,7 +57,7 @@ ONE JSON object, nothing else. Schema:
 | `related` | 0–5 `{id, why}`, only to notes you add in this answer |
 | `aliases` | 1–5 names a person would search for |
 | `as_of` | the material's `as_of`; else the date of `metadata.modified`; else `today` |
-| `body` | markdown; the whole note ≤ 4 KB; a lesson body ≤ 300 chars |
+| `body` | markdown; the whole note ≤ 4 KB (frontmatter included) — an over-cap note is REJECTED, so compress: keep every fact, drop narration, point `sources` at the original; a lesson body ≤ 300 chars |
 
 Ops you may use: `add_note`, `update_note` (on a note you add in this same answer), `link`. Never `delete`.
 

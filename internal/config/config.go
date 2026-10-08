@@ -103,6 +103,7 @@ const (
 	StateMaxBytes       = 8 * 1024
 	CardMaxBytes        = 3 * 1024
 	NoteMaxBytes        = 4 * 1024
+	SummaryMaxChars     = 160
 	LessonMaxChars      = 300
 	SectionWarnBytes    = 20 * 1024
 	BigDocBytes         = 50 * 1024

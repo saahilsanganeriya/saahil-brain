@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"saahil.local/brain/internal/config"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -104,6 +106,7 @@ type Report struct {
 	// DroppedRefs are about/supersedes/related links to notes that do not exist yet: the note is kept without them
 	// and they wait in .brain/pending-links.jsonl until their target lands (ResolvePending).
 	DroppedRefs []PendingLink `json:"dropped_refs,omitempty"`
+	Normalized  int           `json:"normalized"` // summaries cut to 160 chars + missing evidence paths dropped
 }
 
 type entry struct {
@@ -112,11 +115,12 @@ type entry struct {
 }
 
 type applier struct {
-	root    string
-	opts    Options
-	files   map[string]*entry // by id
-	adding  map[string]bool   // ids this delta adds, so notes in one batch may cite each other
-	dropped []PendingLink
+	root       string
+	opts       Options
+	files      map[string]*entry // by id
+	adding     map[string]bool   // ids this delta adds, so notes in one batch may cite each other
+	dropped    []PendingLink
+	normalized int
 }
 
 // Apply checks every op, applies the valid ones in order and writes each changed file atomically. It never deletes:
@@ -148,6 +152,7 @@ func Apply(ctx context.Context, root string, d Delta, opts Options) (Report, err
 	}
 	a.dropRefsToRejected()
 	rep.DroppedRefs = a.dropped
+	rep.Normalized = a.normalized
 	ids := make([]string, 0, len(a.files))
 	for id := range a.files {
 		ids = append(ids, id)
@@ -337,6 +342,7 @@ func (a *applier) commit(n Note, orig []byte) error {
 	if orig == nil {
 		// a new note may cite notes that land later; an edit (link, update) must name an existing target
 		a.dropUnresolved(&n)
+		a.normalize(&n)
 	}
 	resolve := func(kind, ref string) bool { return (kind == "id" && a.adding[ref]) || a.resolve(kind, ref) }
 	if probs := Check(n, Render(n), resolve); len(probs) > 0 {
@@ -344,6 +350,32 @@ func (a *applier) commit(n Note, orig []byte) error {
 	}
 	a.files[n.ID] = &entry{note: n, orig: orig}
 	return nil
+}
+
+// normalize enforces two mechanical caps on a new note instead of rejecting it: the summary is cut to 160 chars at a
+// word boundary (the body keeps the whole fact), and evidence/source paths that do not exist are dropped (a note that
+// needs evidence and is left with none is still rejected by Check).
+func (a *applier) normalize(n *Note) {
+	if r := []rune(n.Summary); len(r) > config.SummaryMaxChars {
+		cut := string(r[:config.SummaryMaxChars-1])
+		if i := strings.LastIndex(cut, " "); i > config.SummaryMaxChars/2 {
+			cut = cut[:i]
+		}
+		n.Summary = strings.TrimRight(cut, " ,;:—-") + "…"
+		a.normalized++
+	}
+	keep := func(paths []string) []string {
+		var out []string
+		for _, p := range paths {
+			if a.resolve("path", p) {
+				out = append(out, p)
+			} else {
+				a.normalized++
+			}
+		}
+		return out
+	}
+	n.Evidence, n.Sources = keep(n.Evidence), keep(n.Sources)
 }
 
 // dropUnresolved removes links to notes that neither exist nor are added by this delta; they are queued, not lost.
