@@ -33,6 +33,7 @@ var AllowedSteps = map[string]Step{
 	"update":  {Args: []string{"self-update"}, Timeout: 5 * time.Minute, Only: config.Laptop},
 	// read-only views and the shadow-phase setup
 	"hook-bench":             {Args: []string{"hook", "bench"}, Timeout: 5 * time.Minute},
+	"view":                   {Args: []string{"view"}, Timeout: 10 * time.Minute},
 	"agents-list":            {Args: []string{"agents", "list"}, Timeout: 2 * time.Minute},
 	"init":                   {Args: []string{"init"}, Timeout: time.Minute},
 	"import-memory":          {Args: []string{"import", "memory"}, Timeout: 10 * time.Minute},

@@ -180,6 +180,7 @@ func cmdSync(args []string) int {
 		if code := cmdIndex(nil); code != 0 {
 			return code
 		}
+		refreshView()
 	}
 	// unison: 0 all done, 1 some files skipped, 2 non-fatal failures, 3 fatal
 	if rec.ExitCode >= 2 {
