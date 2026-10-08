@@ -3,7 +3,6 @@ package rank
 import (
 	"database/sql"
 	"math"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -82,49 +81,49 @@ func scanCand(rows *sql.Rows, withBM25 bool) (cand, error) {
 	return c, err
 }
 
-var tokenRE = regexp.MustCompile(`[\p{L}\p{N}_]+`)
+const (
+	maxTerms      = 12    // a long query (a dispatch brief) is cut to its rarest words
+	minTerms      = 3     // kept whatever their cost
+	termBudget    = 12000 // postings one query may score
+	wMention      = 0.5   // a document the query names by path
+	anchorsPerDir = 3
+	anchorRel     = 0.8 // relevance of a named folder's anchor documents
+)
 
-var stopwords = map[string]bool{"the": true, "and": true, "for": true, "with": true, "what": true, "how": true,
-	"why": true, "does": true, "this": true, "that": true, "are": true, "was": true, "from": true, "into": true}
-
-// matchQuery builds an FTS5 query from free text: every word quoted (no operator injection), joined by AND or OR.
-func matchQuery(q string, op string) string {
-	var terms []string
-	for _, t := range tokenRE.FindAllString(strings.ToLower(q), 16) {
-		if len(t) >= 2 && !stopwords[t] {
-			terms = append(terms, `"`+t+`"`)
+// matchQuery is an FTS5 OR of the rare terms in any column and the common ones in the short columns, each quoted
+// (no operator injection).
+func matchQuery(rare, common []string) string {
+	quote := func(ts []string) string {
+		quoted := make([]string, len(ts))
+		for i, t := range ts {
+			quoted[i] = `"` + t + `"`
 		}
+		return strings.Join(quoted, " OR ")
 	}
-	return strings.Join(terms, op)
+	switch {
+	case len(common) == 0:
+		return quote(rare)
+	case len(rare) == 0:
+		return "{title aliases summary} : (" + quote(common) + ")"
+	}
+	return quote(rare) + " OR {title aliases summary} : (" + quote(common) + ")"
 }
 
-// Search ranks nodes for q: score = relevance (BM25 over title, aliases, summary, body) + proximity (personalized
-// PageRank from the best matches and Seeds, Deep only) + usefulness + recency of helpful use + scope fit + type
-// prior + a little global PageRank.
+// Search ranks nodes for q: score = relevance (BM25 over title, aliases, summary, body for the query's salient
+// words, OR-ed; a document named by path ranks first) + proximity (personalized PageRank from the best matches and
+// Seeds, Deep only) + usefulness + recency of helpful use + scope fit + type prior + a little global PageRank.
 func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 10
 	}
-	cands, err := bm25Candidates(db, matchQuery(q, " "))
+	words := Words(q)
+	df, err := DocFreqs(db, words)
 	if err != nil {
 		return nil, err
 	}
-	if or := matchQuery(q, " OR "); len(cands) < opts.Limit && or != "" {
-		// partial matches only count in the short columns: OR over bodies scores tens of thousands of rows
-		more, err := bm25Candidates(db, "{title aliases summary} : ("+or+")")
-		if err != nil {
-			return nil, err
-		}
-		have := map[string]bool{}
-		for _, c := range cands {
-			have[c.ID] = true
-		}
-		for _, c := range more {
-			if !have[c.ID] {
-				c.bm25 /= 2 // matched only some words
-				cands = append(cands, c)
-			}
-		}
+	cands, err := bm25Candidates(db, matchQuery(Salient(words, df, maxTerms, termBudget)))
+	if err != nil {
+		return nil, err
 	}
 	best := 0.0
 	for _, c := range cands {
@@ -138,6 +137,9 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 			cands[i].Relevance *= artifactRelevance
 		}
 	}
+	if cands, err = addMentions(db, cands, q, opts.Seeds); err != nil {
+		return nil, err
+	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].Relevance > cands[j].Relevance })
 	if opts.Deep {
 		if cands, err = addProximity(db, cands, opts.Seeds); err != nil {
@@ -145,6 +147,63 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 		}
 	}
 	return score(cands, opts), nil
+}
+
+// addMentions puts the documents q names by path at full relevance plus wMention, and a named folder's anchor
+// documents at anchorRel.
+func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, error) {
+	var boxes []string
+	for _, s := range seeds {
+		if b := boxOf(s); b != "" {
+			boxes = append(boxes, b)
+		}
+	}
+	named, err := Mentions(db, q, boxes)
+	if err != nil || len(named) == 0 {
+		return cands, err
+	}
+	rel := map[string]float64{}
+	for _, id := range named {
+		anchors, err := Anchors(db, id, anchorsPerDir)
+		if err != nil {
+			return nil, err
+		}
+		if len(anchors) == 0 {
+			rel[id] = max(rel[id], 1+wMention)
+		}
+		for _, a := range anchors {
+			rel[a] = max(rel[a], anchorRel)
+		}
+	}
+	at := map[string]int{}
+	for i, c := range cands {
+		at[c.ID] = i
+	}
+	var missing []any
+	for id, r := range rel {
+		if i, ok := at[id]; ok {
+			cands[i].Relevance = max(cands[i].Relevance, r)
+		} else {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return cands, nil
+	}
+	rows, err := db.Query(`SELECT `+hitCols+` FROM node n `+rankable+` AND n.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(missing)), ",")+`)`, missing...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		c, err := scanCand(rows, false)
+		if err != nil {
+			return nil, err
+		}
+		c.Relevance = rel[c.ID]
+		cands = append(cands, c)
+	}
+	return cands, rows.Err()
 }
 
 func bm25Candidates(db *sql.DB, match string) ([]cand, error) {
