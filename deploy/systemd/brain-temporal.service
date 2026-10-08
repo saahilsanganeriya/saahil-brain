@@ -1,0 +1,15 @@
+# The brain's own Temporal: a local dev server bound to 127.0.0.1, state in ~/.local/state/brain/temporal.db.
+# Install: cp deploy/systemd/*.service ~/.config/systemd/user/ && systemctl --user daemon-reload &&
+#          systemctl --user enable --now brain-temporal brain-worker
+[Unit]
+Description=brain: local Temporal dev server (127.0.0.1:7233, namespace brain)
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p /home/test-user/.local/state/brain
+ExecStart=/home/test-user/.local/bin/temporal server start-dev --ip 127.0.0.1 --port 7233 --ui-port 8233 --db-filename /home/test-user/.local/state/brain/temporal.db --namespace brain --log-level warn --headless
+Restart=on-failure
+RestartSec=5
+MemoryMax=2G
+
+[Install]
+WantedBy=default.target
