@@ -497,13 +497,14 @@ func deriveDirs(tx *sql.Tx) error {
 	return nil
 }
 
-// deriveCopies keeps one canonical node per content hash: the oldest file, then the smallest id. Only rows whose
-// canonical changed are written.
+// deriveCopies keeps one canonical node per content hash: a live file before any history copy (.archive/, log/), then
+// the oldest, then the smallest id. Only rows whose canonical changed are written.
 func deriveCopies(tx *sql.Tx) error {
 	for _, q := range []string{
 		`WITH g AS (SELECT id, CASE WHEN first_value(id) OVER w = id THEN '' ELSE first_value(id) OVER w END AS canon
 			FROM node WHERE sha256 != '' AND size > 0 AND kind IN ('doc', 'artifact')
-			WINDOW w AS (PARTITION BY kind, sha256 ORDER BY mtime, id))
+			WINDOW w AS (PARTITION BY kind, sha256 ORDER BY (path LIKE '.archive/%' OR path LIKE '%/.archive/%'
+				OR path LIKE 'log/%' OR path LIKE '%/log/%'), mtime, id))
 		 UPDATE node SET canonical_of = g.canon FROM g WHERE node.id = g.id AND node.canonical_of != g.canon`,
 		`DELETE FROM edge WHERE source = 'derived:copy'
 			AND NOT EXISTS (SELECT 1 FROM node n WHERE n.id = edge.src AND n.canonical_of = edge.dst)`,

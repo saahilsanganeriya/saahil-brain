@@ -118,9 +118,12 @@ func TestCopyOfCollapses(t *testing.T) {
 	brain, docs := corpus(t)
 	old := time.Now().Add(-time.Hour)
 	_ = os.Chtimes(filepath.Join(docs, "box/plans/DESIGN.md"), old, old)
-	for _, p := range []string{"snap/plans/DESIGN.md", "box/handoff/DESIGN.md"} {
+	for _, p := range []string{"snap/plans/DESIGN.md", "box/handoff/DESIGN.md", "box/log/DESIGN.md"} {
 		put(t, docs, p, "# Design\n\nCurrent. Links [ocr](../reports/ocr.md) and [gone](../missing.md).\n")
 	}
+	// a history copy older than the live file must never become the canonical one (the dream's .archive copies did)
+	older := old.Add(-time.Hour)
+	_ = os.Chtimes(filepath.Join(docs, "box/log/DESIGN.md"), older, older)
 	db := build(t, filepath.Join(t.TempDir(), "b.db"), []scan.Root{{Abs: brain}, {Abs: docs, Prefix: "work"}}, true)
 
 	rows, err := db.Query(`SELECT id, canonical_of FROM node WHERE path LIKE '%DESIGN.md' AND kind = 'doc' ORDER BY id`)
@@ -135,13 +138,13 @@ func TestCopyOfCollapses(t *testing.T) {
 	}
 	rows.Close()
 	want := map[string]string{"work/box/plans/DESIGN.md": "", "work/snap/plans/DESIGN.md": "work/box/plans/DESIGN.md",
-		"work/box/handoff/DESIGN.md": "work/box/plans/DESIGN.md"}
+		"work/box/handoff/DESIGN.md": "work/box/plans/DESIGN.md", "work/box/log/DESIGN.md": "work/box/plans/DESIGN.md"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("canonical_of = %v, want %v", got, want)
 	}
 	var edges int
 	_ = db.QueryRow(`SELECT count(*) FROM edge WHERE rel = 'copy_of' AND dst = 'work/box/plans/DESIGN.md'`).Scan(&edges)
-	if edges != 2 {
-		t.Fatalf("copy_of edges = %d, want 2", edges)
+	if edges != 3 {
+		t.Fatalf("copy_of edges = %d, want 3", edges)
 	}
 }
