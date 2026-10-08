@@ -25,7 +25,7 @@ const (
 	candidates   = 100
 	ftsTop       = 300 // FTS matches considered before exclusions; copies and old versions take a share
 	pprSeeds     = 10
-	pprExtra     = 50
+	pprExtra     = 200 // nodes reached only through the graph that may join the candidates
 	maxExpandDeg = 300 // a big folder or a much-cited PR is not expanded by the push; mass reaching it stays there
 )
 
@@ -228,8 +228,8 @@ func addProximity(db *sql.DB, cands []cand, extraSeeds []string) ([]cand, error)
 	sort.Slice(extra, func(i, j int) bool {
 		return extra[i].p > extra[j].p || (extra[i].p == extra[j].p && extra[i].id < extra[j].id)
 	})
-	if len(extra) > pprExtra*4 {
-		extra = extra[:pprExtra*4] // most are folders or mention nodes and fall out at the rankable filter
+	if len(extra) > pprExtra {
+		extra = extra[:pprExtra] // many are folders or mention nodes and fall out at the rankable filter
 	}
 	if len(extra) > 0 {
 		args := make([]any, len(extra))
@@ -241,15 +241,13 @@ func addProximity(db *sql.DB, cands []cand, extraSeeds []string) ([]cand, error)
 		if err != nil {
 			return nil, err
 		}
-		added := 0
-		for rows.Next() && added < pprExtra {
+		for rows.Next() {
 			c, err := scanCand(rows, false)
 			if err != nil {
 				rows.Close()
 				return nil, err
 			}
 			cands = append(cands, c)
-			added++
 		}
 		rows.Close()
 	}
