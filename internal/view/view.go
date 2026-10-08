@@ -4,6 +4,7 @@
 package view
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,18 +13,25 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"saahil.local/brain/internal/config"
+	"saahil.local/brain/internal/delta"
 )
 
-// Top are the brain's own entries linked whole into the view.
-var Top = []string{"BRAIN.md", "memory", "hubs", "notes", "sessions", "journal", "inbox"}
+// Top are the brain's own entries linked whole into the view; notes/, hubs/ and memory/ are rendered copies instead.
+var Top = []string{"BRAIN.md", "sessions", "journal", "inbox"}
+
+// rendered are the folders the view holds as read-only copies, links made visible to the viewer.
+var rendered = []string{"notes", "hubs", "memory"}
 
 type Stats struct {
-	Linked, Kept, Removed int
+	Linked, Kept, Removed, Rendered int
 }
 
-// Build creates or refreshes dir from the brain at root. It only ever creates folders and symlinks in dir, and only
-// removes symlinks (and folders they leave empty); a real file in dir is an error, never overwritten.
+// Build creates or refreshes dir from the brain at root: symlinks for the top entries and work/'s markdown, read-only
+// rendered copies for notes/, hubs/ and memory/. It removes only symlinks and its own read-only copies (and folders
+// they leave empty); a real file where a link belongs is an error, never overwritten.
 func Build(root, dir string) (Stats, error) {
 	var st Stats
 	root, dir = filepath.Clean(root), filepath.Clean(dir)
@@ -41,6 +49,14 @@ func Build(root, dir string) (Stats, error) {
 		if err := link(target, filepath.Join(dir, name), &st); err != nil {
 			return st, err
 		}
+	}
+
+	for _, name := range rendered {
+		n, err := renderFolder(filepath.Join(root, name), filepath.Join(dir, name), name != "memory")
+		if err != nil {
+			return st, err
+		}
+		st.Rendered += n
 	}
 
 	want := map[string]string{} // view path → brain file
@@ -125,4 +141,126 @@ func link(target, at string, st *Stats) error {
 	}
 	st.Linked++
 	return nil
+}
+
+const readOnly = 0o444
+
+// renderFolder mirrors src's markdown files into dst as read-only copies (notes rendered with their links as
+// [[wikilinks]]); it replaces a symlink left by an earlier view and removes only read-only files it made before.
+func renderFolder(src, dst string, asNotes bool) (int, error) {
+	if fi, err := os.Lstat(dst); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+		if err := os.Remove(dst); err != nil {
+			return 0, err
+		}
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return 0, err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	seen, n := map[string]bool{}, 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			continue
+		}
+		out := raw
+		if asNotes {
+			if note, err := delta.Parse(raw); err == nil {
+				out = Obsidian(note)
+			}
+		}
+		seen[e.Name()] = true
+		at := filepath.Join(dst, e.Name())
+		if cur, err := os.ReadFile(at); err == nil && bytes.Equal(cur, out) {
+			continue
+		}
+		tmp := at + ".tmp"
+		if err := os.WriteFile(tmp, out, readOnly); err != nil {
+			return n, err
+		}
+		if err := os.Rename(tmp, at); err != nil {
+			return n, err
+		}
+		n++
+	}
+	left, _ := os.ReadDir(dst)
+	for _, e := range left {
+		if info, err := e.Info(); err == nil && !seen[e.Name()] && info.Mode().Perm() == readOnly {
+			_ = os.Remove(filepath.Join(dst, e.Name()))
+		}
+	}
+	return n, nil
+}
+
+// Obsidian renders a note for the viewer: its typed links become [[wikilinks]] in the properties and in a Links
+// section, which is how Obsidian draws its graph (the brain itself keeps bare ids).
+func Obsidian(n delta.Note) []byte {
+	wiki := func(ids []string) []string {
+		out := make([]string, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, "[["+strings.TrimSuffix(id, ".md")+"]]")
+		}
+		return out
+	}
+	paths := func(ps []string) []string {
+		var out []string
+		for _, p := range ps {
+			if !strings.HasPrefix(p, ".") { // .import/… copies never reach the view
+				out = append(out, "[["+p+"]]")
+			}
+		}
+		return out
+	}
+	var related []string
+	for _, r := range n.Related {
+		related = append(related, r.ID)
+	}
+	type props struct {
+		ID         string   `yaml:"id"`
+		Type       string   `yaml:"type"`
+		Status     string   `yaml:"status"`
+		Summary    string   `yaml:"summary"`
+		Scope      string   `yaml:"scope,omitempty"`
+		AsOf       string   `yaml:"as_of,omitempty"`
+		Aliases    []string `yaml:"aliases,omitempty"`
+		Hubs       []string `yaml:"hubs,omitempty"`
+		About      []string `yaml:"about,omitempty"`
+		Broader    []string `yaml:"broader,omitempty"`
+		Supersedes []string `yaml:"supersedes,omitempty"`
+		Related    []string `yaml:"related,omitempty"`
+		Evidence   []string `yaml:"evidence,omitempty"`
+		Sources    []string `yaml:"sources,omitempty"`
+	}
+	fm, _ := yaml.Marshal(props{n.ID, n.Type, n.Status, n.Summary, n.Scope, n.AsOf, n.Aliases, wiki(n.Hubs), wiki(n.About),
+		wiki(n.Broader), wiki(n.Supersedes), wiki(related), paths(n.Evidence), paths(n.Sources)})
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.Write(fm)
+	b.WriteString("---\n")
+	b.WriteString(strings.TrimRight(n.Body, "\n") + "\n")
+	var links []string
+	for _, r := range n.Related {
+		links = append(links, "- related: [["+r.ID+"]] — "+r.Why)
+	}
+	for _, group := range []struct {
+		rel string
+		ids []string
+	}{{"hub", n.Hubs}, {"supersedes", n.Supersedes}, {"broader", n.Broader}, {"about", n.About}} {
+		for _, id := range group.ids {
+			links = append(links, "- "+group.rel+": [["+id+"]]")
+		}
+	}
+	if len(links) > 0 {
+		b.WriteString("\n## Links\n\n" + strings.Join(links, "\n") + "\n")
+	}
+	return []byte(b.String())
 }
