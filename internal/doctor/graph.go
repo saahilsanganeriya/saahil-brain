@@ -84,7 +84,8 @@ func dangling(db *sql.DB) (Status, string, error) {
 		return Fail, "", err
 	}
 	defer rows.Close()
-	l, n := lint.New(config.BrainRoot()), 0
+	l, n, elsewhere := lint.New(config.BrainRoot()), 0, 0
+	var examples []string
 	for rows.Next() {
 		var dst string
 		if err := rows.Scan(&dst); err != nil {
@@ -95,14 +96,28 @@ func dangling(db *sql.DB) (Status, string, error) {
 		if strings.HasPrefix(dst, "/") && !strings.HasPrefix(config.Canonical(dst), config.Canonical(config.BrainRoot())+"/") {
 			continue
 		}
-		if !l.Resolves(dst) {
+		switch {
+		case l.Resolves(dst):
+		case !config.SyncCarries(dst):
+			elsewhere++ // bulk or a non-text file under work/: it lives on the machine that made it, by design
+		default:
 			n++
+			if len(examples) < 3 {
+				examples = append(examples, dst)
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return Fail, "", err
 	}
-	return verdict(n == 0, Warn), fmt.Sprintf("%d links and refs from notes and hubs resolve to nothing (target 0)", n), nil
+	detail := fmt.Sprintf("%d links and refs from notes and hubs resolve to nothing (target 0)", n)
+	if len(examples) > 0 {
+		detail += ": " + strings.Join(examples, ", ")
+	}
+	if elsewhere > 0 {
+		detail += fmt.Sprintf("; %d point at bulk the sync leaves on the other machine", elsewhere)
+	}
+	return verdict(n == 0, Warn), detail, nil
 }
 
 func hubCoverage(db *sql.DB) (Status, string, error) {

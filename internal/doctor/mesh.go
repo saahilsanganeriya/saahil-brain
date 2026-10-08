@@ -21,7 +21,7 @@ func init() {
 	Register(Check{Name: "mesh.sessions", Run: checkSessions})
 	Register(Check{Name: "brain.skeleton", Run: checkSkeleton})
 	Register(Check{Name: "sync.last", Run: checkSync})
-	Register(Check{Name: "sync.conflicts", Run: checkConflicts})
+	Register(Check{Name: "sync.conflicts", Run: checkConflicts, Timeout: 2 * time.Minute}) // walks all of ~/brain
 	Register(Check{Name: "brain.work-root", Run: checkWorkRoot})
 }
 

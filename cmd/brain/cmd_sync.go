@@ -50,7 +50,7 @@ type syncRecord struct {
 func syncRecordPath() string { return filepath.Join(config.StateDir(), "sync-last.json") }
 
 // workText un-ignores the text types inside work/ that the extension rule above ignores.
-var workText = `Regex work/.*\.(md|txt|py|sh|js|toml|yml|yaml)`
+var workText = `Regex work/.*\.(` + strings.Join(config.SyncWorkTextExts, "|") + `)`
 
 func unisonArgs(root string) []string {
 	args := []string{root, "ssh://" + config.DevboxHost + "/" + root,

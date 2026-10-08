@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -126,6 +127,25 @@ func IsSyncBulkDir(name string) bool {
 		}
 	}
 	return false
+}
+
+// SyncWorkTextExts are the only file extensions the sync carries under work/ (bulk stays on the machine that made it).
+var SyncWorkTextExts = []string{"md", "txt", "py", "sh", "js", "toml", "yml", "yaml"}
+
+// SyncCarries reports whether the sync would bring a brain-relative path to the other machine (size aside): not under
+// a bulk folder, and under work/ only text or an extensionless file.
+func SyncCarries(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	for _, part := range strings.Split(rel, "/") {
+		if IsSyncBulkDir(part) {
+			return false
+		}
+	}
+	if !strings.HasPrefix(rel, "work/") {
+		return true
+	}
+	ext := strings.TrimPrefix(filepath.Ext(strings.SplitN(rel, "#", 2)[0]), ".")
+	return ext == "" || slices.Contains(SyncWorkTextExts, ext)
 }
 
 // IsSyncConflictCopy names a conflict copy left by a sync: Unison's "<file> (conflict…_on_<date>…)", the cut-over
