@@ -332,8 +332,9 @@ func TestSplitsPartitionItemsBySession(t *testing.T) {
 
 // TestRankingSeesTheBrainAsOfTheSessionStart catches a navigation eval that ranks the live index: a file born after
 // the session started (no older copy, no earlier session read it) credited as a pointer or a navigator hit, though a
-// brain as of the first prompt could not hold it; and one that takes a file re-born by an agent's Edit (a new inode)
-// for a new one when an earlier session had read it.
+// brain as of the first prompt could not hold it; one that takes a file re-born by an agent's Edit (a new inode) for a
+// new one when an earlier session had read it; and one that keeps a file it cannot find where its path says as old
+// (CARDs staged on 2026-10-08 under .brain/staging, presented as work/<box>/CARD.md, became pointers for 10-04 sessions).
 func TestRankingSeesTheBrainAsOfTheSessionStart(t *testing.T) {
 	ix := fixture(t)
 	env := NewEnv(ix, Sets{}, testNow)
@@ -346,7 +347,7 @@ func TestRankingSeesTheBrainAsOfTheSessionStart(t *testing.T) {
 	}
 
 	oct6 := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
-	stubFileTimes(t, map[string]time.Time{"box-a/STATE.md": oct6, "box-a/plans/rollout.md": oct6})
+	stubFileTimes(t, map[string]time.Time{"box-a/STATE.md": oct6, "box-a/plans/rollout.md": oct6, "box-a/README.md": {}})
 	env = NewEnv(ix, Sets{}, testNow)
 	g := env.guardFor("sessions/devbox/2026/10/2026-10-05-aaaa1111-glacier.md", start)
 	if ptrs := env.Ranker.Pointers(prompt, "/tmp/work", g.hides); state.any(ptrs) {
@@ -357,6 +358,9 @@ func TestRankingSeesTheBrainAsOfTheSessionStart(t *testing.T) {
 	}
 	if g.hides("work/box-a/plans/rollout.md") {
 		t.Errorf("rollout.md was re-born after the start, but the 09-25 session read it: it existed")
+	}
+	if !g.hides("work/box-a/README.md") {
+		t.Errorf("README.md is not on disk and the index saw it after the start: it must be dated by that, not kept")
 	}
 }
 

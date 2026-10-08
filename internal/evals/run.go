@@ -585,7 +585,7 @@ func (e *Env) navNotes(rows []NavRow) []string {
 		fmt.Sprintf("%d items had no readable prompt and are left out of every rate", failed),
 		"brain search reads only the first 16 words of a query, so long prompts are ranked on their opening words",
 		"index: the live index seen as of the session's start: the ranker and the navigator skip files with no sign of existing before it (born, last modified, or read by a session that ended, earlier), session notes from its day on and notes sourced from it",
-		"targets: indexed docs and data files the session read or wrote and that existed before it, without generic files (README, CLAUDE.md, MEMORY.md, …), folders, bulk-folder summaries, sessions or repo code; an imported memory is also hit through a note filed from it",
+		"targets: indexed docs and data files the session read or wrote and that existed before it, without generic files (README, CLAUDE.md, MEMORY.md, …), folders, bulk-folder summaries, sessions, repo code or files the first prompt already holds (the brief it was pasted from); an imported memory is also hit through a note filed from it",
 		"diagnostic: a pointer into the same work box as a target, though not a target file",
 	}
 }

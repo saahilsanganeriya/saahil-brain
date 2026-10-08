@@ -26,11 +26,16 @@ type existence struct {
 	db      *sql.DB
 	touched map[string]time.Time // node path → end of the earliest session that read or wrote it
 	paths   map[string]string    // node id → path, "" for nodes without a file (tickets, PRs, links)
-	times   map[string][2]time.Time
+	times   map[string]fileDates
+}
+
+type fileDates struct {
+	born, modified time.Time
+	keep           bool // no way to date it: kept as old
 }
 
 func newExistence(root string, db *sql.DB) (*existence, error) {
-	x := &existence{root: root, db: db, touched: map[string]time.Time{}, paths: map[string]string{}, times: map[string][2]time.Time{}}
+	x := &existence{root: root, db: db, touched: map[string]time.Time{}, paths: map[string]string{}, times: map[string]fileDates{}}
 	err := filepath.WalkDir(filepath.Join(root, "sessions"), func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
 			return err
@@ -61,19 +66,32 @@ func newExistence(root string, db *sql.DB) (*existence, error) {
 	return x, err // x is usable either way
 }
 
-// before reports whether the node path p existed before t; a file without a birth time (other filesystems, deleted
-// files) is kept, since nothing says it is new.
+// before reports whether the node path p existed before t. A file not where its path says (a staged copy, a moved or
+// deleted file) is dated by the mtime the index recorded; a file on a filesystem without birth times is kept, since
+// nothing says it is new.
 func (x *existence) before(p string, t time.Time) bool {
-	ts, ok := x.times[p]
+	d, ok := x.times[p]
 	if !ok {
-		ts[0], ts[1] = fileTimes(x.abs(p))
-		x.times[p] = ts
+		born, modified := fileTimes(x.abs(p))
+		switch {
+		case born.IsZero() && !modified.IsZero():
+			d.keep = true
+		case modified.IsZero():
+			var ns int64
+			if x.db.QueryRow(`SELECT mtime FROM node WHERE path = ? AND kind != 'section' LIMIT 1`, p).Scan(&ns) == nil && ns > 0 {
+				d.modified = time.Unix(0, ns)
+			}
+			d.keep = d.modified.IsZero()
+		default:
+			d.born, d.modified = born, modified
+		}
+		x.times[p] = d
 	}
-	if ts[0].IsZero() || t.IsZero() {
+	if d.keep || t.IsZero() {
 		return true
 	}
 	first, seen := x.touched[p]
-	return ts[0].Before(t) || ts[1].Before(t) || (seen && first.Before(t))
+	return (!d.born.IsZero() && d.born.Before(t)) || d.modified.Before(t) || (seen && first.Before(t))
 }
 
 // nodeBefore is before for a node id (a section by its document's file); nodes without a file are always kept.
