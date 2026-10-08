@@ -1,0 +1,16 @@
+# The brain's DATA never enters this repo (customer data / PII lives in ~/brain only).
+/brain/
+*.db
+*.db-*
+*.sqlite*
+*.jsonl
+*.jsonl.zst
+*.parquet
+.index/
+.data/
+.archive/
+transcripts/
+sessions/
+# build outputs
+/bin/
+/dist/
