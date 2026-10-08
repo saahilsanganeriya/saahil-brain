@@ -3,13 +3,13 @@ package evals
 import (
 	"fmt"
 	"path"
-	"saahil.local/brain/internal/hooks"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 
+	"saahil.local/brain/internal/hooks"
 	"saahil.local/brain/internal/index"
 	"saahil.local/brain/internal/rank"
 )
@@ -53,6 +53,11 @@ type Env struct {
 	nodes  map[string]nodeFacts
 	exist  *existence
 	filed  map[string][]string // memory key (<project>/<file>) → notes filed from that memory
+	// L0 as of a session's start
+	hooks       hooks.Env
+	memoryFiles []string            // notes/*.md and hubs/*.md
+	memoryTexts map[string]string   // kept-notes key → MEMORY.md as rendered from them
+	sources     map[string][]string // note id → its sources
 }
 
 type nodeFacts struct {
@@ -62,7 +67,10 @@ type nodeFacts struct {
 }
 
 func NewEnv(ix *index.Index, sets Sets, now time.Time) *Env {
-	return &Env{Index: ix, Ranker: NewRanker(ix), Now: now, sets: sets, nodes: map[string]nodeFacts{}}
+	h := hooks.DefaultEnv()
+	h.Root = ix.Root
+	return &Env{Index: ix, Ranker: NewRanker(ix), Now: now, sets: sets, nodes: map[string]nodeFacts{}, hooks: h,
+		memoryTexts: map[string]string{}}
 }
 
 // searchLimit is brain_search's default result count in the Claude Code mod; the grep baseline gets the same budget.
@@ -502,6 +510,9 @@ type NavRow struct {
 	Top3       bool     `json:"top3"`
 	BoxTop3    bool     `json:"box_top3"` // a pointer lands in a target's work box
 	Calls      int      `json:"calls"`    // tool calls to the first target; 0 = not within 3
+	L0Calls    int      `json:"l0_calls"` // the same, counting what L0 and L1 hand the session before its first call
+	Level      string   `json:"level"`    // L0 | L1 | L2: the level the L0-aware hit came from; "" = no hit
+	L0Links    int      `json:"l0_links"` // ids linked from the session's L0 (MEMORY.md and start digest as of its start)
 	Pointers   []string `json:"pointers"`
 	Error      string   `json:"error,omitempty"`
 }
@@ -523,14 +534,26 @@ func (e *Env) Navigation() (Report, error) {
 		r.Top3 = t.any(r.Pointers)
 		r.BoxTop3 = sharesBox(it.Targets, r.Pointers)
 		r.Calls = e.brainCalls(q, t, g)
+		l0, err := e.levelZero(it.CWD, g)
+		if err != nil {
+			return Report{}, fmt.Errorf("%s: L0: %w", it.ID, err)
+		}
+		r.L0Links = len(l0)
+		r.L0Calls, r.Level = reach(t, l0, r.Pointers, r.Calls)
 		rows = append(rows, r)
 	}
 	ok := func(r NavRow) bool { return r.Error == "" }
+	hit := func(r NavRow) bool { return ok(r) && r.L0Calls > 0 }
+	dispatched := func(r NavRow) bool { return r.Dispatched }
 	metrics, splits := perSplit(rows, func(r NavRow) string { return r.Split }, func(rows []NavRow) []Metric {
 		return []Metric{
-			split("navigation", "top-3 hit rate (pointer ranker)", rows, ok, func(r NavRow) bool { return r.Top3 }, func(r NavRow) bool { return r.Dispatched }, 0.70),
-			split("navigation", "reachable within 3 tool calls", rows, ok, func(r NavRow) bool { return r.Calls > 0 }, func(r NavRow) bool { return r.Dispatched }, 0.80),
-			split("navigation", "top-3 in a target's work box (diagnostic)", rows, ok, func(r NavRow) bool { return r.BoxTop3 }, func(r NavRow) bool { return r.Dispatched }, 0),
+			split("navigation", "top-3 hit rate (pointer ranker)", rows, ok, func(r NavRow) bool { return r.Top3 }, dispatched, 0.70),
+			split("navigation", "reachable within 3 tool calls", rows, ok, func(r NavRow) bool { return r.Calls > 0 }, dispatched, 0.80),
+			split("navigation", "top-3 in a target's work box (diagnostic)", rows, ok, func(r NavRow) bool { return r.BoxTop3 }, dispatched, 0),
+			split("navigation", "reachable within 3 tool calls, counting L0 + L1", rows, ok, hit, dispatched, 0.80),
+			split("navigation", "L0-aware hits from L0 (MEMORY.md, start digest)", rows, hit, func(r NavRow) bool { return r.Level == levelL0 }, dispatched, 0),
+			split("navigation", "L0-aware hits from L1 (prompt pointers)", rows, hit, func(r NavRow) bool { return r.Level == levelL1 }, dispatched, 0),
+			split("navigation", "L0-aware hits from L2 (search, show, open)", rows, hit, func(r NavRow) bool { return r.Level == levelL2 }, dispatched, 0),
 		}
 	})
 	worst := slices.Clone(rows)
@@ -587,6 +610,8 @@ func (e *Env) navNotes(rows []NavRow) []string {
 		"index: the live index seen as of the session's start: the ranker and the navigator skip files with no sign of existing before it (born, last modified, or read by a session that ended, earlier), session notes from its day on and notes sourced from it",
 		"targets: indexed docs and data files the session read or wrote and that existed before it, without generic files (README, CLAUDE.md, MEMORY.md, …), folders, bulk-folder summaries, sessions, repo code or files the first prompt already holds (the brief it was pasted from); an imported memory is also hit through a note filed from it",
 		"diagnostic: a pointer into the same work box as a target, though not a target file",
+		"counting L0 + L1: a target linked from what the session held before its first call costs one call to open: L0 is MEMORY.md, rendered by the production code (owner-index order, 200 lines / 25 KB) from the notes and hubs that existed at the session's start (a note filed today counts from its sources: a memory by its file's mtime, a session note once its session ended), and the start digest for the session's cwd, built by the production code from session notes that had ended, work boxes that existed and files (hot.md, STATE.md, CARD.md, hubs) last modified before the start, so a CARD or hub the dream wrote later gives nothing; L1 is the ≤ 3 pointers. Everything else costs what the L2 navigator above needs",
+		"L0-aware hits by level: the share of those hits each level gave first (L0 before L1 before L2 at one call)",
 	}
 }
 

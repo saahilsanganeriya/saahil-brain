@@ -248,7 +248,7 @@ func list(ids []string) string {
 }
 
 func (NavRow) header() []string {
-	return []string{"id", "split", "session", "dispatched", "query from", "targets", "top-3", "box top-3", "calls", "pointers"}
+	return []string{"id", "split", "session", "dispatched", "query from", "targets", "top-3", "box top-3", "calls", "L0-aware calls", "level", "L0 links", "pointers"}
 }
 
 func (r NavRow) cells() []string {
@@ -256,7 +256,8 @@ func (r NavRow) cells() []string {
 	if r.Error != "" {
 		q = "error: " + r.Error
 	}
-	return []string{r.ID, r.Split, r.Session, yes(r.Dispatched), q, strconv.Itoa(r.Targets), yes(r.Top3), yes(r.BoxTop3), callsCell(r.Calls), list(r.Pointers)}
+	return []string{r.ID, r.Split, r.Session, yes(r.Dispatched), q, strconv.Itoa(r.Targets), yes(r.Top3), yes(r.BoxTop3), callsCell(r.Calls),
+		callsCell(r.L0Calls), cmp.Or(r.Level, "—"), strconv.Itoa(r.L0Links), list(r.Pointers)}
 }
 
 func (QARow) header() []string {
