@@ -74,7 +74,7 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 	opus := worker.New(c, dream.QueueOpus, worker.Options{MaxConcurrentActivityExecutionSize: 1})
 	haiku := worker.New(c, dream.QueueHaiku, worker.Options{MaxConcurrentActivityExecutionSize: 2})
 	for _, w := range []worker.Worker{opus, haiku} {
-		w.RegisterActivityWithOptions(acts.LLMStep, activity.RegisterOptions{Name: "LLMStep"})
+		w.RegisterActivityWithOptions(acts.SkillStep, activity.RegisterOptions{Name: "LLMStep"})
 	}
 	for _, w := range []worker.Worker{dreamWorker, opus, haiku} {
 		if err := w.Start(); err != nil {

@@ -129,6 +129,10 @@ func (a *Activities) writablePath(rel string) (string, error) {
 			return "", fmt.Errorf("no dot-folders or dot-files")
 		}
 	}
+	// the cut-over swaps saahil-docs in with one rename that needs work/ to be an empty folder
+	if parts[0] == "work" && !a.live() {
+		return "", fmt.Errorf("work/ stays empty until the cut-over (shadow mode: no .brain/live)")
+	}
 	if filepath.Ext(clean) != ".md" {
 		return "", fmt.Errorf("only .md files")
 	}
@@ -160,6 +164,12 @@ func (a *Activities) writablePath(rel string) (string, error) {
 		}
 	}
 	return abs, nil
+}
+
+// live is true once the cut-over has switched the brain out of shadow mode.
+func (a *Activities) live() bool {
+	_, err := os.Stat(filepath.Join(a.Cfg.BrainRoot, ".brain", "live"))
+	return err == nil
 }
 
 func within(path, root string) bool {

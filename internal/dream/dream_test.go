@@ -187,3 +187,27 @@ func TestMaterialWaitsWhenItsStepDidNotRun(t *testing.T) {
 		t.Fatalf("the capture did not wait: material=%+v file=%+v", second.Material, step(second, "file"))
 	}
 }
+
+// TestShadowDreamNeverWritesWork catches a shadow-mode dream writing a CARD or STATE into work/, which would make the
+// cut-over's one-rename swap of saahil-docs into an empty work/ fail.
+func TestShadowDreamNeverWritesWork(t *testing.T) {
+	acts, _ := newBrain(t, 0)
+	if err := os.MkdirAll(filepath.Join(acts.Cfg.BrainRoot, "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	edit := []Edit{{Path: "work/box/CARD.md", Action: "write", Content: "card"}}
+	res, err := acts.ApplyEdits(t.Context(), ApplyInput{RunID: "r", Step: "render", Edits: edit, Remaining: MaxEdits})
+	if err != nil || len(res.Applied) != 0 {
+		t.Fatalf("shadow dream wrote work/: applied=%+v err=%v", res.Applied, err)
+	}
+	if err := os.WriteFile(filepath.Join(acts.Cfg.BrainRoot, ".brain", "live"), nil, 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Join(acts.Cfg.BrainRoot, ".brain"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(filepath.Join(acts.Cfg.BrainRoot, ".brain", "live"), nil, 0o644)
+	}
+	res, err = acts.ApplyEdits(t.Context(), ApplyInput{RunID: "r2", Step: "render", Edits: edit, Remaining: MaxEdits})
+	if err != nil || len(res.Applied) != 1 {
+		t.Fatalf("live dream could not write work/: applied=%+v rejected=%+v err=%v", res.Applied, res.Rejected, err)
+	}
+}
