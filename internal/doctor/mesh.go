@@ -147,7 +147,8 @@ func checkConflicts(context.Context) (Status, string) {
 		if err != nil {
 			return nil
 		}
-		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data") {
+		// .archive holds the losers already handled (brain sync --archive-conflicts); only live copies are unhandled
+		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive") {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {
@@ -156,7 +157,7 @@ func checkConflicts(context.Context) (Status, string) {
 		return nil
 	})
 	if len(found) == 0 {
-		return OK, "0 conflict copies in the brain"
+		return OK, "0 unhandled conflict copies in the brain (losers are kept in .archive/conflicts)"
 	}
 	return Fail, fmt.Sprintf("%d conflict copies: %s", len(found), strings.Join(found[:min(len(found), 5)], ", "))
 }
