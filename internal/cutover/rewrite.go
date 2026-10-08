@@ -133,11 +133,15 @@ const (
 	readText textRead = iota
 	readBinary
 	readLarge
+	readSecret
 )
 
 // readTextFile returns the content of a text file ≤ 10 MB; binaries (known extension, or a NUL in the first 8 KB) are
-// never read past the sniff.
+// never read past the sniff, and .env files (secrets) are never opened at all.
 func readTextFile(abs string) ([]byte, fs.FileInfo, textRead, error) {
+	if base := filepath.Base(abs); base == ".env" || strings.HasPrefix(base, ".env.") && base != ".env.example" {
+		return nil, nil, readSecret, nil
+	}
 	if binaryExt[strings.ToLower(filepath.Ext(abs))] {
 		return nil, nil, readBinary, nil
 	}

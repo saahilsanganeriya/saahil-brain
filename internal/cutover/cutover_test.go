@@ -136,13 +136,15 @@ func TestReconcileMovesOnlyThisMachinesLoser(t *testing.T) {
 }
 
 // TestRewriteSkipsBinaryAndHistory: only live text is rewritten; binaries (by NUL byte or extension), git internals,
-// box history under log/ and session transcripts keep the old paths byte for byte, because they record what was true.
+// box history under log/ and session transcripts keep the old paths byte for byte, because they record what was true;
+// .env files are secrets and are never opened.
 func TestRewriteSkipsBinaryAndHistory(t *testing.T) {
 	root := t.TempDir()
 	untouched := map[string]string{
 		"img/scan.png":            "PNG " + oldPrefix + "x",
 		"data/blob.dat":           "head\x00" + oldPrefix + "x",
 		".git/config":             oldPrefix,
+		"box/.env":                "DOCS=" + oldPrefix,
 		"box/log/2026-10-01.md":   oldPrefix,
 		"box/transcripts/t.jsonl": oldPrefix,
 		"box/0a1b2c3d-1111-2222-3333-444455556666.jsonl": oldPrefix,
