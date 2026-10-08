@@ -205,47 +205,70 @@ func ownerPrompts(transcript string, max int) []string {
 	}
 	defer f.Close()
 	var out []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
+	sc := newTranscriptScanner(f)
 	for len(out) < max && sc.Scan() {
 		line := sc.Bytes()
-		if !bytes.Contains(line, []byte(`"human"`)) {
+		if !bytes.Contains(line, humanOrigin) {
 			continue // a tool result or an assistant turn: not worth decoding
 		}
-		var e struct {
-			Type        string `json:"type"`
-			IsMeta      bool   `json:"isMeta"`
-			IsSidechain bool   `json:"isSidechain"`
-			Origin      *struct {
-				Kind string `json:"kind"`
-			} `json:"origin"`
-			Message *struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-			Attachment *struct {
-				Type   string          `json:"type"`
-				Prompt json.RawMessage `json:"prompt"`
-				Origin *struct {
-					Kind string `json:"kind"`
-				} `json:"origin"`
-			} `json:"attachment"`
-		}
-		if json.Unmarshal(line, &e) != nil || e.IsSidechain {
+		var l transcriptLine
+		if json.Unmarshal(line, &l) != nil {
 			continue
 		}
-		var text string
-		switch {
-		case e.Type == "user" && !e.IsMeta && e.Origin != nil && e.Origin.Kind == "human" && e.Message != nil:
-			text = contentText(e.Message.Content)
-		case e.Type == "attachment" && e.Attachment != nil && e.Attachment.Type == "queued_command" &&
-			e.Attachment.Origin != nil && e.Attachment.Origin.Kind == "human":
-			text = contentText(e.Attachment.Prompt) // typed while the agent was busy
-		}
-		if strings.TrimSpace(text) != "" {
+		if text := l.ownerPrompt(); text != "" {
 			out = append(out, session.Redact(text))
 		}
 	}
 	return out
+}
+
+func newTranscriptScanner(f *os.File) *bufio.Scanner {
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
+	return sc
+}
+
+// humanOrigin is in every owner prompt's line; a line without it is never decoded as one.
+var humanOrigin = []byte(`"human"`)
+
+// transcriptLine is the part of a Claude Code transcript line the evals read.
+type transcriptLine struct {
+	Type        string `json:"type"`
+	Timestamp   string `json:"timestamp"`
+	CWD         string `json:"cwd"`
+	IsMeta      bool   `json:"isMeta"`
+	IsSidechain bool   `json:"isSidechain"`
+	Origin      *struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+	Message *struct {
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+	Attachment *struct {
+		Type   string          `json:"type"`
+		Prompt json.RawMessage `json:"prompt"`
+		Origin *struct {
+			Kind string `json:"kind"`
+		} `json:"origin"`
+	} `json:"attachment"`
+}
+
+// ownerPrompt is the line's text when it is an owner prompt as the session note's writer counts them (origin human on
+// the main chain: a user turn, or a command typed while the agent was busy), else "".
+func (l *transcriptLine) ownerPrompt() string {
+	var text string
+	switch {
+	case l.IsSidechain:
+	case l.Type == "user" && !l.IsMeta && l.Origin != nil && l.Origin.Kind == "human" && l.Message != nil:
+		text = contentText(l.Message.Content)
+	case l.Type == "attachment" && l.Attachment != nil && l.Attachment.Type == "queued_command" &&
+		l.Attachment.Origin != nil && l.Attachment.Origin.Kind == "human":
+		text = contentText(l.Attachment.Prompt)
+	}
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return text
 }
 
 func contentText(raw json.RawMessage) string {

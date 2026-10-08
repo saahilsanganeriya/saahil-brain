@@ -19,6 +19,7 @@ func SplitOf(key string) string {
 
 // Only keeps the items of one split (dev or test), for a quicker run while tuning.
 func (e *Env) Only(split string) {
+	e.only = split
 	keep := func(key string) bool { return SplitOf(key) != split }
 	e.sets.Navigation = slices.DeleteFunc(slices.Clone(e.sets.Navigation), func(it NavItem) bool { return keep(it.Session) })
 	e.sets.Mistakes = slices.DeleteFunc(slices.Clone(e.sets.Mistakes), func(it MistakeItem) bool { return keep(it.Session) })
