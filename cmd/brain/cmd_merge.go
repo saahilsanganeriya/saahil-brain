@@ -166,20 +166,20 @@ func describeChange(was, now delta.Note) string {
 	return strings.Join(parts, "; ")
 }
 
+// inside reports whether path lands in the brain under either home spelling or through a linked folder.
 func inside(path, root string) bool {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return true
 	}
-	for _, r := range []string{root, config.Canonical(root)} {
-		if real, err := filepath.EvalSymlinks(r); err == nil {
-			r = real
-		}
-		if abs == r || strings.HasPrefix(abs, r+string(filepath.Separator)) {
-			return true
-		}
+	if dir, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		abs = filepath.Join(dir, filepath.Base(abs))
 	}
-	return false
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		root = real
+	}
+	abs, root = config.Canonical(abs), config.Canonical(root)
+	return abs == root || strings.HasPrefix(abs, root+string(filepath.Separator))
 }
 
 // replayRunner answers each stage from a recorded answer file, so tonight's manual sweep can be replayed through the

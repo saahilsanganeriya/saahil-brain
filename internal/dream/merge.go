@@ -148,9 +148,8 @@ type mergeState struct {
 }
 
 type MergeGateResult struct {
-	Skip        string `json:"skip,omitempty"`
-	Notes       int    `json:"notes"`
-	Fingerprint string `json:"fingerprint"`
+	Skip  string `json:"skip,omitempty"`
+	Notes int    `json:"notes"`
 }
 
 // MergeGate runs curate.merge when the current global notes differ from what the last merge left, or a day after it.
@@ -159,7 +158,7 @@ func (a *Activities) MergeGate(_ context.Context, now time.Time) (MergeGateResul
 	if err != nil {
 		return MergeGateResult{}, err
 	}
-	res := MergeGateResult{Notes: len(entries), Fingerprint: fingerprint(entries)}
+	res := MergeGateResult{Notes: len(entries)}
 	var st mergeState
 	if b, err := os.ReadFile(a.path(".brain", "merge-state.json")); err == nil {
 		if err := json.Unmarshal(b, &st); err != nil {
@@ -171,7 +170,7 @@ func (a *Activities) MergeGate(_ context.Context, now time.Time) (MergeGateResul
 	switch {
 	case len(entries) < 2:
 		res.Skip = fmt.Sprintf("%d current global notes: nothing to compare", len(entries))
-	case st.Fingerprint == res.Fingerprint && now.Sub(st.LastRun) < mergeEvery:
+	case st.Fingerprint == fingerprint(entries) && now.Sub(st.LastRun) < mergeEvery:
 		res.Skip = fmt.Sprintf("no global note changed since the last merge %s ago (runs again after %s)",
 			now.Sub(st.LastRun).Round(time.Minute), mergeEvery)
 	}
@@ -342,7 +341,7 @@ func (r *MergeStepResult) add(s LLMStepResult) {
 
 // MergeStep asks the merge skill which current global notes are duplicates, conflicts or stale, settles the answer by
 // code, asks for one merged body per duplicate group, and returns the delta as whole-file edits for ApplyEdits. It
-// writes nothing itself; MergeDone queues the owner questions.
+// writes no note and no question (ApplyEdits and MergeDone do); only the ledger records the calls.
 func (a *Activities) MergeStep(ctx context.Context, in MergeStepInput) (MergeStepResult, error) {
 	var out MergeStepResult
 	skill, err := a.readSkill("merge")
@@ -500,7 +499,7 @@ func (a *Activities) bodiesInput(groups []DuplicateGroup, notes map[string]delta
 	var gs []group
 	for _, g := range groups {
 		keep := notes[g.Keep]
-		gr := group{Keep: g.Keep, Supersede: g.Supersede, Type: keep.Type, CapChars: bodyCap(keep)}
+		gr := group{Keep: g.Keep, Supersede: g.Supersede, Type: keep.Type, CapChars: bodyCap(keep, g.Supersede)}
 		for _, id := range append([]string{g.Keep}, g.Supersede...) {
 			b, err := os.ReadFile(a.path("notes", id+".md"))
 			if err != nil {
@@ -514,14 +513,15 @@ func (a *Activities) bodiesInput(groups []DuplicateGroup, notes map[string]delta
 	return string(b), err
 }
 
-// bodyCap is what a kept body may hold: a lesson's 300 chars, else the note cap less its frontmatter and the
-// supersedes and updated lines the merge adds.
-func bodyCap(n delta.Note) int {
+// bodyCap is what a kept body may hold: a lesson's 300 chars, else the note cap less the frontmatter as the merge
+// leaves it (its supersedes ids and updated stamp added).
+func bodyCap(n delta.Note, supersede []string) int {
 	if n.Type == "lesson" {
 		return config.LessonMaxChars
 	}
-	n.Body = ""
-	return config.NoteMaxBytes - len(delta.Render(n)) - 200
+	n.Body, n.Updated = "", time.Time{}.Format(time.RFC3339)
+	n.Supersedes = append(slices.Clone(n.Supersedes), supersede...)
+	return config.NoteMaxBytes - len(delta.Render(n)) - 1
 }
 
 // unit is a set of ops that applies whole or not at all: a merged body without its supersedes, or the reverse, would
