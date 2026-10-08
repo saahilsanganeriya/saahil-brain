@@ -104,7 +104,7 @@ func (l *Linter) All() (Report, error) {
 			return nil // a vanished or unreadable entry is not the brain's fault
 		}
 		if d.IsDir() {
-			if p != l.Root && skipDirs[d.Name()] {
+			if p != l.Root && (skipDirs[d.Name()] || config.IsSyncBulkDir(d.Name())) {
 				return filepath.SkipDir
 			}
 			return nil

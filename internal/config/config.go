@@ -94,7 +94,7 @@ func BridgeTokenPath() string { return filepath.Join(ConfigDir(), BridgeTokenFil
 // Caps from the design; the guard and lint enforce them.
 const (
 	MemoryIndexMaxLines = 200
-	MemoryIndexMaxBytes = 25 * 1024
+	MemoryIndexMaxBytes = 24 * 1024 // Claude Code loads 24.4 KB of MEMORY.md and cuts the rest
 	DigestMaxChars      = 8000
 	MaxPointers         = 3
 	PointerMaxTokens    = 300

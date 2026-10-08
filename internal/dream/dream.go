@@ -260,6 +260,11 @@ func (r *run) outcome(step string, f workflow.Future) StepOutcome {
 
 // check lints what this run wrote; a failing lint (exit ≥ 2) puts every edited file back as the snapshot had it.
 func (r *run) check() {
+	// with nothing written there is nothing to check, and lint without paths walks the whole brain, work/ included
+	if len(r.applied) == 0 && workflow.GetVersion(r.ctx, "check-only-edits", workflow.DefaultVersion, 1) == 1 {
+		r.record(StepRecord{Name: "check", Status: "skipped", Reason: "no edits"}, workflow.Now(r.ctx))
+		return
+	}
 	paths := make([]string, len(r.applied))
 	for i, ap := range r.applied {
 		paths[i] = ap.Path
