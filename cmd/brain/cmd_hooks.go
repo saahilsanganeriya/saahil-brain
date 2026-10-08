@@ -2,12 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
+	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/hooks"
 )
 
@@ -16,6 +22,7 @@ func init() {
 	register("hook prompt", "UserPromptSubmit hook: ≤ 3 pointers or nothing (shadow: logged, not injected)", hookRunner(300*time.Millisecond, hooks.Prompt))
 	register("hook post", "PostToolUse hook: count opened/followed for pointers this session was shown", hookRunner(100*time.Millisecond,
 		func(env hooks.Env, in hooks.Input) ([]byte, error) { return nil, hooks.Post(env, in) }))
+	register("hook bench", "time the prompt hook on questions from the QA eval set, nothing logged: [--n 40]", cmdHookBench)
 	register("_hook-names", "rebuild the prompt hook's name dictionary (started in the background)", cmdHookNames)
 }
 
@@ -67,5 +74,41 @@ func cmdHookNames([]string) int {
 	if err := hooks.RebuildNames(hooks.DefaultEnv()); err != nil {
 		return fail("hook names: %v", err)
 	}
+	return 0
+}
+
+func cmdHookBench(args []string) int {
+	fs := flag.NewFlagSet("hook bench", flag.ContinueOnError)
+	n := fs.Int("n", 40, "how many questions (spread over the QA set)")
+	if _, err := parseAll(fs, args); err != nil {
+		return 2
+	}
+	raw, err := os.ReadFile(filepath.Join(config.BrainRoot(), ".brain", "evals", "sets", "qa.jsonl"))
+	if err != nil {
+		return fail("qa set: %v (brain eval build makes it)", err)
+	}
+	var questions []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var item struct{ Question string }
+		if json.Unmarshal([]byte(line), &item) == nil && item.Question != "" {
+			questions = append(questions, item.Question)
+		}
+	}
+	if len(questions) == 0 || *n <= 0 {
+		return fail("no questions in the qa set")
+	}
+	var prompts []string
+	for i := 0; i < *n; i++ {
+		prompts = append(prompts, questions[i*len(questions) / *n])
+	}
+	env := hooks.DefaultEnv()
+	took, abstained, err := hooks.Bench(env, prompts, config.BrainRoot())
+	if err != nil {
+		return fail("%v", err)
+	}
+	slices.Sort(took)
+	at := func(q float64) time.Duration { return took[min(len(took)-1, int(q*float64(len(took))))] }
+	fmt.Printf("prompt hook on %s: n %d · p50 %s · p95 %s · max %s · abstained %d (budget p95 150ms)\n", config.ThisMachine(),
+		len(took), at(0.5).Round(time.Millisecond), at(0.95).Round(time.Millisecond), took[len(took)-1].Round(time.Millisecond), abstained)
 	return 0
 }
