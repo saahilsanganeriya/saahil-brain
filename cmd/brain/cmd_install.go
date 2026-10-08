@@ -28,6 +28,7 @@ func cmdInstall(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	*repo = config.Canonical(*repo)
 	var only []string
 	if *hosts != "" {
 		only = strings.Split(*hosts, ",")

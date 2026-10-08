@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func init() {
 
 // checkHost: is the host installed, and are our hooks, MCP entry, extension or mod (whichever it takes) in place?
 func checkHost(ctx context.Context, name string) (Status, string) {
-	rep := install.Verify(filepath.Join(config.LaptopHome, "Documents", "saahil-brain"), []string{name})[0]
+	rep := install.Verify(linkedRepo(), []string{name})[0]
 	if !rep.Present {
 		return Skip, "not installed on this machine"
 	}
@@ -49,11 +50,27 @@ func hostVersion(ctx context.Context, name string) string {
 	if !ok {
 		return ""
 	}
-	out, err := exec.CommandContext(ctx, bin, "--version").Output()
+	out, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0]) + ":"
+	for _, line := range strings.Split(string(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			if line[0] >= '0' && line[0] <= '9' {
+				line = bin + " " + line
+			}
+			return line + ":"
+		}
+	}
+	return ""
+}
+
+// linkedRepo is the checkout the installed mod link points into, so doctor checks what is installed.
+func linkedRepo() string {
+	if target, err := os.Readlink(filepath.Join(install.ModsDir(), install.ModName)); err == nil {
+		return filepath.Dir(target)
+	}
+	return filepath.Join(config.LaptopHome, "Documents", "saahil-brain")
 }
 
 func contains(list []string, s string) bool {
