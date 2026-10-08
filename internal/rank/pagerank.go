@@ -12,7 +12,7 @@ const (
 	Damping   = 0.85
 	prTol     = 1e-9
 	prMaxIter = 100
-	pushEps   = 1e-4 // residual per unit degree left unpushed; bounds work to ~1/(eps·(1-Damping)) pushes
+	pushEps   = 1e-3 // residual per unit degree left unpushed; bounds work to ~1/(eps·(1-Damping)) pushes
 )
 
 // UpdatePageRank recomputes global PageRank over every edge (directed) and stores it on node.pagerank, rounded to

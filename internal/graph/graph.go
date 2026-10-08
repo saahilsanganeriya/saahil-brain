@@ -248,13 +248,20 @@ func process(e scan.Entry, prev prevFile, roots []scan.Root) result {
 		for i, s := range r.sections {
 			sid := sectionID(id, i)
 			r.edges = append(r.edges, edgeRow{src: sid, dst: id, rel: "section_of"})
-			r.fts = append(r.fts, ftsRow{id: sid, title: n.title + " › " + s.Heading, summary: s.Summary, body: capText(s.Text)})
+			r.fts = append(r.fts, ftsRow{id: sid, title: sectionTitle(n.title, s.Heading), summary: s.Summary, body: capText(s.Text)})
 			heads = append(heads, s.Heading)
 		}
 		body = strings.Join(heads, "\n")
 	}
 	r.fts = append([]ftsRow{{id: id, title: n.title, aliases: aliases, summary: n.summary, body: capText(body)}}, r.fts...)
 	return r
+}
+
+func sectionTitle(doc, heading string) string {
+	if heading == doc {
+		return doc
+	}
+	return doc + " › " + heading
 }
 
 func sectionID(doc string, idx int) string { return doc + "#" + strconv.Itoa(idx) }
@@ -423,7 +430,7 @@ func (w *writer) write(r result) error {
 	}
 	for i, s := range r.sections {
 		sid := sectionID(n.id, i)
-		sec := nodeRow{id: sid, kind: "section", typ: "section", path: n.path, title: n.title + " › " + s.Heading,
+		sec := nodeRow{id: sid, kind: "section", typ: "section", path: n.path, title: sectionTitle(n.title, s.Heading),
 			summary: s.Summary, size: int64(s.Bytes)}
 		if err := w.upsert(sec); err != nil {
 			return err
@@ -618,12 +625,34 @@ func deriveMentions(tx *sql.Tx) error {
 	return nil
 }
 
-// deriveMeta records link health: dangling targets inside the brain, and external absolute paths.
+// deriveMeta records link health: dangling targets the index would hold (docs, data, folders), links to files it
+// never indexes (code, config), and absolute paths outside every root.
 func deriveMeta(tx *sql.Tx) error {
-	_, err := tx.Exec(`INSERT OR REPLACE INTO meta(key, value)
-		SELECT 'links.dangling', count(*) FROM edge e WHERE e.rel = 'links_to' AND e.dst NOT LIKE '/%'
-			AND NOT EXISTS (SELECT 1 FROM node n WHERE n.id = e.dst)
-		UNION ALL
-		SELECT 'links.external', count(*) FROM edge e WHERE e.rel = 'links_to' AND e.dst LIKE '/%'`)
-	return err
+	rows, err := tx.Query(`SELECT e.dst FROM edge e WHERE e.rel = 'links_to' AND NOT EXISTS (SELECT 1 FROM node n WHERE n.id = e.dst)`)
+	if err != nil {
+		return err
+	}
+	counts := map[string]int{"links.dangling": 0, "links.unindexed": 0, "links.external": 0}
+	for rows.Next() {
+		var dst string
+		if err := rows.Scan(&dst); err != nil {
+			rows.Close()
+			return err
+		}
+		switch {
+		case strings.HasPrefix(dst, "/"):
+			counts["links.external"]++
+		case path.Ext(dst) != "" && scan.ClassOf(dst) == "":
+			counts["links.unindexed"]++
+		default:
+			counts["links.dangling"]++
+		}
+	}
+	rows.Close()
+	for k, v := range counts {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)`, k, strconv.Itoa(v)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -17,7 +17,7 @@ import (
 
 type Index struct {
 	Root  string
-	Roots []scan.Root
+	roots []scan.Root // built on first use: a search should not glob ~400 memory folders
 	st    *store.Store
 }
 
@@ -37,7 +37,15 @@ func Open(root string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Index{Root: root, Roots: scan.DefaultRoots(root), st: st}, nil
+	return &Index{Root: root, st: st}, nil
+}
+
+// Roots are the folders an update reads: the brain, saahil-docs as work/ (until the cut-over), memory folders.
+func (ix *Index) Roots() []scan.Root {
+	if ix.roots == nil {
+		ix.roots = scan.DefaultRoots(ix.Root)
+	}
+	return ix.roots
 }
 
 func (ix *Index) Close() error { return ix.st.Close() }
@@ -46,7 +54,7 @@ func (ix *Index) DB() *sql.DB { return ix.st.DB }
 
 // Update scans the roots (only changed files unless full) and recomputes global PageRank.
 func (ix *Index) Update(ctx context.Context, full bool) (Stats, error) {
-	gs, err := graph.Update(ctx, ix.st.DB, ix.Roots, full)
+	gs, err := graph.Update(ctx, ix.st.DB, ix.Roots(), full)
 	if err != nil {
 		return Stats{Stats: gs}, err
 	}
@@ -56,6 +64,9 @@ func (ix *Index) Update(ctx context.Context, full bool) (Stats, error) {
 	iters, err := rank.UpdatePageRank(ctx, ix.st.DB)
 	if err == nil && full {
 		err = ix.st.Compact()
+	}
+	if err == nil {
+		err = ix.st.Checkpoint()
 	}
 	return Stats{Stats: gs, PageRankIters: iters}, err
 }
@@ -86,7 +97,7 @@ var ErrNotFound = errors.New("not in the index")
 func (ix *Index) Resolve(ref string) (string, error) {
 	cands := []string{ref}
 	if filepath.IsAbs(ref) {
-		if p, ok := scan.Presented(ix.Roots, ref); ok {
+		if p, ok := scan.Presented(ix.Roots(), ref); ok {
 			cands = []string{graph.ID(p), p}
 		}
 	} else {

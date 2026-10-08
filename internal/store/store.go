@@ -58,7 +58,7 @@ func Open(dbPath string) (*Store, error) {
 		return nil, err
 	}
 	dsn := "file:" + dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)" +
-		"&_pragma=cache_size(-65536)&_pragma=temp_store(MEMORY)"
+		"&_pragma=cache_size(-65536)&_pragma=temp_store(MEMORY)&_pragma=journal_size_limit(67108864)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -97,6 +97,13 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// Checkpoint folds the WAL back into the database and truncates it. A full rebuild writes the whole index through
+// the WAL; left there, every reader's page lookup probes a WAL of hundreds of megabytes.
+func (s *Store) Checkpoint() error {
+	_, err := s.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
 }
 
 // Compact rewrites the file when more than a quarter of it is free pages (after a full rebuild).

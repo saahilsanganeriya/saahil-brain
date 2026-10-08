@@ -76,7 +76,8 @@ type Stats struct{ Dirs, Ignored int }
 
 var skipDirs = map[string]bool{"node_modules": true, "venv": true, "__pycache__": true, "site-packages": true}
 
-func classOf(name string) string {
+// ClassOf says how a file is indexed by its name: md, html, data, or "" (not indexed).
+func ClassOf(name string) string {
 	switch strings.ToLower(path.Ext(name)) {
 	case ".md", ".markdown":
 		return "md"
@@ -137,7 +138,7 @@ func (w *walker) dir(abs, presented string, list []os.DirEntry) error {
 			err = w.child(name, childAbs, childPath)
 		case strings.HasPrefix(name, "."):
 			// dotfiles (.env, .DS_Store) are never opened
-		case classOf(name) == "":
+		case ClassOf(name) == "":
 			w.stats.Ignored++
 		case !mode.IsRegular():
 			err = w.emit(Entry{Path: childPath, Abs: childAbs, Kind: Skip, Reason: "not-regular"})
@@ -146,7 +147,7 @@ func (w *walker) dir(abs, presented string, list []os.DirEntry) error {
 			if ierr != nil {
 				continue // vanished mid-scan; the next run converges
 			}
-			err = w.emit(Entry{Path: childPath, Abs: childAbs, Kind: File, Class: classOf(name), Size: fi.Size(),
+			err = w.emit(Entry{Path: childPath, Abs: childAbs, Kind: File, Class: ClassOf(name), Size: fi.Size(),
 				MTime: fi.ModTime().UnixNano()})
 		}
 		if err != nil {
@@ -229,7 +230,7 @@ func (w *walker) census(abs string, list []os.DirEntry) tally {
 			}
 		default:
 			ct := tally{files: 1}
-			switch classOf(name) {
+			switch ClassOf(name) {
 			case "md", "html":
 				ct.docs = 1
 			case "data":

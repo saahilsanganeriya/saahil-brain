@@ -22,10 +22,11 @@ type Hit struct {
 }
 
 const (
-	candidates   = 200
+	candidates   = 100
+	ftsTop       = 300 // FTS matches considered before exclusions; copies and old versions take a share
 	pprSeeds     = 10
 	pprExtra     = 50
-	maxExpandDeg = 1000 // a folder of thousands of files is not expanded by the push; mass reaching it stays there
+	maxExpandDeg = 300 // a big folder or a much-cited PR is not expanded by the push; mass reaching it stays there
 )
 
 // Score weights; relevance and proximity are normalised to [0, 1] within one query.
@@ -44,6 +45,9 @@ var typePrior = map[string]float64{
 	"artifact": -0.05, "bulk": -0.1, "repo": -0.1,
 }
 
+// artifactRelevance damps BM25 for data files: their few short fields (name and shape) score above whole docs.
+const artifactRelevance = 0.6
+
 // rankable joins the node (or, for a section, its document) and drops what FORMAT.md says is never ranked:
 // superseded or retired, byte copies, older versions, sessions and days, logs and the archive.
 const rankable = `
@@ -51,7 +55,7 @@ const rankable = `
 	JOIN node x ON x.id = coalesce(p.dst, n.id)
 	LEFT JOIN node_stats s ON s.id = n.id
 	WHERE x.status NOT IN ('superseded', 'retired') AND x.canonical_of = '' AND x.type NOT IN ('session', 'day')
-	  AND n.kind IN ('doc', 'section', 'artifact')
+	  AND +n.kind IN ('doc', 'section', 'artifact') -- unary + keeps the planner off node_kind (a 58k-row scan)
 	  AND x.path NOT LIKE 'log/%' AND x.path NOT LIKE '%/log/%' AND x.path NOT LIKE '.archive/%' AND x.path NOT LIKE '%/.archive/%'
 	  AND NOT EXISTS (SELECT 1 FROM edge v WHERE v.src = x.id AND v.rel = 'version_of')
 	  AND NOT EXISTS (SELECT 1 FROM edge v WHERE v.dst = x.id AND v.rel = 'supersedes')`
@@ -105,8 +109,9 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(cands) < opts.Limit {
-		more, err := bm25Candidates(db, matchQuery(q, " OR "))
+	if or := matchQuery(q, " OR "); len(cands) < opts.Limit && or != "" {
+		// partial matches only count in the short columns: OR over bodies scores tens of thousands of rows
+		more, err := bm25Candidates(db, "{title aliases summary} : ("+or+")")
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +134,11 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 		if best > 0 {
 			cands[i].Relevance = -cands[i].bm25 / best
 		}
+		if cands[i].Kind == "artifact" {
+			cands[i].Relevance *= artifactRelevance
+		}
 	}
+	sort.SliceStable(cands, func(i, j int) bool { return cands[i].Relevance > cands[j].Relevance })
 	if opts.Deep {
 		if cands, err = addProximity(db, cands, opts.Seeds); err != nil {
 			return nil, err
@@ -142,8 +151,10 @@ func bm25Candidates(db *sql.DB, match string) ([]cand, error) {
 	if match == "" {
 		return nil, nil
 	}
-	rows, err := db.Query(`SELECT `+hitCols+`, bm25(fts, 0.0, 10.0, 8.0, 4.0, 1.0) AS b
-		FROM fts JOIN node n ON n.rowid = fts.rowid `+rankable+` AND fts MATCH ? ORDER BY b LIMIT ?`, match, candidates)
+	// rank inside FTS first: joining every match through the exclusions before the sort costs 100+ ms on a common word
+	rows, err := db.Query(`SELECT `+hitCols+`, m.b FROM (SELECT rowid AS r, bm25(fts, 0.0, 10.0, 8.0, 4.0, 1.0) AS b
+		FROM fts WHERE fts MATCH ? ORDER BY b LIMIT ?) m JOIN node n ON n.rowid = m.r `+rankable+` ORDER BY m.b LIMIT ?`,
+		match, ftsTop, candidates)
 	if err != nil {
 		return nil, err
 	}
@@ -286,10 +297,20 @@ func score(cands []cand, opts Opts) []Hit {
 	sort.Slice(hits, func(i, j int) bool {
 		return hits[i].Score > hits[j].Score || (hits[i].Score == hits[j].Score && hits[i].ID < hits[j].ID)
 	})
-	if len(hits) > opts.Limit {
-		hits = hits[:opts.Limit]
+	// one hit per document (the doc or its best section), and one per title+summary (snapshots of one plan)
+	seenDoc, seenText, out := map[string]bool{}, map[string]bool{}, hits[:0]
+	for _, h := range hits {
+		doc, _, _ := strings.Cut(h.ID, "#")
+		text := h.Title + "\x00" + h.Summary
+		if seenDoc[doc] || seenText[text] {
+			continue
+		}
+		seenDoc[doc], seenText[text] = true, true
+		if out = append(out, h); len(out) == opts.Limit {
+			break
+		}
 	}
-	return hits
+	return out
 }
 
 // scopeFits: the node sits under a seed folder (a work box) or names a seed among its hubs.
