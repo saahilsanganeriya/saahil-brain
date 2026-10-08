@@ -8,6 +8,7 @@ build: build-linux build-darwin
 
 build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/brain-linux-amd64 ./cmd/brain
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/brain-worker-linux-amd64 ./cmd/brain-worker
 
 build-darwin:
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/brain-darwin-arm64 ./cmd/brain

@@ -1,0 +1,14 @@
+# The brain's Temporal worker: DreamWorkflow and its activities (claude --bare -p per LLM step).
+[Unit]
+Description=brain: Temporal worker (dream)
+After=brain-temporal.service
+Requires=brain-temporal.service
+
+[Service]
+ExecStart=/home/test-user/.local/bin/brain-worker
+Restart=on-failure
+RestartSec=10
+MemoryMax=4G
+
+[Install]
+WantedBy=default.target
