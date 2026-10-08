@@ -25,8 +25,9 @@ type Result struct {
 }
 
 type Check struct {
-	Name string
-	Run  func(ctx context.Context) (Status, string)
+	Name    string
+	Run     func(ctx context.Context) (Status, string)
+	Timeout time.Duration // overrides RunAll's default for a slow check (e.g. one that asks the claude CLI)
 }
 
 var (
@@ -51,7 +52,11 @@ func RunAll(ctx context.Context, timeout time.Duration) []Result {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			cctx, cancel := context.WithTimeout(ctx, timeout)
+			limit := timeout
+			if c.Timeout > 0 {
+				limit = c.Timeout
+			}
+			cctx, cancel := context.WithTimeout(ctx, limit)
 			defer cancel()
 			started := time.Now()
 			done := make(chan Result, 1)
@@ -63,7 +68,7 @@ func RunAll(ctx context.Context, timeout time.Duration) []Result {
 			case r := <-done:
 				results[i] = r
 			case <-cctx.Done():
-				results[i] = Result{Name: c.Name, Status: Fail, Detail: "timed out after " + timeout.String()}
+				results[i] = Result{Name: c.Name, Status: Fail, Detail: "timed out after " + limit.String()}
 			}
 			results[i].Ms = time.Since(started).Milliseconds()
 		}()

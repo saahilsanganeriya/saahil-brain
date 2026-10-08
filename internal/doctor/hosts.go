@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/install"
@@ -16,7 +17,11 @@ var hostBinaries = map[string]string{"claude": "claude", "codex": "codex", "prim
 
 func init() {
 	for _, name := range []string{"claude", "codex", "cursor", "prime", "omp"} {
-		Register(Check{Name: "host." + name, Run: func(ctx context.Context) (Status, string) { return checkHost(ctx, name) }})
+		c := Check{Name: "host." + name, Run: func(ctx context.Context) (Status, string) { return checkHost(ctx, name) }}
+		if name == "claude" {
+			c.Timeout = 90 * time.Second // `claude plugin list` can refresh marketplaces first
+		}
+		Register(c)
 	}
 }
 
