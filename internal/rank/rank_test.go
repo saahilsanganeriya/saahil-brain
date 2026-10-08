@@ -83,6 +83,7 @@ func TestExcludesSuperseded(t *testing.T) {
 		"work/snap/SPEC.md":                                  "# Spec\n\nOCR recall gate spec.\n",
 		"work/box/log/2026-10-08.md":                         "OCR recall gate log line.\n",
 		"sessions/devbox/2026/10/2026-10-08-abcd1234-ocr.md": "---\ntype: session\n---\nOCR recall gate session.\n",
+		"memory-import/-proj/ocr-recall-gate.md":             "---\nname: ocr\n---\nOCR recall gate raw memory.\n",
 	}
 	old := filepath.Join(brain, "work/box/SPEC.v1.md")
 	st := indexFiles(t, brain, files, func() {

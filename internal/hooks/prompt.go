@@ -121,6 +121,7 @@ const rankable = `
 	WHERE x.status NOT IN ('superseded', 'retired') AND x.canonical_of = '' AND x.type NOT IN ('session', 'day')
 	  AND +n.kind IN ('doc', 'section', 'artifact')
 	  AND x.path NOT LIKE 'log/%' AND x.path NOT LIKE '%/log/%' AND x.path NOT LIKE '.archive/%' AND x.path NOT LIKE '%/.archive/%'
+	  AND x.path NOT LIKE 'memory-import/%' -- a raw imported memory: its filed note is what ranks
 	  AND NOT EXISTS (SELECT 1 FROM edge v WHERE v.src = x.id AND v.rel = 'version_of')
 	  AND NOT EXISTS (SELECT 1 FROM edge v WHERE v.dst = x.id AND v.rel = 'supersedes')`
 
@@ -181,9 +182,6 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 		// naming a document and naming its folder are one piece of evidence, not two
 		c.score = wRelevance*c.rel + wAlias*c.alias + wProximity*c.prox + wScope*c.scope + typePrior[c.typ] +
 			max(wMention*c.mention, wFolder*c.folder)
-		if strings.HasPrefix(c.path, "memory-import/") {
-			c.score -= 0.05 // the filed note in notes/ is the canonical form
-		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		return cands[i].score > cands[j].score || (cands[i].score == cands[j].score && cands[i].id < cands[j].id)

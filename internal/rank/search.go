@@ -59,6 +59,7 @@ const rankable = `
 	WHERE x.status NOT IN ('superseded', 'retired') AND x.canonical_of = '' AND x.type NOT IN ('session', 'day')
 	  AND +n.kind IN ('doc', 'section', 'artifact') -- unary + keeps the planner off node_kind (a 58k-row scan)
 	  AND x.path NOT LIKE 'log/%' AND x.path NOT LIKE '%/log/%' AND x.path NOT LIKE '.archive/%' AND x.path NOT LIKE '%/.archive/%'
+	  AND x.path NOT LIKE 'memory-import/%' -- a raw imported memory: its filed note is what ranks
 	  AND NOT EXISTS (SELECT 1 FROM edge v WHERE v.src = x.id AND v.rel = 'version_of')
 	  AND NOT EXISTS (SELECT 1 FROM edge v WHERE v.dst = x.id AND v.rel = 'supersedes')`
 
