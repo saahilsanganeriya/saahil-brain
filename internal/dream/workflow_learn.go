@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -97,7 +98,8 @@ func LearnID(session string) string {
 	return "learn/" + base
 }
 
-func learnOptions(ctx workflow.Context, model string) workflow.Context {
+// llmContext puts a model call on its model's queue (one Opus at a time, two Haiku), with the LLM retry policy.
+func llmContext(ctx workflow.Context, model string) workflow.Context {
 	opts := llmOptions
 	opts.TaskQueue = QueueHaiku
 	if model == config.ModelJudgment {
@@ -114,7 +116,7 @@ func LearnSessionWorkflow(ctx workflow.Context, in LearnInput) (LearnResult, err
 	}
 	if out.Signals.worthJudging() {
 		var j LearnCallResult
-		err := workflow.ExecuteActivity(learnOptions(ctx, config.ModelBulk), a.LearnJudge,
+		err := workflow.ExecuteActivity(llmContext(ctx, config.ModelBulk), a.LearnJudge,
 			LearnCallInput{Session: in.Session, Signals: out.Signals, SpentUSD: in.RunSpentUSD}).Get(ctx, &j)
 		if err != nil {
 			return out, err
@@ -128,7 +130,7 @@ func LearnSessionWorkflow(ctx workflow.Context, in LearnInput) (LearnResult, err
 		return out, nil
 	}
 	var r LearnCallResult
-	err := workflow.ExecuteActivity(learnOptions(ctx, config.ModelJudgment), a.LearnReflect, LearnCallInput{
+	err := workflow.ExecuteActivity(llmContext(ctx, config.ModelJudgment), a.LearnReflect, LearnCallInput{
 		Session: in.Session, Signals: out.Signals, Outcome: out.Outcome, SpentUSD: in.RunSpentUSD + out.CostUSD}).Get(ctx, &r)
 	if err != nil {
 		return out, err
@@ -288,20 +290,11 @@ func scanTranscript(r io.Reader, sig *Signals) {
 
 func appendNew(list []string, items ...string) []string {
 	for _, it := range items {
-		if it != "" && !contains(list, it) {
+		if it != "" && !slices.Contains(list, it) {
 			list = append(list, it)
 		}
 	}
 	return list
-}
-
-func contains(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 const judgeSchema = `{"type":"object","required":["outcome","pointers"],"additionalProperties":false,"properties":{
@@ -351,7 +344,7 @@ func (a *Activities) LearnJudge(ctx context.Context, in LearnCallInput) (LearnCa
 	var counters []delta.Counter
 	for _, ptr := range j.Pointers {
 		field := map[string]string{"helpful": "helpful", "misled": "harmful"}[ptr.Verdict]
-		if field != "" && contains(in.Signals.Shown, ptr.ID) {
+		if field != "" && slices.Contains(in.Signals.Shown, ptr.ID) {
 			counters = append(counters, delta.Counter{ID: ptr.ID, Field: field, Delta: 1})
 		}
 	}

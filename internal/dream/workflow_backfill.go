@@ -120,13 +120,8 @@ func BackfillBatchWorkflow(ctx workflow.Context, in BatchInput) (BatchResult, er
 }
 
 func boxStep(ctx workflow.Context, out *BatchResult, res *backfill.BoxResult, model string, act any, in BoxInput) BoxStepResult {
-	opts := llmOptions
-	opts.TaskQueue = QueueHaiku
-	if model == config.ModelJudgment {
-		opts.TaskQueue = QueueOpus
-	}
 	var step BoxStepResult
-	if err := workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, opts), act, in).Get(ctx, &step); err != nil {
+	if err := workflow.ExecuteActivity(llmContext(ctx, model), act, in).Get(ctx, &step); err != nil {
 		res.Status, res.Reason = "failed", err.Error()
 		return step
 	}

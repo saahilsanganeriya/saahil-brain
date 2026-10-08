@@ -150,30 +150,18 @@ func (a *Activities) BackfillCard(ctx context.Context, in BoxInput) (BoxStepResu
 	}
 	payload := map[string]any{"step": "card", "hubs": hubs, "inventory": backfill.BuildInventory(a.Cfg.BrainRoot, in.Box)}
 	var out BoxStepResult
-	for attempt := 0; attempt < 2; attempt++ {
-		input, _ := json.Marshal(payload)
-		spent, err := a.workflowSpent("backfill")
-		if err != nil {
-			return out, err
+	p := paid{workflow: "backfill", step: "card/" + in.Box.Name, model: config.ModelBulk, skill: string(skill),
+		schema: backfill.AnswerSchema, capUSD: in.BudgetUSD}
+	out.LLMStepResult, err = a.askTwice(ctx, payload, p, func(raw []byte) (string, error) {
+		content, status, verr := backfill.RenderCard(raw, in.Box, hubIDs)
+		if verr != nil {
+			return verr.Error(), nil
 		}
-		res, step, err := a.paidCall(ctx, paid{workflow: "backfill", step: "card/" + in.Box.Name, model: config.ModelBulk,
-			skill: string(skill), input: string(input), schema: backfill.AnswerSchema, spentUSD: spent, capUSD: in.BudgetUSD})
-		out.CostUSD += step.CostUSD
-		out.Called, out.Cached = out.Called || step.Called, out.Cached || step.Cached
-		out.Status, out.Reason, out.StopLLM = step.Status, step.Reason, step.StopLLM
-		if err != nil || step.Status != "ok" {
-			return out, err
-		}
-		content, status, verr := backfill.RenderCard(answerJSON(res), in.Box, hubIDs)
-		if verr == nil {
-			out.CardStatus = status
-			out.Card, err = a.writeCard(in, content)
-			return out, err
-		}
-		payload["rejected"] = verr.Error()
-		out.Status, out.Reason = "failed", "CARD rejected twice: "+verr.Error()
-	}
-	return out, nil
+		out.CardStatus = status
+		out.Card, err = a.writeCard(in, content)
+		return "", err
+	})
+	return out, err
 }
 
 // writeCard stages the CARD in shadow or writes it into the box once live; a CARD it replaces is kept in .archive/.
@@ -268,40 +256,52 @@ func (a *Activities) BackfillCampaign(ctx context.Context, in BoxInput) (BoxStep
 	payload := map[string]any{"step": "campaign", "today": in.Box.Newest.Format("2006-01-02"), "hubs": hubs,
 		"ask": campaignAsk, "card": string(card), "material": material}
 	var out BoxStepResult
+	p := paid{workflow: "backfill", step: "campaign/" + in.Box.Name, model: config.ModelJudgment, skill: string(skill),
+		schema: delta.Schema, capUSD: in.BudgetUSD}
+	out.LLMStepResult, err = a.askTwice(ctx, payload, p, func(raw []byte) (string, error) {
+		edits, unchanged, why, err := a.deltaEdits(ctx, raw, p.step)
+		if err != nil {
+			return "", err
+		}
+		applied, err := a.ApplyEdits(ctx, ApplyInput{RunID: "backfill-" + in.RunID, Step: "campaign", Edits: edits,
+			Remaining: MaxEdits})
+		for _, ap := range applied.Applied {
+			if ap.Created {
+				out.Notes++
+			}
+		}
+		if err != nil || len(applied.Applied)+applied.Noop+unchanged > 0 {
+			return "", err
+		}
+		return "no note was kept: " + why, nil
+	})
+	return out, err
+}
+
+// askTwice pays for an answer (under the backfill's ledger total) and lets accept judge it; a refused answer is asked
+// again once with the reason in the input, which makes it a new key.
+func (a *Activities) askTwice(ctx context.Context, payload map[string]any, p paid, accept func([]byte) (string, error)) (LLMStepResult, error) {
+	var out LLMStepResult
 	for attempt := 0; attempt < 2; attempt++ {
 		input, _ := json.Marshal(payload)
-		spent, err := a.workflowSpent("backfill")
+		spent, err := a.workflowSpent(p.workflow)
 		if err != nil {
 			return out, err
 		}
-		res, step, err := a.paidCall(ctx, paid{workflow: "backfill", step: "campaign/" + in.Box.Name,
-			model: config.ModelJudgment, skill: string(skill), input: string(input), schema: delta.Schema,
-			spentUSD: spent, capUSD: in.BudgetUSD})
+		p.input, p.spentUSD = string(input), spent
+		res, step, err := a.paidCall(ctx, p)
 		out.CostUSD += step.CostUSD
 		out.Called, out.Cached = out.Called || step.Called, out.Cached || step.Cached
 		out.Status, out.Reason, out.StopLLM = step.Status, step.Reason, step.StopLLM
 		if err != nil || step.Status != "ok" {
 			return out, err
 		}
-		edits, unchanged, why, err := a.deltaEdits(ctx, answerJSON(res), "campaign/"+in.Box.Name)
-		if err != nil {
+		refused, err := accept(answerJSON(res))
+		if err != nil || refused == "" {
 			return out, err
 		}
-		applied, err := a.ApplyEdits(ctx, ApplyInput{RunID: "backfill-" + in.RunID, Step: "campaign", Edits: edits,
-			Remaining: MaxEdits})
-		if err != nil {
-			return out, err
-		}
-		for _, ap := range applied.Applied {
-			if ap.Created {
-				out.Notes++
-			}
-		}
-		if len(applied.Applied)+applied.Noop+unchanged > 0 {
-			return out, nil
-		}
-		payload["rejected"] = "no note was kept: " + why
-		out.Status, out.Reason = "failed", "no campaign note kept: "+why
+		payload["rejected"] = refused
+		out.Status, out.Reason = "failed", "refused twice: "+refused
 	}
 	return out, nil
 }

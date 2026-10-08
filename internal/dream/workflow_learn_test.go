@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
-	"strings"
 	"strconv"
+	"strings"
 	"testing"
 
 	"go.temporal.io/sdk/testsuite"

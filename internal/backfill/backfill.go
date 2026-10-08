@@ -4,10 +4,10 @@
 package backfill
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -205,18 +205,13 @@ func BuildInventory(root string, b Box) Inventory {
 	return inv
 }
 
-func readCapped(path string, n int) ([]byte, error) {
+func readCapped(path string, n int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	buf := make([]byte, n)
-	k, err := f.Read(buf)
-	if err != nil && k == 0 {
-		return nil, err
-	}
-	return buf[:k], nil
+	return io.ReadAll(io.LimitReader(f, n))
 }
 
 // Session is a session note's header: enough to say what happened in a box, never its prompts.
@@ -245,25 +240,13 @@ func (s Session) Line() string {
 
 // ReadSession parses a session note's frontmatter.
 func ReadSession(root, rel string) (Session, error) {
-	f, err := os.Open(filepath.Join(root, rel))
-	if err != nil {
-		return Session{}, err
-	}
-	defer f.Close()
-	var fm strings.Builder
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1<<20)
-	for i := 0; sc.Scan(); i++ {
-		if sc.Text() == "---" {
-			if i == 0 {
-				continue
-			}
-			break
-		}
-		fm.WriteString(sc.Text() + "\n")
-	}
 	var s Session
-	err = yaml.Unmarshal([]byte(fm.String()), &s)
+	b, err := readCapped(filepath.Join(root, rel), 64*1024)
+	if err != nil {
+		return s, err
+	}
+	fm, _, _ := strings.Cut(strings.TrimPrefix(string(b), "---\n"), "\n---")
+	err = yaml.Unmarshal([]byte(fm), &s)
 	s.Rel = rel
 	return s, err
 }
