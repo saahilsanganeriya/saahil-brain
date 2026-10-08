@@ -127,12 +127,35 @@ func (ix *Index) Show(ref string) (Node, error) {
 	if n.Out, err = ix.edges(`SELECT src, dst, rel, why FROM edge WHERE src = ? AND rel != 'section_of' ORDER BY rel, dst LIMIT 500`, id); err != nil {
 		return n, err
 	}
-	n.In, err = ix.edges(`SELECT src, dst, rel, why FROM edge WHERE dst = ? AND rel NOT IN ('part_of', 'section_of') ORDER BY rel, src LIMIT 500`, id)
+	if n.In, err = ix.edges(`SELECT src, dst, rel, why FROM edge WHERE dst = ? AND rel NOT IN ('part_of', 'section_of') ORDER BY rel, src LIMIT 500`, id); err != nil {
+		return n, err
+	}
+	if n.Kind == "dir" {
+		err = ix.addContents(&n)
+	}
 	return n, err
 }
 
-func (ix *Index) edges(q, id string) ([]Edge, error) {
-	rows, err := ix.st.DB.Query(q, id)
+const maxContents = 40
+
+// addContents lists a folder's next hops as part_of edges: its anchor documents first (CARD, STATE, GOAL, the live
+// spec or plan, report or readme, rankable only), then its sub-folders.
+func (ix *Index) addContents(n *Node) error {
+	anchors, err := rank.Anchors(ix.st.DB, n.ID, maxContents)
+	if err != nil {
+		return err
+	}
+	for _, a := range anchors {
+		n.In = append(n.In, Edge{Src: a, Dst: n.ID, Rel: "part_of"})
+	}
+	subs, err := ix.edges(`SELECT e.src, e.dst, e.rel, e.why FROM edge e JOIN node c ON c.id = e.src
+		WHERE e.dst = ? AND e.rel = 'part_of' AND c.kind = 'dir' ORDER BY e.src LIMIT ?`, n.ID, maxContents)
+	n.In = append(n.In, subs...)
+	return err
+}
+
+func (ix *Index) edges(q string, args ...any) ([]Edge, error) {
+	rows, err := ix.st.DB.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

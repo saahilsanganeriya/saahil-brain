@@ -29,19 +29,20 @@ const (
 	exploreShown  = 3 // a note shown fewer times than this may take the explore slot
 
 	// relevance saturates as bm25/(bm25+relHalf): a match worth relHalf is half way to certain
-	relHalf     = 12.0
-	wRelevance  = 0.3
-	wAlias      = 0.4 // times the name's weight (Names): 1 multi-word alias, 0.8 note id or title, 0.5 one word
-	wProximity  = 0.35
-	wScope      = 0.1
-	wMention    = 0.6  // a document the prompt names by path
-	wFolder     = 0.45 // times the folder's strength: an anchor document of a folder the prompt or session names
-	linkShare   = 0.5  // a document a named document links to gets this share of wMention
-	maxLinks    = 30   // links read per named document
-	workFolder  = 0.6  // the strength of the session's own work box as a folder
-	anchorStep  = 0.15 // each later anchor of a folder counts this much less
-	anchorsPer  = 3
-	exploreFrac = 0.85 // the explore slot takes a note scoring ≥ this share of the threshold
+	relHalf      = 12.0
+	wRelevance   = 0.3
+	wAlias       = 0.4 // times the name's weight (Names): 1 multi-word alias, 0.8 note id or title, 0.5 one word
+	wProximity   = 0.35
+	wScope       = 0.1
+	wMention     = 0.6  // a document the prompt names by path
+	wFolder      = 0.45 // times the folder's strength: an anchor document of a folder the prompt or session names
+	linkShare    = 0.5  // a document a named document links to gets this share of wMention
+	aliasPhrases = 8.0  // up to this many named phrases keep their full alias weight
+	maxLinks     = 30   // links read per named document
+	workFolder   = 0.6  // the strength of the session's own work box as a folder
+	anchorStep   = 0.15 // each later anchor of a folder counts this much less
+	anchorsPer   = 3
+	exploreFrac  = 0.85 // the explore slot takes a note scoring ≥ this share of the threshold
 )
 
 // Threshold is the score the best pointer must reach or the hook abstains. Calibrated on the 209 real prompts
@@ -135,11 +136,14 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	if err != nil {
 		return lk, err
 	}
-	own, err := ownFolders(db, seeds, mentioned)
+	own, related, err := sessionFolders(db, seeds, mentioned)
 	if err != nil {
 		return lk, err
 	}
-	folders := maps.Clone(own)
+	folders := maps.Clone(related)
+	for id, w := range own {
+		folders[id] = max(folders[id], w)
+	}
 	for _, w := range seeds.Work {
 		folders["work/"+w] = max(folders["work/"+w], workFolder)
 	}
@@ -209,18 +213,22 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	return lk, nil
 }
 
-// ownFolders are the folders and documents, in the session's work box or a box the prompt names, whose name the
-// session's folder or a file the prompt names spells, by strength.
-func ownFolders(db *sql.DB, seeds Seeds, mentioned []string) (map[string]float64, error) {
+// sessionFolders finds folders and documents, in the session's work box or a box the prompt names, named like the
+// session's folder (own) or like a file the prompt names (related), by strength.
+func sessionFolders(db *sql.DB, seeds Seeds, mentioned []string) (own, related map[string]float64, err error) {
 	boxes := slices.Clone(seeds.Work)
-	names := []string{seeds.Folder}
+	var stems []string
 	for _, id := range mentioned {
 		if b := boxOf(id); b != "" && !slices.Contains(boxes, b) {
 			boxes = append(boxes, b)
 		}
-		names = append(names, strings.TrimSuffix(path.Base(id), path.Ext(id)))
+		stems = append(stems, strings.TrimSuffix(path.Base(id), path.Ext(id)))
 	}
-	return rank.MatchFolders(db, boxes, names)
+	if own, err = rank.MatchFolders(db, boxes, []string{seeds.Folder}); err != nil {
+		return nil, nil, err
+	}
+	related, err = rank.MatchFolders(db, boxes, stems)
+	return own, related, err
 }
 
 // pointed loads the documents the prompt names (mention 1), those they link to (linkShare), and the anchor
@@ -267,17 +275,20 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([
 		}
 		rows.Close()
 	}
+	// fetch keeps the strongest maxNamedIDs: a brief names many files and their links
 	ids := map[string]float64{}
-	for id := range mention {
-		ids[id] = 1
+	for id, w := range mention {
+		ids[id] = max(ids[id], w)
 	}
-	for id := range folder {
-		ids[id] = 1
+	for id, w := range folder {
+		ids[id] = max(ids[id], w)
 	}
 	out, err := fetch(db, ids)
 	for i := range out {
 		out[i].alias = 0
-		out[i].mention, out[i].folder, out[i].own = mention[out[i].id], folder[out[i].id], isOwn[out[i].id]
+		// a document the prompt spells is already in hand; own is what the session's name adds
+		out[i].mention, out[i].folder = mention[out[i].id], folder[out[i].id]
+		out[i].own = isOwn[out[i].id] && !slices.Contains(mentioned, out[i].id)
 	}
 	return out, err
 }

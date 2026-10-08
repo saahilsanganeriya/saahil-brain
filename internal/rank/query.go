@@ -329,8 +329,9 @@ const (
 // MatchFolders finds the folders and documents inside the given boxes whose name (a document's without its
 // extension) is spelled by one of the names (a worktree, a brief's file name): every word of the folder's name is
 // among the name's words, one of them is distinctive (has a digit or four letters), and no other folder or document
-// in the box has the same name more than twice. The strength is ½ plus half the share of the name's words the
-// folder covers.
+// in the box has the same name more than twice; a one-word name must carry a digit (b2, f41). The strength is ¾
+// for a one-word name and 1 for longer ones: a family prefix many sibling worktrees share (image-ovn-attack-) must
+// not dilute an exact match.
 func MatchFolders(db *sql.DB, boxes []string, names []string) (map[string]float64, error) {
 	out := map[string]float64{}
 	var nameWords [][]string
@@ -378,14 +379,15 @@ func MatchFolders(db *sql.DB, boxes []string, names []string) (map[string]float6
 				continue
 			}
 			dw := FolderWords(stem(d))
-			if !slices.ContainsFunc(dw, isDistinctive) {
+			// one generic word ("spec", "notes") names too much; a one-word name needs a digit (b2, f41)
+			if !slices.ContainsFunc(dw, isDistinctive) || len(dw) == 1 && !strings.ContainsAny(dw[0], "0123456789") {
 				continue
 			}
 			for _, nw := range nameWords {
 				if !subset(dw, nw) {
 					continue
 				}
-				out[d] = max(out[d], 0.5+0.5*float64(len(dw))/float64(len(nw)))
+				out[d] = max(out[d], 0.5+0.25*float64(min(len(dw), 2)))
 			}
 		}
 	}

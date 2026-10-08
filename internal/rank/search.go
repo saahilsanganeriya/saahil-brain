@@ -3,6 +3,7 @@ package rank
 import (
 	"database/sql"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -87,7 +88,8 @@ const (
 	termBudget    = 12000 // postings one query may score
 	wMention      = 0.5   // a document the query names by path
 	anchorsPerDir = 3
-	anchorRel     = 0.8 // relevance of a named folder's anchor documents
+	anchorRel     = 0.8  // relevance of a named folder's anchor documents
+	wOwn          = 0.25 // above full relevance for a folder or doc named like a named file, times the match strength
 )
 
 // matchQuery is an FTS5 OR of the rare terms in any column and the common ones in the short columns, each quoted
@@ -149,8 +151,9 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 	return score(cands, opts), nil
 }
 
-// addMentions puts the documents q names by path at full relevance plus wMention, and a named folder's anchor
-// documents at anchorRel.
+// addMentions puts the documents q names by path at full relevance plus wMention, a named folder's anchor
+// documents at anchorRel, and the folders and documents named like a named file (briefs/fix-7266.md →
+// evidence/fix-7266/) above every text match, by the match's strength.
 func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, error) {
 	var boxes []string
 	for _, s := range seeds {
@@ -163,16 +166,37 @@ func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, er
 		return cands, err
 	}
 	rel := map[string]float64{}
+	var stems []string
 	for _, id := range named {
+		if b := boxOf(id); b != "" && !slices.Contains(boxes, b) {
+			boxes = append(boxes, b)
+		}
 		anchors, err := Anchors(db, id, anchorsPerDir)
 		if err != nil {
 			return nil, err
 		}
 		if len(anchors) == 0 {
 			rel[id] = max(rel[id], 1+wMention)
+			stems = append(stems, stem(id))
 		}
 		for _, a := range anchors {
 			rel[a] = max(rel[a], anchorRel)
+		}
+	}
+	own, err := MatchFolders(db, boxes, stems)
+	if err != nil {
+		return nil, err
+	}
+	for id, strength := range own {
+		anchors, err := Anchors(db, id, anchorsPerDir)
+		if err != nil {
+			return nil, err
+		}
+		if len(anchors) == 0 {
+			rel[id] = max(rel[id], 1+wOwn*strength)
+		}
+		for i, a := range anchors {
+			rel[a] = max(rel[a], 1+wOwn*strength*(1-0.15*float64(i)))
 		}
 	}
 	at := map[string]int{}
