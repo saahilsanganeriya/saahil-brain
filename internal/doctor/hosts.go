@@ -2,11 +2,11 @@ package doctor
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/install"
@@ -18,9 +18,6 @@ var hostBinaries = map[string]string{"claude": "claude", "codex": "codex", "prim
 func init() {
 	for _, name := range []string{"claude", "codex", "cursor", "prime", "omp"} {
 		c := Check{Name: "host." + name, Run: func(ctx context.Context) (Status, string) { return checkHost(ctx, name) }}
-		if name == "claude" {
-			c.Timeout = 90 * time.Second // `claude plugin list` can refresh marketplaces first
-		}
 		Register(c)
 	}
 }
@@ -57,36 +54,30 @@ func checkHost(ctx context.Context, name string) (Status, string) {
 	return OK, detail
 }
 
-// claudeLoadsMod asks Claude Code whether the saahil-brain plugin is enabled and loaded.
-func claudeLoadsMod(ctx context.Context) (bool, string) {
-	bin, err := exec.LookPath("claude")
-	if err != nil {
-		return true, ""
+// claudeLoadsMod checks what Claude Code itself records, without running the claude CLI (under launchd on the
+// laptop it hangs): the plugin is in its installed registry, enabled in settings, and the mod is real files inside the
+// marketplace folder (Claude refuses plugin files that resolve outside it, as a symlinked mod did).
+func claudeLoadsMod(context.Context) (bool, string) {
+	ref := install.ModName + "@" + install.ModMarketplace
+	var reg struct {
+		Plugins map[string][]json.RawMessage `json:"plugins"` // a directory marketplace is read in place, not from installPath
 	}
-	out, err := exec.CommandContext(ctx, bin, "plugin", "list").CombinedOutput()
-	if err != nil {
-		return false, "claude plugin list failed: " + err.Error()
+	raw, err := os.ReadFile(filepath.Join(config.ClaudeDir(), "plugins", "installed_plugins.json"))
+	if err != nil || json.Unmarshal(raw, &reg) != nil || len(reg.Plugins[ref]) == 0 {
+		return false, ref + " is not in Claude's installed plugins (brain install runs claude plugin install)"
 	}
-	lines := strings.Split(string(out), "\n")
-	for i, line := range lines {
-		if !strings.Contains(line, install.ModName+"@"+install.ModMarketplace) {
-			continue
-		}
-		for _, next := range lines[i+1 : min(i+8, len(lines))] {
-			next = strings.TrimSpace(next)
-			if strings.HasPrefix(next, "Status:") {
-				if strings.Contains(next, "enabled") && !strings.Contains(next, "failed") {
-					return true, ""
-				}
-				return false, next
-			}
-			if strings.HasPrefix(next, "Error:") {
-				return false, next
-			}
-		}
-		return false, "no status line"
+	var settings struct {
+		Enabled map[string]bool `json:"enabledPlugins"`
 	}
-	return false, "not listed by claude plugin list"
+	raw, err = os.ReadFile(filepath.Join(config.ClaudeDir(), "settings.json"))
+	if err != nil || json.Unmarshal(raw, &settings) != nil || !settings.Enabled[ref] {
+		return false, ref + " is not enabled in settings.json"
+	}
+	dir := filepath.Join(install.ModsDir(), install.ModName)
+	if fi, err := os.Lstat(dir); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		return false, dir + " must be a real folder inside the marketplace"
+	}
+	return true, ""
 }
 
 func hostVersion(ctx context.Context, name string) string {
