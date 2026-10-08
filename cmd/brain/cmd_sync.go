@@ -141,6 +141,11 @@ func cmdSync(args []string) int {
 		switch {
 		case strings.HasPrefix(t, "skipped:"):
 			skipped++
+			reason := "other"
+			if i := strings.LastIndex(t, "("); i > 0 {
+				reason = strings.TrimSuffix(t[i+1:], ")")
+			}
+			kinds["skipped: "+reason]++
 		case strings.Contains(t, "will be synced") || strings.Contains(t, "to be synced") ||
 			strings.HasPrefix(t, "Synchronization") || strings.Contains(t, "items transferred") ||
 			strings.HasPrefix(t, "Nothing to do") || strings.Contains(t, "conflict"):
