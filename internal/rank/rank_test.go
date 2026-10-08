@@ -84,25 +84,11 @@ func TestExcludesSuperseded(t *testing.T) {
 		"work/box/log/2026-10-08.md":                         "OCR recall gate log line.\n",
 		"sessions/devbox/2026/10/2026-10-08-abcd1234-ocr.md": "---\ntype: session\n---\nOCR recall gate session.\n",
 	}
-	for rel, body := range files {
-		p := filepath.Join(brain, rel)
-		_ = os.MkdirAll(filepath.Dir(p), 0o755)
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
 	old := filepath.Join(brain, "work/box/SPEC.v1.md")
-	_ = os.Chtimes(old, timeAgo(2), timeAgo(2))
-	_ = os.Chtimes(filepath.Join(brain, "work/box/SPEC.md"), timeAgo(1), timeAgo(1))
-
-	st, err := store.Open(filepath.Join(t.TempDir(), "b.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if _, err := graph.Update(context.Background(), st.DB, []scan.Root{{Abs: brain}}, true); err != nil {
-		t.Fatal(err)
-	}
+	st := indexFiles(t, brain, files, func() {
+		_ = os.Chtimes(old, timeAgo(2), timeAgo(2))
+		_ = os.Chtimes(filepath.Join(brain, "work/box/SPEC.md"), timeAgo(1), timeAgo(1))
+	})
 	for _, deep := range []bool{false, true} {
 		hits, err := Search(st.DB, "ocr recall gate", Opts{Limit: 20, Deep: deep})
 		if err != nil {
@@ -116,6 +102,58 @@ func TestExcludesSuperseded(t *testing.T) {
 			t.Fatalf("deep=%v hits = %v, want exactly finding-ocr-new and work/box/SPEC.md", deep, got)
 		}
 	}
+}
+
+// TestQueryWordsAndPathsReachTheDoc catches the two ways real queries missed their document on 2026-10-08: filler
+// words AND-ed into the match ("What do I know about …" required "know" and "about" in the document; a third of the
+// QA questions missed), and a document the query names by path (also as BOX/<path> after naming the box) ranked
+// on its words alone.
+func TestQueryWordsAndPathsReachTheDoc(t *testing.T) {
+	brain := t.TempDir()
+	st := indexFiles(t, brain, map[string]string{
+		"notes/finding-glacier-stall.md": "---\nid: finding-glacier-stall\ntype: finding\nstatus: current\nsummary: Glacier shards stall when widened past eight\n---\nBody.\n",
+		"work/box/plans/rollout.md":      "# Rollout\n\nShard widths for the next run.\n",
+	}, nil)
+	top := func(q string) string {
+		hits, err := Search(st.DB, q, Opts{Limit: 3})
+		if err != nil || len(hits) == 0 {
+			t.Fatalf("%q: hits %v, err %v", q, hits, err)
+		}
+		return hits[0].ID
+	}
+	if got := top("What do I know about glacier shards that stall when widened for the next rollout?"); got != "finding-glacier-stall" {
+		t.Errorf("question: top hit %s", got)
+	}
+	if got := top("Follow /Users/someone/Documents/work-repo/saahil-docs/box/plans/rollout.md for the glacier shards that stall"); got != "work/box/plans/rollout.md" {
+		t.Errorf("named path: top hit %s", got)
+	}
+	if got := top("BOX is saahil-docs/box. Read BOX/plans/rollout.md about the glacier shards that stall"); got != "work/box/plans/rollout.md" {
+		t.Errorf("box placeholder path: top hit %s", got)
+	}
+}
+
+// indexFiles writes files under brain, runs touch (file times) and indexes them into a fresh store.
+func indexFiles(t *testing.T, brain string, files map[string]string, touch func()) *store.Store {
+	t.Helper()
+	for rel, body := range files {
+		p := filepath.Join(brain, rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if touch != nil {
+		touch()
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "b.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if _, err := graph.Update(context.Background(), st.DB, []scan.Root{{Abs: brain}}, true); err != nil {
+		t.Fatal(err)
+	}
+	return st
 }
 
 func timeAgo(hours int) time.Time { return time.Now().Add(-time.Duration(hours) * time.Hour) }

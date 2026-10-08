@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,7 +38,7 @@ const (
 	namesCacheFile = "names.tsv"
 	commonShare    = 100 // a stem in more than 1/commonShare of the rows is common
 	minDF          = 100 // stems rarer than this are not stored: they are cheap to query
-	maxQueryTerms  = 12
+	maxQueryTerms  = 8
 	minTerms       = 4     // below this many usable words, common ones fill in
 	termBudget     = 12000 // estimated postings one query may read: BM25 scores every row any term matches
 )
@@ -263,6 +264,15 @@ func (nm *Names) save(path, stamp string) error {
 	return os.Rename(tmp, path)
 }
 
+// commonName is the weight share of a name made only of common words ("saahil docs", "docs register"): every
+// brief and constraint block repeats such words, so they say little about what this prompt is about.
+const commonName = 0.4
+
+// common: the word is in more than 1/commonShare of the rows.
+func (nm *Names) common(word string) bool {
+	return nm.rows > 0 && nm.docFreq(word)*commonShare > nm.rows
+}
+
 // match returns the ids named in words (any 1–6 word run) with their best weight, and the matched phrases.
 func (nm *Names) match(words []string) (map[string]float64, []string) {
 	hits, seen := map[string]float64{}, map[string]bool{}
@@ -278,8 +288,12 @@ func (nm *Names) match(words []string) (map[string]float64, []string) {
 				seen[key] = true
 				phrases = append(phrases, key)
 			}
+			w := 1.0
+			if !slices.ContainsFunc(words[i:i+n], func(w string) bool { return !nm.common(w) }) {
+				w = commonName
+			}
 			for _, r := range refs {
-				hits[r.id] = max(hits[r.id], r.w)
+				hits[r.id] = max(hits[r.id], r.w*w)
 			}
 		}
 	}

@@ -270,3 +270,32 @@ func TestEvalFilesKeepNoPromptText(t *testing.T) {
 		t.Errorf("navigation rows %+v: the dispatched item must be replayed from its transcript", rows)
 	}
 }
+
+// TestSplitsPartitionItemsBySession catches DEV and TEST metrics that share items or miss some (DEV + TEST must
+// be every item), and a split that is not a fixed function of the session, which would let tuning on DEV see TEST.
+func TestSplitsPartitionItemsBySession(t *testing.T) {
+	env := NewEnv(fixture(t), Sets{}, testNow)
+	reports, err := RunAll(env, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rep := range reports {
+		byName := map[string]map[string]int{}
+		for _, m := range append(rep.Metrics, rep.SplitMetrics...) {
+			if byName[m.Name] == nil {
+				byName[m.Name] = map[string]int{}
+			}
+			byName[m.Name][m.Split] = m.All.N
+		}
+		for name, n := range byName {
+			if n["dev"]+n["test"] != n[""] {
+				t.Errorf("%s %q: dev n=%d + test n=%d != all n=%d", rep.Eval, name, n["dev"], n["test"], n[""])
+			}
+		}
+	}
+	for _, r := range reports[0].Rows.([]NavRow) {
+		if r.Split != SplitOf(r.Session) {
+			t.Errorf("%s: split %q, want %q (by session)", r.ID, r.Split, SplitOf(r.Session))
+		}
+	}
+}

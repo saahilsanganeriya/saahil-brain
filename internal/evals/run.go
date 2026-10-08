@@ -438,6 +438,7 @@ func keywordsOf(query string) []string {
 
 type NavRow struct {
 	ID         string   `json:"id"`
+	Split      string   `json:"split"`
 	Session    string   `json:"session"`
 	Dispatched bool     `json:"dispatched"`
 	Query      string   `json:"query_from"` // transcript | note (the text itself is never kept)
@@ -452,7 +453,7 @@ type NavRow struct {
 func (e *Env) Navigation() (Report, error) {
 	rows := make([]NavRow, 0, len(e.sets.Navigation))
 	for _, it := range e.sets.Navigation {
-		r := NavRow{ID: it.ID, Session: it.Session, Dispatched: it.Dispatched, Targets: len(it.Targets)}
+		r := NavRow{ID: it.ID, Split: SplitOf(it.Session), Session: it.Session, Dispatched: it.Dispatched, Targets: len(it.Targets)}
 		q, src, err := e.navQuery(it)
 		if err != nil {
 			r.Error = err.Error()
@@ -468,11 +469,13 @@ func (e *Env) Navigation() (Report, error) {
 		rows = append(rows, r)
 	}
 	ok := func(r NavRow) bool { return r.Error == "" }
-	metrics := []Metric{
-		split("navigation", "top-3 hit rate (pointer ranker)", rows, ok, func(r NavRow) bool { return r.Top3 }, func(r NavRow) bool { return r.Dispatched }, 0.70),
-		split("navigation", "reachable within 3 tool calls", rows, ok, func(r NavRow) bool { return r.Calls > 0 }, func(r NavRow) bool { return r.Dispatched }, 0.80),
-		split("navigation", "top-3 in a target's work box (diagnostic)", rows, ok, func(r NavRow) bool { return r.BoxTop3 }, func(r NavRow) bool { return r.Dispatched }, 0),
-	}
+	metrics, splits := perSplit(rows, func(r NavRow) string { return r.Split }, func(rows []NavRow) []Metric {
+		return []Metric{
+			split("navigation", "top-3 hit rate (pointer ranker)", rows, ok, func(r NavRow) bool { return r.Top3 }, func(r NavRow) bool { return r.Dispatched }, 0.70),
+			split("navigation", "reachable within 3 tool calls", rows, ok, func(r NavRow) bool { return r.Calls > 0 }, func(r NavRow) bool { return r.Dispatched }, 0.80),
+			split("navigation", "top-3 in a target's work box (diagnostic)", rows, ok, func(r NavRow) bool { return r.BoxTop3 }, func(r NavRow) bool { return r.Dispatched }, 0),
+		}
+	})
 	worst := slices.Clone(rows)
 	sort.SliceStable(worst, func(i, j int) bool {
 		a, b := worst[i], worst[j]
@@ -488,7 +491,7 @@ func (e *Env) Navigation() (Report, error) {
 		return a.ID < b.ID
 	})
 	worst = slices.DeleteFunc(worst, func(r NavRow) bool { return r.Top3 && r.Calls > 0 })
-	return newReport(e, "navigation", metrics, rows, worst[:min(20, len(worst))], e.navNotes(rows)), nil
+	return newReport(e, "navigation", metrics, splits, rows, worst[:min(20, len(worst))], e.navNotes(rows)), nil
 }
 
 // boxOf is a work doc's box (work/<box>), or "" outside work/.
@@ -532,6 +535,7 @@ func (e *Env) navNotes(rows []NavRow) []string {
 
 type QARow struct {
 	ID       string   `json:"id"`
+	Split    string   `json:"split"`
 	Kind     QAKind   `json:"kind"`
 	Source   string   `json:"source"`
 	Question string   `json:"question"`
@@ -544,7 +548,7 @@ type QARow struct {
 func (e *Env) QA() (Report, error) {
 	rows := make([]QARow, 0, len(e.sets.QA))
 	for _, it := range e.sets.QA {
-		r := QARow{ID: it.ID, Kind: it.Kind, Source: it.Source, Question: it.Question, Target: it.Target}
+		r := QARow{ID: it.ID, Split: SplitOf(it.ID), Kind: it.Kind, Source: it.Source, Question: it.Question, Target: it.Target}
 		if it.Kind == QAUnknown {
 			r.Returned = e.Ranker.Pointers(it.Question, "")
 			r.Hit = len(r.Returned) == 0
@@ -574,20 +578,22 @@ func (e *Env) QA() (Report, error) {
 		rows = append(rows, r)
 	}
 	answerable := func(r QARow) bool { return r.Kind != QAUnknown }
-	metrics := []Metric{rate("qa", "recall@3 (brain_search)", rows, answerable, func(r QARow) bool { return r.Hit }, 0.80)}
-	for _, src := range [][2]string{{"note", "notes"}, {"memory", "imported memories"}} {
-		src, label := src[0], src[1]
-		metrics = append(metrics, rate("qa", "recall@3, questions from "+label, rows,
-			func(r QARow) bool { return answerable(r) && r.Source == src }, func(r QARow) bool { return r.Hit }, 0))
-	}
-	for _, k := range []QAKind{QAAsOf, QACurrent} {
-		metrics = append(metrics, rate("qa", "recall@3, "+string(k)+" questions", rows,
-			func(r QARow) bool { return r.Kind == k }, func(r QARow) bool { return r.Hit }, 0))
-	}
-	metrics = append(metrics, rate("qa", "recall@3, topic words only (diagnostic)", rows, answerable,
-		func(r QARow) bool { return r.TopicHit }, 0))
-	metrics = append(metrics, rate("qa", "abstain on unknown (pointer ranker)", rows,
-		func(r QARow) bool { return r.Kind == QAUnknown }, func(r QARow) bool { return r.Hit }, 0))
+	metrics, splits := perSplit(rows, func(r QARow) string { return r.Split }, func(rows []QARow) []Metric {
+		metrics := []Metric{rate("qa", "recall@3 (brain_search)", rows, answerable, func(r QARow) bool { return r.Hit }, 0.80)}
+		for _, src := range [][2]string{{"note", "notes"}, {"memory", "imported memories"}} {
+			src, label := src[0], src[1]
+			metrics = append(metrics, rate("qa", "recall@3, questions from "+label, rows,
+				func(r QARow) bool { return answerable(r) && r.Source == src }, func(r QARow) bool { return r.Hit }, 0))
+		}
+		for _, k := range []QAKind{QAAsOf, QACurrent} {
+			metrics = append(metrics, rate("qa", "recall@3, "+string(k)+" questions", rows,
+				func(r QARow) bool { return r.Kind == k }, func(r QARow) bool { return r.Hit }, 0))
+		}
+		metrics = append(metrics, rate("qa", "recall@3, topic words only (diagnostic)", rows, answerable,
+			func(r QARow) bool { return r.TopicHit }, 0))
+		return append(metrics, rate("qa", "abstain on unknown (pointer ranker)", rows,
+			func(r QARow) bool { return r.Kind == QAUnknown }, func(r QARow) bool { return r.Hit }, 0))
+	})
 	worst := slices.DeleteFunc(slices.Clone(rows), func(r QARow) bool { return r.Hit })
 	sort.SliceStable(worst, func(i, j int) bool {
 		if (worst[i].Kind == QAUnknown) != (worst[j].Kind == QAUnknown) {
@@ -601,11 +607,12 @@ func (e *Env) QA() (Report, error) {
 		"brain_search has no abstention (it falls back to partial matches), so unknowns are asked of the pointer ranker",
 		"diagnostic: the same questions without their template words; brain search requires every query word of two or more letters (bar a few stopwords), so a question's filler words ('do', 'know', 'about') can sink it",
 	}
-	return newReport(e, "qa", metrics, rows, worst[:min(20, len(worst))], notes), nil
+	return newReport(e, "qa", metrics, splits, rows, worst[:min(20, len(worst))], notes), nil
 }
 
 type MistakeRow struct {
 	ID         string   `json:"id"`
+	Split      string   `json:"split"`
 	Session    string   `json:"session"`
 	Dispatched bool     `json:"dispatched"`
 	Lessons    int      `json:"lessons"`
@@ -628,26 +635,30 @@ func (e *Env) Mistakes() (Report, error) {
 		if it.Correction < 1 || it.Correction >= len(prompts) {
 			continue
 		}
-		r := MistakeRow{ID: it.ID, Session: it.Session, Dispatched: it.Dispatched, Lessons: len(it.Lessons)}
+		r := MistakeRow{ID: it.ID, Split: SplitOf(it.Session), Session: it.Session, Dispatched: it.Dispatched, Lessons: len(it.Lessons)}
 		r.Pointers = e.Ranker.Pointers(taskText(prompts[it.Correction-1]), it.CWD)
 		r.Surfaced = e.targetsByID(it.Lessons).any(r.Pointers)
 		rows = append(rows, r)
 	}
-	m := split("mistakes", "relevant lesson surfaced before the correction", rows, func(MistakeRow) bool { return true },
-		func(r MistakeRow) bool { return r.Surfaced }, func(r MistakeRow) bool { return r.Dispatched }, 0)
-	m.Mark, m.Pass = "> 0 (the replay without the brain surfaces none)", boolPtr(m.All.N > 0 && m.All.Value > 0)
-	if len(rows) == 0 {
-		m.NA = fmt.Sprintf("no lesson or anti-pattern names any of the %d corrected sessions among its sources yet (the dream has not learned from sessions)", len(e.sets.Mistakes))
-		m.Pass = nil
-	}
+	metrics, splits := perSplit(rows, func(r MistakeRow) string { return r.Split }, func(rows []MistakeRow) []Metric {
+		m := split("mistakes", "relevant lesson surfaced before the correction", rows, func(MistakeRow) bool { return true },
+			func(r MistakeRow) bool { return r.Surfaced }, func(r MistakeRow) bool { return r.Dispatched }, 0)
+		m.Mark, m.Pass = "> 0 (the replay without the brain surfaces none)", boolPtr(m.All.N > 0 && m.All.Value > 0)
+		if len(rows) == 0 {
+			m.NA = fmt.Sprintf("no lesson or anti-pattern names any of the %d corrected sessions among its sources yet (the dream has not learned from sessions)", len(e.sets.Mistakes))
+			m.Pass = nil
+		}
+		return []Metric{m}
+	})
 	worst := slices.DeleteFunc(slices.Clone(rows), func(r MistakeRow) bool { return r.Surfaced })
-	return newReport(e, "mistakes", []Metric{m}, rows, worst[:min(20, len(worst))], []string{
+	return newReport(e, "mistakes", metrics, splits, rows, worst[:min(20, len(worst))], []string{
 		"the replayed moment is the owner prompt just before the correction; a hit is a pointer to a lesson or anti-pattern learned from that session",
 	}), nil
 }
 
 type ABRow struct {
 	ID         string `json:"id"`
+	Split      string `json:"split"`
 	Dispatched bool   `json:"dispatched"`
 	BrainTop3  bool   `json:"brain_top3"`
 	GrepTop3   bool   `json:"grep_top3"`
@@ -681,7 +692,7 @@ func (e *Env) AB() (Report, error) {
 	rows := make([]ABRow, 0, len(items))
 	for _, p := range items {
 		t := e.targetsByPath(p.it.Targets)
-		rows = append(rows, ABRow{ID: p.it.ID, Dispatched: p.it.Dispatched,
+		rows = append(rows, ABRow{ID: p.it.ID, Split: SplitOf(p.it.Session), Dispatched: p.it.Dispatched,
 			BrainTop3: t.any(e.Ranker.Pointers(p.q, p.it.CWD)), GrepTop3: t.any(g.top(p.kws, 3)),
 			BrainCalls: e.brainCalls(p.q, t, e.guardFor(p.it.Session, p.it.Started)), GrepCalls: e.grepCalls(g, p.kws, t)})
 	}
@@ -693,13 +704,15 @@ func (e *Env) AB() (Report, error) {
 		}
 		return float64(n)
 	}
-	metrics := []Metric{
-		lift("ab", "top-3 hit rate lift (brain − grep)", rows, dispatched, func(r ABRow) float64 { return b2f(r.BrainTop3) - b2f(r.GrepTop3) }),
-		lift("ab", "within-3-calls lift (brain − grep)", rows, dispatched, func(r ABRow) float64 { return b2f(r.BrainCalls > 0) - b2f(r.GrepCalls > 0) }),
-		mean("ab", "tool calls to first relevant file, brain (miss = 4)", rows, dispatched, func(r ABRow) float64 { return calls(r.BrainCalls) }),
-		mean("ab", "tool calls to first relevant file, grep (miss = 4)", rows, dispatched, func(r ABRow) float64 { return calls(r.GrepCalls) }),
-		split("ab", "top-3 hit rate, grep baseline", rows, all, func(r ABRow) bool { return r.GrepTop3 }, dispatched, 0),
-	}
+	metrics, splits := perSplit(rows, func(r ABRow) string { return r.Split }, func(rows []ABRow) []Metric {
+		return []Metric{
+			lift("ab", "top-3 hit rate lift (brain − grep)", rows, dispatched, func(r ABRow) float64 { return b2f(r.BrainTop3) - b2f(r.GrepTop3) }),
+			lift("ab", "within-3-calls lift (brain − grep)", rows, dispatched, func(r ABRow) float64 { return b2f(r.BrainCalls > 0) - b2f(r.GrepCalls > 0) }),
+			mean("ab", "tool calls to first relevant file, brain (miss = 4)", rows, dispatched, func(r ABRow) float64 { return calls(r.BrainCalls) }),
+			mean("ab", "tool calls to first relevant file, grep (miss = 4)", rows, dispatched, func(r ABRow) float64 { return calls(r.GrepCalls) }),
+			split("ab", "top-3 hit rate, grep baseline", rows, all, func(r ABRow) bool { return r.GrepTop3 }, dispatched, 0),
+		}
+	})
 	worst := slices.Clone(rows)
 	sort.SliceStable(worst, func(i, j int) bool {
 		di, dj := calls(worst[i].BrainCalls)-calls(worst[i].GrepCalls), calls(worst[j].BrainCalls)-calls(worst[j].GrepCalls)
@@ -709,7 +722,7 @@ func (e *Env) AB() (Report, error) {
 		return worst[i].ID < worst[j].ID
 	})
 	worst = slices.DeleteFunc(worst, func(r ABRow) bool { return calls(r.BrainCalls) <= calls(r.GrepCalls) && (r.BrainTop3 || !r.GrepTop3) })
-	return newReport(e, "ab", metrics, rows, worst[:min(20, len(worst))], []string{
+	return newReport(e, "ab", metrics, splits, rows, worst[:min(20, len(worst))], []string{
 		"same navigation items and query words for both arms; budget-matched: the same number of results per call (8 for a search or grep, 3 for top-3) and the same 3-call budget",
 		"grep arm: whole-word, case-insensitive match over the same files' paths and text, ranked by distinct query words found; a read reveals the file's links",
 		"worst rows: items where the brain needed more calls than grep, or grep had a top-3 hit the brain missed",
