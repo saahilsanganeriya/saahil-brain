@@ -89,6 +89,7 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 	}
 	opus.RegisterActivityWithOptions(acts.BackfillCampaign, activity.RegisterOptions{Name: "BackfillCampaign"})
 	opus.RegisterActivityWithOptions(acts.LearnReflect, activity.RegisterOptions{Name: "LearnReflect"})
+	opus.RegisterActivityWithOptions(acts.MergeStep, activity.RegisterOptions{Name: "MergeStep"})
 	haiku.RegisterActivityWithOptions(acts.BackfillCard, activity.RegisterOptions{Name: "BackfillCard"})
 	haiku.RegisterActivityWithOptions(acts.LearnJudge, activity.RegisterOptions{Name: "LearnJudge"})
 	for _, w := range []worker.Worker{dreamWorker, opus, haiku} {
