@@ -107,13 +107,19 @@ func cmdSessionBackfill(args []string) int {
 	return 0
 }
 
-// cmdHookCapture serves SessionEnd and PostCompact: it must return within the 300 ms hook budget, so it only starts
-// `brain session note` in its own session (Setsid, so it outlives Claude Code) and fails open on any problem.
+// cmdHookCapture serves SessionEnd and PostCompact: it must return within the 300 ms hook budget, so it counts the
+// ignored pointers (bounded) and only starts `brain session note` in its own session (Setsid, so it outlives Claude
+// Code), failing open on any problem.
 func cmdHookCapture([]string) int {
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	if err != nil {
+		return 0
+	}
+	hookEnd(raw)
 	var in struct {
 		TranscriptPath string `json:"transcript_path"`
 	}
-	if json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&in) != nil || in.TranscriptPath == "" {
+	if json.Unmarshal(raw, &in) != nil || in.TranscriptPath == "" {
 		return 0
 	}
 	exe, err := os.Executable()

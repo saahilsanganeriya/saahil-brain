@@ -17,7 +17,7 @@ import (
 func init() {
 	register("hook start", "SessionStart/SubagentStart hook: the start digest (shadow: logged, not injected)", hookRunner(300*time.Millisecond, hooks.Start))
 	register("hook prompt", "UserPromptSubmit hook: ≤ 3 pointers or nothing (shadow: logged, not injected)", hookRunner(300*time.Millisecond, hooks.Prompt))
-	register("hook post", "PostToolUse hook: count opened/followed for pointers this session was shown", hookRunner(100*time.Millisecond,
+	register("hook post", "PostToolUse hook: count opened/followed for pointers this session was shown, and brain pulls", hookRunner(100*time.Millisecond,
 		func(env hooks.Env, in hooks.Input) ([]byte, error) { return nil, hooks.Post(env, in) }))
 	register("hook bench", "time the prompt hook on questions from the QA eval set, nothing logged: [--n 40]", cmdHookBench)
 	register("_hook-names", "rebuild the prompt hook's name dictionary (started in the background)", cmdHookNames)
@@ -51,6 +51,24 @@ func hookRunner(budget time.Duration, run func(hooks.Env, hooks.Input) ([]byte, 
 		case <-time.After(budget):
 		}
 		return 0
+	}
+}
+
+// hookEnd counts the session's ignored pointers for `hook end` and `hook compact` (cmdHookCapture), failing open
+// within 200 ms so the session note still starts inside the 300 ms budget.
+func hookEnd(raw []byte) {
+	var in hooks.Input
+	if json.Unmarshal(raw, &in) != nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = hooks.End(hooks.DefaultEnv(), in)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
