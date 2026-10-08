@@ -69,6 +69,13 @@ func cmdInstall(args []string) int {
 	} else if reports, err = install.Install(m, *repo, only, now, *dryRun); err != nil {
 		return fail("%v", err)
 	}
+	if !*dryRun && *off == "" {
+		if msg, err := install.EnsureClaudePlugin(); err != nil {
+			return fail("claude plugin: %v", err)
+		} else if msg != "" {
+			fmt.Println(msg)
+		}
+	}
 	for _, rep := range reports {
 		fmt.Println(summarize(rep))
 		for _, c := range rep.Conflicts {

@@ -1,9 +1,14 @@
 package install
 
 import (
+	"context"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/mod"
@@ -89,4 +94,27 @@ func dropOldModLink() error {
 		return nil
 	}
 	return os.Remove(link)
+}
+
+// EnsureClaudePlugin installs the mod as a Claude Code plugin when Claude does not list it yet: a plugin in a
+// directory marketplace is only listed in the marketplace file until `claude plugin install` registers it.
+func EnsureClaudePlugin() (string, error) {
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		return "", nil
+	}
+	if _, err := os.Stat(filepath.Join(ModsDir(), ModName, ".claude-plugin", "plugin.json")); err != nil {
+		return "", nil
+	}
+	ref := ModName + "@" + ModMarketplace
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, bin, "plugin", "list").CombinedOutput()
+	if strings.Contains(string(out), ref) {
+		return "", nil
+	}
+	if out, err := exec.CommandContext(ctx, bin, "plugin", "install", ref, "--scope", "user").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("claude plugin install %s: %v %s", ref, err, strings.TrimSpace(string(out)))
+	}
+	return "claude plugin: installed " + ref, nil
 }
