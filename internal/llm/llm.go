@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"saahil.local/brain/internal/config"
 	"strconv"
 	"sync"
 )
@@ -43,7 +45,22 @@ func (e *ModelError) Error() string { return "model error " + e.Subtype + ": " +
 // Linux caps one argv string at 128 KiB; the skill rides in --append-system-prompt.
 const maxSkillBytes = 120 * 1024
 
-type Claude struct{ Bin string }
+// Claude runs the claude CLI. Prefix wraps it (on the devbox: devbox-exec, which loads the provider and its key the
+// same way interactive sessions get them; a systemd worker has neither in its environment).
+type Claude struct {
+	Bin    string
+	Prefix []string
+}
+
+// DefaultClaude is ~/.local/bin/claude, behind devbox-exec when this machine has it.
+func DefaultClaude() Claude {
+	bin := filepath.Join(config.BinDir(), "claude")
+	wrapper := filepath.Join(config.BinDir(), "devbox-exec")
+	if _, err := os.Stat(wrapper); err == nil {
+		return Claude{Bin: wrapper, Prefix: []string{bin}}
+	}
+	return Claude{Bin: bin}
+}
 
 func (c Claude) Run(ctx context.Context, call Call) (Result, error) {
 	if len(call.Skill) > maxSkillBytes {
@@ -61,7 +78,7 @@ func (c Claude) Run(ctx context.Context, call Call) (Result, error) {
 		return Result{}, err
 	}
 	defer os.RemoveAll(dir)
-	cmd := exec.CommandContext(ctx, c.Bin, args...)
+	cmd := exec.CommandContext(ctx, c.Bin, append(append([]string{}, c.Prefix...), args...)...)
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewBufferString(call.Input)
 	var stdout, stderr bytes.Buffer

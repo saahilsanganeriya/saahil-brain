@@ -73,7 +73,7 @@ func cmdFile(args []string) int {
 	}
 	defer ledger.Close()
 	res, err := filing.Run(context.Background(), filing.Config{Root: root, Machines: machines, Batch: *batch,
-		Limit: *limit, Model: modelID, Runner: llm.Claude{Bin: filepath.Join(config.BinDir(), "claude")},
+		Limit: *limit, Model: modelID, Runner: llm.DefaultClaude(),
 		Ledger: ledger, Skill: string(skill), BudgetUSD: *budget, Now: time.Now()})
 	res.Skips = nil // the full list is in .brain/filing-report.json
 	out, _ := json.MarshalIndent(res, "", "  ")

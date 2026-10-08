@@ -43,7 +43,10 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 	var runner llm.Runner
 	switch llmKind {
 	case "claude":
-		runner = llm.Claude{Bin: claudeBin}
+		runner = llm.DefaultClaude()
+		if claudeBin != filepath.Join(config.BinDir(), "claude") {
+			runner = llm.Claude{Bin: claudeBin}
+		}
 	case "fake":
 		runner = &llm.Fake{}
 	default:
