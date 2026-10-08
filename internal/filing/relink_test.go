@@ -78,4 +78,20 @@ func TestRenderPrioritizesOwnerIndex(t *testing.T) {
 	if i, j := strings.Index(text, "lesson-owner-rule-scoped"), strings.Index(text, "anti-pattern-newer"); i < 0 || j < 0 || i > j {
 		t.Fatalf("the successor of an owner-index note lost its place:\n%s", text)
 	}
+
+	// and down a chain: the 2026-10-08 Haiku decision superseded a successor of an owner-index note and dropped out
+	_ = os.WriteFile(filepath.Join(root, "notes", "lesson-owner-rule-scoped.md"), []byte("---\nid: lesson-owner-rule-scoped"+
+		"\ntype: lesson\nstatus: superseded\nsummary: fact scoped\nscope: global\nhubs: [git]\nsupersedes: [lesson-owner-rule]"+
+		"\nas_of: 2026-10-08\n---\nbody\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "notes", "decision-owner-rule-now.md"), []byte("---\nid: decision-owner-rule-now"+
+		"\ntype: decision\nstatus: current\nsummary: fact now\nscope: global\nhubs: [git]\nsupersedes: [lesson-owner-rule-scoped]"+
+		"\nas_of: 2026-10-08\n---\nbody\n"), 0o644)
+	if err := RenderMemoryIndex(root); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(root, "memory", "MEMORY.md"))
+	text = string(raw)
+	if i, j := strings.Index(text, "decision-owner-rule-now"), strings.Index(text, "anti-pattern-newer"); i < 0 || j < 0 || i > j {
+		t.Fatalf("the end of a supersede chain lost the owner-index place:\n%s", text)
+	}
 }

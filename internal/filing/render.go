@@ -89,14 +89,28 @@ func MemoryIndexText(root string, keep func(brainPath string) bool) (string, err
 	if prio == nil {
 		prio = map[string]int{}
 	}
-	// a note that supersedes one the owner's index ranked takes that place (the old one is no longer current)
-	for _, n := range facts {
-		for _, old := range n.Supersedes {
-			if p, ok := prio[old]; ok {
-				if have, set := prio[n.ID]; !set || p < have {
-					prio[n.ID] = p
-				}
+	// a note that supersedes one the owner's index ranked takes that place, down the whole chain of replacements
+	older := map[string][]string{}
+	for _, n := range notes {
+		older[n.ID] = n.Supersedes
+	}
+	var inherit func(id string, seen map[string]bool) (int, bool)
+	inherit = func(id string, seen map[string]bool) (int, bool) {
+		best, found := prio[id]
+		for _, old := range older[id] {
+			if seen[old] {
+				continue
 			}
+			seen[old] = true
+			if p, ok := inherit(old, seen); ok && (!found || p < best) {
+				best, found = p, true
+			}
+		}
+		return best, found
+	}
+	for _, n := range facts {
+		if p, ok := inherit(n.ID, map[string]bool{n.ID: true}); ok {
+			prio[n.ID] = p
 		}
 	}
 	sort.SliceStable(facts, func(i, j int) bool {
