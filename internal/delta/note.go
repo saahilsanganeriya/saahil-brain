@@ -259,7 +259,7 @@ func flowList(items []string) string {
 	return "[" + strings.Join(q, ", ") + "]"
 }
 
-// yamlScalar leaves a plain string plain and double-quotes anything YAML (or a flow list) would read differently.
+// yamlScalar leaves a plain string plain and quotes anything YAML (or a flow list) would read differently.
 func yamlScalar(s string) string {
 	plain := s != "" && strings.TrimSpace(s) == s && !strings.ContainsAny(s, ",[]{}\"'\n\t\\") &&
 		!strings.ContainsAny(s[:1], "-?:#&*!|>%@`") && !strings.Contains(s, ": ") && !strings.Contains(s, " #") &&
@@ -270,6 +270,9 @@ func yamlScalar(s string) string {
 	}
 	if plain {
 		return s
+	}
+	if !strings.ContainsAny(s, "'\n\t") { // single quotes escape nothing, so a reader that only strips quotes reads it right
+		return "'" + s + "'"
 	}
 	q, _ := json.Marshal(s)
 	return string(q)
