@@ -31,6 +31,10 @@ var AllowedSteps = map[string]Step{
 	"index":   {Args: []string{"index"}, Timeout: 30 * time.Minute},
 	"sync":    {Args: []string{"sync"}, Timeout: 30 * time.Minute},
 	"update":  {Args: []string{"self-update"}, Timeout: 5 * time.Minute, Only: config.Laptop},
+	// read-only views and the shadow-phase setup
+	"agents-list":   {Args: []string{"agents", "list"}, Timeout: 2 * time.Minute},
+	"init":          {Args: []string{"init"}, Timeout: time.Minute},
+	"import-memory": {Args: []string{"import", "memory"}, Timeout: 10 * time.Minute},
 }
 
 type Job struct {
