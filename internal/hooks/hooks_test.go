@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -250,5 +251,35 @@ func TestExploreSlotGoesToFreshNote(t *testing.T) {
 	}
 	if len(lk.Chosen) != 3 || lk.Chosen[2].ID != "finding-ocr-census-fresh" {
 		t.Fatalf("chosen %+v", lk.Chosen)
+	}
+}
+
+// TestBriefPointsAtNamedAndOwnDocs catches a dispatch brief pointed at a note its boilerplate names by alias instead
+// of the brief it names by path and the worker's own report (navigation top-3 was 5.5% on 2026-10-08), and a
+// sibling folder whose name differs only in a number (cascade-4 for a cascade-5 worker).
+func TestBriefPointsAtNamedAndOwnDocs(t *testing.T) {
+	f := newFixture(t, true, map[string]string{
+		"notes/playbook-orca-orchestration.md":      note("playbook-orca-orchestration", "playbook", "current", "How workers report through orca orchestration", []string{"image-lane"}, "orca orchestration"),
+		"work/slice-x/briefs/cascade-5.md":          "# Cascade 5 brief\n\nGate the fifth cascade.\n",
+		"work/slice-x/evidence/cascade-5/REPORT.md": "# Cascade 5 report\n\nGate held.\n",
+		"work/slice-x/evidence/cascade-4/REPORT.md": "# Cascade 4 report\n\nGate held.\n",
+	})
+	nm, err := BuildNames(f.db, func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b })
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief := "=== TASK === Run the gate. Brief: /Users/someone/Documents/work-repo/saahil-docs/slice-x/briefs/cascade-5.md " +
+		"Report through orca orchestration when done."
+	lk, err := Pointers(f.db, brief, Seeds{Folder: "cascade-5-slice-x"}, nm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range lk.Chosen {
+		got = append(got, p.ID)
+	}
+	if len(got) == 0 || got[0] != "work/slice-x/briefs/cascade-5.md" || !slices.Contains(got, "work/slice-x/evidence/cascade-5/REPORT.md") ||
+		slices.Contains(got, "work/slice-x/evidence/cascade-4/REPORT.md") {
+		t.Fatalf("pointers %v: want the brief first, then the cascade-5 report, never cascade-4's", got)
 	}
 }

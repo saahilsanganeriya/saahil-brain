@@ -106,7 +106,8 @@ func TestExcludesSuperseded(t *testing.T) {
 
 // TestQueryWordsAndPathsReachTheDoc catches the two ways real queries missed their document on 2026-10-08: filler
 // words AND-ed into the match ("What do I know about …" required "know" and "about" in the document; a third of the
-// QA questions missed), and a document the query names by path ranked on its words alone.
+// QA questions missed), and a document the query names by path (also as BOX/<path> after naming the box) ranked
+// on its words alone.
 func TestQueryWordsAndPathsReachTheDoc(t *testing.T) {
 	brain := t.TempDir()
 	st := indexFiles(t, brain, map[string]string{
@@ -125,6 +126,9 @@ func TestQueryWordsAndPathsReachTheDoc(t *testing.T) {
 	}
 	if got := top("Follow /Users/someone/Documents/work-repo/saahil-docs/box/plans/rollout.md for the glacier shards that stall"); got != "work/box/plans/rollout.md" {
 		t.Errorf("named path: top hit %s", got)
+	}
+	if got := top("BOX is saahil-docs/box. Read BOX/plans/rollout.md about the glacier shards that stall"); got != "work/box/plans/rollout.md" {
+		t.Errorf("box placeholder path: top hit %s", got)
 	}
 }
 
