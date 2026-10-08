@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -24,11 +23,18 @@ func cmdInstall(args []string) int {
 	verify := fs.Bool("verify", false, "re-check each host; exit 1 when anything is missing or in the way")
 	off := fs.String("off", "", "remove what the manifest says the installer added to this host ("+strings.Join(install.HostNames(), "|")+")")
 	hosts := fs.String("host", "", "only these hosts, comma-separated")
-	repo := fs.String("repo", filepath.Join(config.LaptopHome, "Documents", "saahil-brain"), "the saahil-brain checkout whose mod/ is linked")
+	repo := fs.String("repo", install.ShareDir(), "where the mod/ the Claude Code marketplace links to lives (default: laid out from this binary)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	*repo = config.Canonical(*repo)
+	if *repo == install.ShareDir() && !*dryRun && *off == "" {
+		if n, err := install.ExtractMod(*repo); err != nil {
+			return fail("lay out the mod: %v", err)
+		} else if n > 0 {
+			fmt.Printf("mod: %d files laid out in %s/mod\n", n, *repo)
+		}
+	}
 	var only []string
 	if *hosts != "" {
 		only = strings.Split(*hosts, ",")
