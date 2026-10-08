@@ -28,6 +28,14 @@ func cmdInstall(args []string) int {
 		return 2
 	}
 	*repo = config.Canonical(*repo)
+	if !*dryRun && *off == "" {
+		// ~/.claude/rules/brain.md @-imports BRAIN.md: keep it at this binary's version
+		if changed, err := install.WriteBrainDoc(config.BrainRoot()); err != nil {
+			return fail("BRAIN.md: %v", err)
+		} else if changed {
+			fmt.Println("BRAIN.md: laid out in", config.BrainRoot())
+		}
+	}
 	if *repo == install.ShareDir() && !*dryRun && *off == "" {
 		if n, err := install.ExtractMod(*repo); err != nil {
 			return fail("lay out the mod: %v", err)

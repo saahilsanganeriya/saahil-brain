@@ -7,6 +7,7 @@ import (
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/mod"
+	"saahil.local/brain/templates"
 )
 
 // ShareDir holds what the binary lays out for hosts; its mod/ is what the Claude Code marketplace links to.
@@ -38,4 +39,21 @@ func ExtractMod(dir string) (changed int, err error) {
 		return os.Rename(tmp, dst)
 	})
 	return changed, err
+}
+
+// WriteBrainDoc keeps <brain>/BRAIN.md equal to the binary's template (code-owned, like the mod).
+func WriteBrainDoc(brainRoot string) (bool, error) {
+	data, err := templates.FS.ReadFile("BRAIN.md")
+	if err != nil {
+		return false, err
+	}
+	dst := filepath.Join(brainRoot, "BRAIN.md")
+	if old, err := os.ReadFile(dst); err == nil && string(old) == string(data) {
+		return false, nil
+	}
+	tmp := dst + ".brain-tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return false, err
+	}
+	return true, os.Rename(tmp, dst)
 }

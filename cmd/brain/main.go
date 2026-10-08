@@ -34,11 +34,11 @@ func dispatch(args []string) int {
 	}
 	if len(args) >= 2 {
 		if c, ok := commands[args[0]+" "+args[1]]; ok {
-			return c.run(args[2:])
+			return runCommand(c, args[2:])
 		}
 	}
 	if c, ok := commands[args[0]]; ok {
-		return c.run(args[1:])
+		return runCommand(c, args[1:])
 	}
 	if hasGroup(args[0]) {
 		usage(args[0])
@@ -47,6 +47,15 @@ func dispatch(args []string) int {
 	fmt.Fprintf(os.Stderr, "brain: unknown command %q\n\n", args[0])
 	usage("")
 	return 2
+}
+
+// runCommand answers -h/--help itself: a command that parses no flags would otherwise run (and write) on --help.
+func runCommand(c command, rest []string) int {
+	if len(rest) > 0 && (rest[0] == "-h" || rest[0] == "--help" || rest[0] == "help") {
+		fmt.Printf("brain %s — %s\n", c.path, c.summary)
+		return 0
+	}
+	return c.run(rest)
 }
 
 func hasGroup(group string) bool {
