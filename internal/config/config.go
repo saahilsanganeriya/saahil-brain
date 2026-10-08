@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -146,6 +147,24 @@ func SyncCarries(rel string) bool {
 	}
 	ext := strings.TrimPrefix(filepath.Ext(strings.SplitN(rel, "#", 2)[0]), ".")
 	return ext == "" || slices.Contains(SyncWorkTextExts, ext)
+}
+
+// MonorepoBox is the work/ box the team-monorepo's old saahil-docs moved into at the cut-over.
+const MonorepoBox = "team-monorepo-saahil-docs-2026-08"
+
+var legacyDocsRE = regexp.MustCompile(`/Documents/(?:work-repo|worktrees/work-repo/[^/]+)/saahil-docs/(.+)$`)
+var legacyMonorepoRE = regexp.MustCompile(`/apps/server/work-repo/saahil-docs/(.+)$`)
+
+// LegacyDocsPath maps an absolute path in an old saahil-docs spelling (the work-repo checkout, one of its
+// worktrees, or the monorepo's) to its brain path under work/; history keeps those spellings for good.
+func LegacyDocsPath(abs string) (string, bool) {
+	if m := legacyDocsRE.FindStringSubmatch(abs); m != nil {
+		return "work/" + m[1], true
+	}
+	if m := legacyMonorepoRE.FindStringSubmatch(abs); m != nil && strings.Contains(abs, "team-monorepo") {
+		return "work/" + MonorepoBox + "/" + m[1], true
+	}
+	return "", false
 }
 
 // IsSyncConflictCopy names a conflict copy left by a sync: Unison's "<file> (conflict…_on_<date>…)", the cut-over

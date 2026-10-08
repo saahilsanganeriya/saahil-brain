@@ -372,3 +372,20 @@ func TestNavigationCountsANoteFiledFromATargetMemory(t *testing.T) {
 		t.Errorf("decision-nimbus-flag, filed from the target memory, is not a hit")
 	}
 }
+
+// TestCutoverManifestDatesRewrittenFiles: the cut-over's path rewrite and the sync's replacements gave files a birth
+// and modification time of that day, so every older session's targets looked new and the navigation eval fell from
+// 71% to 49%; the manifest taken before the move keeps the older date.
+func TestCutoverManifestDatesRewrittenFiles(t *testing.T) {
+	cutDay := time.Date(2026, 10, 8, 12, 43, 0, 0, time.UTC)
+	stubFileTimes(t, map[string]time.Time{"plans/SPEC.md": cutDay, "plans/NEW.md": cutDay})
+	x := &existence{root: t.TempDir(), touched: map[string]time.Time{}, times: map[string]fileDates{},
+		cutover: map[string]time.Time{"work/box/plans/SPEC.md": time.Date(2026, 10, 6, 4, 42, 0, 0, time.UTC)}}
+	session := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	if !x.before("work/box/plans/SPEC.md", session) {
+		t.Fatal("a file listed before the cut-over with an older mtime existed at the session's start")
+	}
+	if x.before("work/box/plans/NEW.md", session) {
+		t.Fatal("a file the manifest does not list keeps its own dates")
+	}
+}

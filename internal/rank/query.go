@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"saahil.local/brain/internal/config"
 )
 
 var TokenRE = regexp.MustCompile(`[\p{L}\p{N}_]+`)
@@ -210,6 +212,9 @@ func Mentions(db *sql.DB, text string, boxes []string) ([]string, error) {
 // presented turns a spelled path into the index's form; absolute reports a path anchored at a root.
 func presented(m string) (string, bool) {
 	m = strings.TrimRight(m, "./")
+	if p, ok := config.LegacyDocsPath(m); ok {
+		return p, true
+	}
 	if i := strings.Index(m, "saahil-docs/"); i >= 0 {
 		return workDir + m[i+len("saahil-docs/"):], true
 	}

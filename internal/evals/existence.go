@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"bufio"
 	"database/sql"
 	"errors"
 	"io/fs"
@@ -28,6 +29,7 @@ type existence struct {
 	ended   map[string]time.Time // session note path → when its session ended
 	paths   map[string]string    // node id → path, "" for nodes without a file (tickets, PRs, links)
 	times   map[string]fileDates
+	cutover map[string]time.Time // work/… path → its mtime in this machine's manifest from before the cut-over
 }
 
 type fileDates struct {
@@ -68,7 +70,44 @@ func newExistence(root string, db *sql.DB) (*existence, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		err = nil
 	}
+	x.cutover = loadCutoverDates(root, db)
 	return x, err // x is usable either way
+}
+
+// loadCutoverDates reads this machine's manifest from before the cut-over for the work/ docs the index holds: the
+// cut-over's path rewrite and the sync's replacements gave many files a birth and modification time of that day, so
+// without it every such file looked new to every older session.
+func loadCutoverDates(root string, db *sql.DB) map[string]time.Time {
+	out := map[string]time.Time{}
+	f, err := os.Open(filepath.Join(root, ".archive", "cutover", string(config.ThisMachine())+"-before.tsv"))
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+	want := map[string]bool{}
+	rows, err := db.Query(`SELECT path FROM node WHERE kind = 'doc' AND path LIKE 'work/%'`)
+	if err != nil {
+		return out
+	}
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) == nil {
+			want[p] = true
+		}
+	}
+	rows.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		cols := strings.SplitN(sc.Text(), "\t", 4)
+		if len(cols) < 3 || !want["work/"+cols[0]] {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339Nano, cols[2]); err == nil {
+			out["work/"+cols[0]] = t
+		}
+	}
+	return out
 }
 
 // before reports whether the node path p existed before t. A file not where its path says (a staged copy, a moved or
@@ -80,7 +119,9 @@ func (x *existence) before(p string, t time.Time) bool {
 		return true
 	}
 	first, seen := x.touched[p]
-	return (!d.born.IsZero() && d.born.Before(t)) || d.modified.Before(t) || (seen && first.Before(t))
+	cut, listed := x.cutover[p]
+	return (!d.born.IsZero() && d.born.Before(t)) || d.modified.Before(t) || (seen && first.Before(t)) ||
+		(listed && cut.Before(t))
 }
 
 // unchangedBefore reports whether p's text today is its text at t: last modified before t. A file with no

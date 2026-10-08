@@ -311,6 +311,9 @@ func linkID(src string, l parse.Link, roots []scan.Root) string {
 		if p, ok := scan.Presented(roots, t); ok {
 			return ID(p)
 		}
+		if p, ok := config.LegacyDocsPath(t); ok {
+			return ID(p)
+		}
 		return config.Canonical(t)
 	}
 	return ID(path.Join(path.Dir(src), t))
