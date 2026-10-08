@@ -69,6 +69,9 @@ func stubFileTimes(t *testing.T, newer map[string]time.Time) {
 	}
 }
 
+// shardBrief is a brief file the dispatched fixture session's prompt was pasted from.
+const shardBrief = "Update the glacier tokenizer shard plan for the next run and report the shard widths back."
+
 // fixture is a synthetic brain: work docs (as the shadow saahil-docs), notes with a supersession, a lesson learned
 // from a session, an imported memory and the note filed from it, and sessions on both sides of each date window.
 func fixture(t *testing.T) *index.Index {
@@ -83,6 +86,7 @@ func fixture(t *testing.T) *index.Index {
 	write(t, filepath.Join(docs, "box-a", "plans", "rollout.md"), "# Rollout plan\n\nShard widths for the next run.\n")
 	write(t, filepath.Join(docs, "box-a", "README.md"), "# Box A\n\nglacier tokenizer readme\n")
 	write(t, filepath.Join(docs, "box-a", "artifacts", "run-7.json"), `{"shards": 8}`+"\n")
+	write(t, filepath.Join(docs, "box-a", "briefs", "shard-plan.md"), shardBrief+"\n")
 	write(t, filepath.Join(docs, "box-b", "baking.md"), "# Notes\n\nsourdough starter hydration at seventy percent\n")
 	write(t, filepath.Join(root, "notes", "decision-glacier-shards.md"), "---\nid: decision-glacier-shards\ntype: decision\nstatus: current\n"+
 		"summary: Glacier tokenizer runs use eight shards per worker; wider shards stalled the queue\nhubs: [box-a]\nevidence: [work/box-a/STATE.md]\n---\nBody.\n")
@@ -103,10 +107,10 @@ func fixture(t *testing.T) *index.Index {
 	write(t, filepath.Join(sessions, "09", "2026-09-10-bbbb2222-early.md"), sessionFile("2026-09-10T10:00:00Z",
 		"work/box-a/plans/rollout.md", "", "glacier rollout "+promptMarker, "no, don't widen the shards"))
 	brief := "Please carry out this task from my Orca coordinator. <pasted_content id=\"1\"> You are working inside Orca. " +
-		"=== CLI COMMANDS === orca orchestration send ... === TASK === Update the glacier tokenizer shard plan " + promptMarker + " </pasted_content id=\"1\">"
+		"=== CLI COMMANDS === orca orchestration send ... === TASK === " + shardBrief + " " + promptMarker + " </pasted_content id=\"1\">"
 	dispatched := transcriptFile(t, filepath.Join(home, "dispatched.jsonl"), brief)
 	write(t, filepath.Join(sessions, "09", "2026-09-25-cccc3333-dispatch.md"), sessionFile("2026-09-25T10:00:00Z",
-		"work/box-a/plans/rollout.md", dispatched, brief[:120], "no, stop widening them"))
+		"work/box-a/briefs/shard-plan.md, work/box-a/plans/rollout.md", dispatched, brief[:120], "no, stop widening them"))
 	// fitted to its size cap, the note lists only the first prompt; the correction survives in the transcript
 	typed := transcriptFile(t, filepath.Join(home, "typed.jsonl"), "where is the glacier tokenizer state "+promptMarker,
 		"fine, continue", "no, don't widen the shards "+promptMarker)
@@ -143,13 +147,18 @@ func ids[T any](items []T, id func(T) string) []string {
 }
 
 // TestBuildSplitsByDateAndKeepsOnlyRealTargets catches sets that leak sessions from before their window into the
-// evaluation, count generic files, folders or unindexed repo code as navigation targets, replay a correction from
-// the wrong prompt, or lose corrections a note dropped to fit its size cap (148 real ones were, on 2026-10-08).
+// evaluation, count generic files, folders, a bulk folder or unindexed repo code as navigation targets, count the
+// brief a dispatch was pasted from (the session already holds its text; 21 of 74 DEV hits were only that, on
+// 2026-10-08), replay a correction from the wrong prompt, or lose corrections a note dropped to fit its size cap
+// (148 real ones were, on 2026-10-08).
 func TestBuildSplitsByDateAndKeepsOnlyRealTargets(t *testing.T) {
 	sets := buildSets(t, fixture(t))
 	nav := ids(sets.Navigation, func(it NavItem) string { return it.ID })
 	if want := []string{"nav-2026-09-25-cccc3333", "nav-2026-10-05-aaaa1111"}; !slices.Equal(nav, want) {
 		t.Fatalf("navigation items %v, want %v (09-10 is before the 09-20 window)", nav, want)
+	}
+	if got := sets.Navigation[0].Targets; !slices.Equal(got, []string{"work/box-a/plans/rollout.md"}) {
+		t.Errorf("targets %v: the brief the dispatch was pasted from must be dropped", got)
 	}
 	if got := sets.Navigation[1].Targets; !slices.Equal(got, []string{"work/box-a/STATE.md"}) {
 		t.Errorf("targets %v: README, the folder, the bulk artifacts folder and repo code must be dropped", got)

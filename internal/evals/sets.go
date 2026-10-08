@@ -24,6 +24,7 @@ import (
 
 	"saahil.local/brain/internal/index"
 	"saahil.local/brain/internal/parse"
+	"saahil.local/brain/internal/rank"
 	"saahil.local/brain/internal/session"
 )
 
@@ -339,11 +340,14 @@ func (b *builder) sessions(navFrom, cut time.Time) ([]NavItem, []MistakeItem, er
 		dispatched := isDispatchBrief(s.Prompts[0])
 		if s.Started.Before(navFrom) {
 			b.skipped["navigation: before its window"]++
-		} else if targets := b.targets(append(append([]string{}, s.Touched...), s.Produced...), s.Started); len(targets) > 0 {
-			nav = append(nav, NavItem{ID: "nav-" + s.shortID(), Session: rel, Machine: s.Machine, Started: s.Started,
-				CWD: s.CWD, Transcript: s.Transcript, Dispatched: dispatched, Targets: targets})
 		} else {
-			b.skipped["navigation: no indexed target"]++
+			first, _ := firstPrompt(s.Transcript, s.Prompts)
+			if targets := b.targets(append(append([]string{}, s.Touched...), s.Produced...), s.Started, rank.Shingles(first)); len(targets) > 0 {
+				nav = append(nav, NavItem{ID: "nav-" + s.shortID(), Session: rel, Machine: s.Machine, Started: s.Started,
+					CWD: s.CWD, Transcript: s.Transcript, Dispatched: dispatched, Targets: targets})
+			} else {
+				b.skipped["navigation: no indexed target"]++
+			}
 		}
 		prompts, from := s.Prompts, "note"
 		if s.Corrections > 0 && !s.Started.Before(cut) {
@@ -377,9 +381,10 @@ func (b *builder) sessions(navFrom, cut time.Time) ([]NavItem, []MistakeItem, er
 
 // targets resolves a session's files to indexed docs and data files (a byte copy counts as its canonical); generic
 // files, folders (a bulk folder's summary node too: no session reads a folder as a file), other sessions, files the
-// index never saw (repo code) and files the session itself created (they did not exist when its first prompt was
-// typed, so no brain could have pointed at them) are dropped.
-func (b *builder) targets(files []string, started time.Time) []string {
+// index never saw (repo code), files the session itself created (they did not exist when its first prompt was typed,
+// so no brain could have pointed at them) and files the first prompt already holds (the brief a dispatch was pasted
+// from: the session has its text, so finding it is no navigation) are dropped.
+func (b *builder) targets(files []string, started time.Time, prompt map[uint64]bool) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, f := range files {
@@ -396,10 +401,15 @@ func (b *builder) targets(files []string, started time.Time) []string {
 			continue
 		}
 		if canonical != "" {
+			id = canonical
 			_ = b.ix.DB().QueryRow(`SELECT path FROM node WHERE id = ?`, canonical).Scan(&p)
 		}
 		if !b.exist.before(p, started) {
 			b.skipped["navigation: target created by the session itself"]++
+			continue
+		}
+		if body, err := rank.Body(b.ix.DB(), id); err == nil && rank.Echo(body, prompt) >= rank.EchoShare {
+			b.skipped["navigation: target text already in the first prompt"]++
 			continue
 		}
 		if !seen[p] && !genericFiles[path.Base(p)] {

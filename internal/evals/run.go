@@ -93,17 +93,27 @@ func taskText(prompt string) string {
 	return strings.TrimSpace(rest)
 }
 
-// navQuery is what the ranker would have seen: the full first owner prompt from the transcript when it is on this
+// firstPrompt is what the ranker would have seen: the full first owner prompt from the transcript when it is on this
 // machine (the note keeps 500 characters), cut to its task text. It is used in memory only, never written.
-func (e *Env) navQuery(it NavItem) (q, source string, err error) {
-	if p := ownerPrompts(it.Transcript, 1); len(p) == 1 {
-		return taskText(p[0]), "transcript", nil
+func firstPrompt(transcript string, notePrompts []string) (q, source string) {
+	if p := ownerPrompts(transcript, 1); len(p) == 1 {
+		return taskText(p[0]), "transcript"
 	}
-	s, err := readSession(e.Index.Root, it.Session)
-	if err != nil || len(s.Prompts) == 0 {
+	if len(notePrompts) > 0 {
+		return taskText(notePrompts[0]), "note"
+	}
+	return "", ""
+}
+
+func (e *Env) navQuery(it NavItem) (q, source string, err error) {
+	if q, source = firstPrompt(it.Transcript, nil); source == "" {
+		s, _ := readSession(e.Index.Root, it.Session)
+		q, source = firstPrompt("", s.Prompts)
+	}
+	if source == "" {
 		return "", "", fmt.Errorf("%s: no owner prompt", it.Session)
 	}
-	return taskText(s.Prompts[0]), "note", nil
+	return q, source, nil
 }
 
 // ---- matching ----
