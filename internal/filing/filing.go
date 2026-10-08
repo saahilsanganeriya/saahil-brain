@@ -315,16 +315,17 @@ type Config struct {
 }
 
 type Result struct {
-	Reconcile Reconcile `json:"reconcile"`
-	FiledNow  int       `json:"filed_now"`
-	Unfiled   int       `json:"unfiled"` // sent, but no applied note cites it: retried once
-	Batches   int       `json:"batches"`
-	Calls     int       `json:"calls"`
-	Cached    int       `json:"cached"`
-	CostUSD   float64   `json:"cost_usd"`
-	Rejected  int       `json:"rejected_ops"`
-	Stopped   string    `json:"stopped,omitempty"`
-	Skips     []Skip    `json:"skips,omitempty"`
+	Reconcile  Reconcile `json:"reconcile"`
+	FiledNow   int       `json:"filed_now"`
+	Unfiled    int       `json:"unfiled"` // sent, but no applied note cites it: retried once
+	Batches    int       `json:"batches"`
+	Calls      int       `json:"calls"`
+	Cached     int       `json:"cached"`
+	CostUSD    float64   `json:"cost_usd"`
+	Rejected   int       `json:"rejected_ops"`
+	BadAnswers int       `json:"bad_answers,omitempty"` // not a delta: its memories count as left out
+	Stopped    string    `json:"stopped,omitempty"`
+	Skips      []Skip    `json:"skips,omitempty"`
 }
 
 type batchInput struct {
@@ -381,15 +382,17 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		}
 		res.Batches++
 		var d delta.Delta
+		cited := map[string][]string{}
 		if err := json.Unmarshal(answer, &d); err != nil {
-			return res, fmt.Errorf("batch %d: the answer is not a delta: %w", res.Batches, err)
+			res.BadAnswers++ // its memories count as left out; their attempt marker makes the retry a new question
+		} else {
+			rep, err := delta.Apply(ctx, cfg.Root, d, delta.Options{Now: cfg.Now})
+			if err != nil {
+				return res, err
+			}
+			res.Rejected += len(rep.Rejected)
+			cited = citedSources(d, rep)
 		}
-		rep, err := delta.Apply(ctx, cfg.Root, d, delta.Options{Now: cfg.Now})
-		if err != nil {
-			return res, err
-		}
-		res.Rejected += len(rep.Rejected)
-		cited := citedSources(d, rep)
 		for _, it := range batch {
 			notes := cited[it.Path]
 			for _, c := range it.Copies {

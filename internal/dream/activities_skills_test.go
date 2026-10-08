@@ -74,3 +74,29 @@ func TestSkillStepFilesThroughDeltas(t *testing.T) {
 		t.Fatalf("note not written by the delta: %v\n%s", err, b)
 	}
 }
+
+// TestSkillStepRetriesABrokenAnswer catches a skill answer that is not a delta being kept in the ledger as done: every
+// later dream would then get the same broken answer for $0, fail the step, and never advance past that material.
+func TestSkillStepRetriesABrokenAnswer(t *testing.T) {
+	brain, skills := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(brain, "memory/feedback-x.md"), "x\n")
+	write(t, filepath.Join(skills, "file.md"), "# skill file\n")
+	fake := &llm.Fake{Respond: func(llm.Call) llm.Result { return llm.Result{Text: "not json"} }}
+	ledger, err := llm.OpenLedger(filepath.Join(brain, ".index", "brain.db"), filepath.Join(brain, ".data", "llm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	acts := &Activities{Cfg: Config{BrainRoot: brain, SkillsDir: skills}, LLM: fake, Ledger: ledger}
+	in := LLMStepInput{Workflow: "dream", Step: "file", Skill: "file", Model: "m", BudgetUSD: 0.5,
+		Material: []Material{{Rel: "memory/feedback-x.md", Abs: filepath.Join(brain, "memory/feedback-x.md")}}}
+	for i := 0; i < 2; i++ {
+		out, err := acts.SkillStep(context.Background(), in)
+		if err != nil || out.Status != "failed" || out.Cached {
+			t.Fatalf("attempt %d: %+v %v", i, out, err)
+		}
+	}
+	if fake.Calls() != 2 {
+		t.Fatalf("model asked %d times; a broken answer must not be served from the ledger", fake.Calls())
+	}
+}

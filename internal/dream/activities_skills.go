@@ -43,8 +43,9 @@ func (a *Activities) SkillStep(ctx context.Context, in LLMStepInput) (LLMStepRes
 	}
 	var d delta.Delta
 	if err := json.Unmarshal(raw, &d); err != nil {
+		// unmark the key at no cost: a cached broken answer would fail every later dream on the same material
 		out.Status, out.Reason = "failed", "answer is not a delta"
-		return out, nil
+		return out, a.Ledger.Finish(key, llm.Result{}, "failed", time.Now())
 	}
 	work := ""
 	if len(a.Cfg.ShadowDocs) > 0 {
