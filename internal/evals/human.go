@@ -671,12 +671,16 @@ type HumanRun struct {
 	Other    string         // the other machine's report merged in, "" when it has none
 }
 
+// humanSplit puts an item in DEV or TEST by its answer file (its first target by name), so prompts answered by one file
+// never sit in both halves; a session key left one half nearly empty, two long sessions holding most items.
+func humanSplit(it HumanItem) string { return SplitOf(slices.Min(it.Targets)) }
+
 // Human runs this machine's items, re-reading each prompt from its transcript, and merges the other machine's rows
 // from its latest report. With write, both reports land under ReportsDir: human-<machine> and the merged human.
 func (e *Env) Human(items []HumanItem, write bool) (HumanRun, error) {
 	machine := config.ThisMachine()
 	if e.only != "" {
-		items = slices.DeleteFunc(slices.Clone(items), func(it HumanItem) bool { return SplitOf(it.Transcript) != e.only })
+		items = slices.DeleteFunc(slices.Clone(items), func(it HumanItem) bool { return humanSplit(it) != e.only })
 	}
 	rows, err := e.humanRows(items)
 	if err != nil {
@@ -723,7 +727,7 @@ func (e *Env) humanRows(items []HumanItem) ([]HumanRow, error) {
 	}
 	rows := make([]HumanRow, 0, len(items))
 	for _, it := range items {
-		r := HumanRow{ID: it.ID, Machine: it.Machine, Split: SplitOf(it.Transcript), Targets: it.Targets}
+		r := HumanRow{ID: it.ID, Machine: it.Machine, Split: humanSplit(it), Targets: it.Targets}
 		ps := prompts[it.Transcript]
 		switch {
 		case it.Turn >= len(ps):

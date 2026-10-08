@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -248,5 +249,20 @@ func TestHumanEvalRereadsPromptsAndMergesTheOtherMachine(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw, &own); err != nil || len(own.Rows) != 2 {
 		t.Errorf("human-devbox.json rows %d (%v), want this machine's 2", len(own.Rows), err)
+	}
+}
+
+// TestHumanSplitKeepsOneAnswerFileInOneHalf catches a split keyed by session or item, which puts prompts answered by
+// the same file in both halves: ranking tuned on DEV would then be judged on TEST prompts it was tuned for.
+func TestHumanSplitKeepsOneAnswerFileInOneHalf(t *testing.T) {
+	first := ""
+	for i := range 8 {
+		it := HumanItem{ID: "human-devbox-0000000" + strconv.Itoa(i) + "-1", Transcript: "/t/" + strconv.Itoa(i) + ".jsonl",
+			Targets: []string{"work/box-a/STATE.md", "work/box-z/plan-" + strconv.Itoa(i) + ".md"}}
+		if s := humanSplit(it); first == "" {
+			first = s
+		} else if s != first {
+			t.Fatalf("item %d in %s, item 0 in %s: one answer file split across halves", i, s, first)
+		}
 	}
 }
