@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"saahil.local/brain/internal/bridge"
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/install"
 )
@@ -29,6 +30,9 @@ func cmdInstall(args []string) int {
 	}
 	if len(added) == 0 {
 		fmt.Println("claude hooks: already installed")
+	}
+	if err := bridge.InstallSync(); err != nil {
+		return fail("sync: %v", err)
 	}
 	return 0
 }

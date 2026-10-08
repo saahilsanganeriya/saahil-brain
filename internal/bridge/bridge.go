@@ -157,3 +157,68 @@ func SelfUpdate() error {
 	fmt.Printf("installed %s", out)
 	return exec.Command("launchctl", "kickstart", "-k", "gui/"+strconv.Itoa(os.Getuid())+"/"+BridgeLabel).Run()
 }
+
+const SyncLabel = "com.saahil.brain-sync"
+
+// InstallSync makes sure unison exists (Homebrew) and loads an hourly `brain sync` LaunchAgent.
+func InstallSync() error {
+	if config.ThisMachine() != config.Laptop {
+		return nil
+	}
+	if _, err := exec.LookPath("unison"); err != nil {
+		brew := "/opt/homebrew/bin/brew"
+		if out, err := exec.Command(brew, "install", "unison").CombinedOutput(); err != nil {
+			return fmt.Errorf("brew install unison: %v %s", err, tail(out))
+		}
+		fmt.Println("installed unison with Homebrew")
+	}
+	spec := agentSpec{Label: SyncLabel, Args: []string{filepath.Join(config.BinDir(), "brain"), "sync"}, Throttle: 60,
+		Log: filepath.Join(config.Home(), "Library", "Logs", "brain-sync.log"), Home: config.Home()}
+	path := filepath.Join(config.Home(), "Library", "LaunchAgents", SyncLabel+".plist")
+	var buf strings.Builder
+	if err := syncPlist.Execute(&buf, spec); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(buf.String()), 0o644); err != nil {
+		return err
+	}
+	domain := "gui/" + strconv.Itoa(os.Getuid())
+	_ = exec.Command("launchctl", "bootout", domain+"/"+SyncLabel).Run()
+	time.Sleep(500 * time.Millisecond)
+	if out, err := exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl bootstrap %s: %v %s", SyncLabel, err, out)
+	}
+	fmt.Println("loaded", SyncLabel, "(hourly brain sync)")
+	return nil
+}
+
+func tail(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > 400 {
+		s = s[len(s)-400:]
+	}
+	return s
+}
+
+// syncPlist runs once an hour (StartInterval), not kept alive: each run is one unison pass.
+var syncPlist = template.Must(template.New("sync").Parse(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{.Label}}</string>
+  <key>ProgramArguments</key>
+  <array>{{range .Args}}
+    <string>{{.}}</string>{{end}}
+  </array>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>{{.Log}}</string>
+  <key>StandardErrorPath</key><string>{{.Log}}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>{{.Home}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>{{.Home}}</string>
+  </dict>
+</dict>
+</plist>
+`))

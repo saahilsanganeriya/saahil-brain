@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -97,6 +98,12 @@ func (h *Handler) Handle(ctx context.Context, req Request) Response {
 			return fail(err)
 		}
 		return ok(job)
+	case "sync-status":
+		raw, err := os.ReadFile(filepath.Join(config.StateDir(), "sync-last.json"))
+		if err != nil {
+			return failf("no sync has run on the %s yet", config.ThisMachine())
+		}
+		return Response{OK: true, Result: raw}
 	case "job":
 		job, err := h.Steps.Job(req.ID)
 		if err != nil {
