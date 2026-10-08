@@ -82,6 +82,7 @@ type Node struct {
 	Size, MTime                                                                                   int64
 	PageRank                                                                                      float64
 	Out, In                                                                                       []Edge
+	Sections                                                                                      []Section // a doc's first maxShownSections, to open one by line range
 }
 
 type Section struct {
@@ -130,11 +131,18 @@ func (ix *Index) Show(ref string) (Node, error) {
 	if n.In, err = ix.edges(`SELECT src, dst, rel, why FROM edge WHERE dst = ? AND rel NOT IN ('part_of', 'section_of') ORDER BY rel, src LIMIT 500`, id); err != nil {
 		return n, err
 	}
-	if n.Kind == "dir" {
+	switch n.Kind {
+	case "dir":
 		err = ix.addContents(&n)
+	case "doc":
+		if n.Sections, err = ix.Sections(id); len(n.Sections) > maxShownSections {
+			n.Sections = n.Sections[:maxShownSections]
+		}
 	}
 	return n, err
 }
+
+const maxShownSections = 30
 
 const maxContents = 40
 
