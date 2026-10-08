@@ -72,7 +72,16 @@ func RenderMemoryIndex(root string) error {
 			facts = append(facts, n)
 		}
 	}
+	prio := indexPriority(root)
 	sort.SliceStable(facts, func(i, j int) bool {
+		pi, iok := prio[facts[i].ID]
+		pj, jok := prio[facts[j].ID]
+		if iok != jok {
+			return iok // a note filed from a memory the owner's own index listed comes first
+		}
+		if iok && pi != pj {
+			return pi < pj
+		}
 		ri, rj := rank(facts[i].Type), rank(facts[j].Type)
 		if ri != rj {
 			return ri < rj
@@ -108,4 +117,55 @@ func rank(t string) int {
 		return r
 	}
 	return len(typeRank)
+}
+
+// indexPriority ranks notes by where the owner's old MEMORY.md indexes (.import/<machine>/<project>/MEMORY.md) listed
+// the memory they were filed from: the "Standing rules" section first, then everything else, each in index order. It
+// is the owner's own ordering of what matters, so the baseline keeps it.
+func indexPriority(root string) map[string]int {
+	byFile := map[string]int{}
+	indexes, _ := filepath.Glob(filepath.Join(root, ".import", "*", "*", "MEMORY.md"))
+	sort.Strings(indexes)
+	for _, idx := range indexes {
+		raw, err := os.ReadFile(idx)
+		if err != nil {
+			continue
+		}
+		section, pos := 1, 0
+		for _, line := range strings.Split(string(raw), "\n") {
+			lower := strings.ToLower(strings.TrimSpace(line))
+			if !strings.HasPrefix(lower, "- ") && lower != "" {
+				section = 1
+				if strings.Contains(lower, "standing rule") || strings.Contains(lower, "read first") {
+					section = 0
+				}
+				continue
+			}
+			for _, m := range indexLinkRE.FindAllStringSubmatch(line, -1) {
+				file := filepath.Base(m[1])
+				score := section*100000 + pos
+				if old, ok := byFile[file]; !ok || score < old {
+					byFile[file] = score
+				}
+				pos++
+			}
+		}
+	}
+	st, err := loadState(root)
+	if err != nil {
+		return nil
+	}
+	out := map[string]int{}
+	for _, f := range st.Filed {
+		score, ok := byFile[filepath.Base(f.Path)]
+		if !ok {
+			continue
+		}
+		for _, id := range f.Notes {
+			if old, seen := out[id]; !seen || score < old {
+				out[id] = score
+			}
+		}
+	}
+	return out
 }
