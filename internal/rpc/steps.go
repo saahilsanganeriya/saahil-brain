@@ -38,6 +38,8 @@ var AllowedSteps = map[string]Step{
 	"sync-setup":    {Args: []string{"sync", "--setup"}, Timeout: 15 * time.Minute, Only: config.Laptop},
 	"sync-dry-run":  {Args: []string{"sync", "--dry-run"}, Timeout: 30 * time.Minute, Only: config.Laptop},
 	"sync-enable":   {Args: []string{"sync", "--enable"}, Timeout: 5 * time.Minute, Only: config.Laptop},
+	"session-backfill": {Args: []string{"session", "backfill", "--machine", "laptop"}, Timeout: 30 * time.Minute,
+		Only: config.Laptop},
 }
 
 type Job struct {
