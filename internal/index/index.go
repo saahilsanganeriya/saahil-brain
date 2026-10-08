@@ -43,7 +43,7 @@ func Open(root string) (*Index, error) {
 // Roots are the folders an update reads: the brain, saahil-docs as work/ (until the cut-over), memory folders.
 func (ix *Index) Roots() []scan.Root {
 	if ix.roots == nil {
-		ix.roots = scan.DefaultRoots(ix.Root)
+		ix.roots = withStagedCards(ix.Root, scan.DefaultRoots(ix.Root))
 	}
 	return ix.roots
 }

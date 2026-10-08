@@ -159,7 +159,12 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 
 	r.outcome("reconcile", workflow.ExecuteActivity(r.det, a.Reconcile))
 	r.brain("capture", []string{"session", "backfill"}, "--machine", "devbox")
-	r.llm(learnStep, r.gate.Sessions)
+	// histories recorded before per-session learning replay the batched call
+	if workflow.GetVersion(ctx, "learn-per-session", workflow.DefaultVersion, 1) == workflow.DefaultVersion {
+		r.llm(learnStep, r.gate.Sessions)
+	} else {
+		r.learnSessions(r.gate.Sessions)
+	}
 	r.llm(fileStep, r.gate.Captures)
 	r.llm(linkStep, nil)
 	r.llm(hubsStep, nil)

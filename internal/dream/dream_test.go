@@ -51,6 +51,7 @@ func runDream(t *testing.T, acts *Activities, in Input, start time.Time) Report 
 	env := suite.NewTestWorkflowEnvironment()
 	env.SetStartTime(start)
 	env.RegisterWorkflow(DreamWorkflow)
+	env.RegisterWorkflow(LearnSessionWorkflow)
 	env.RegisterActivity(acts)
 	env.ExecuteWorkflow(DreamWorkflow, in)
 	if !env.IsWorkflowCompleted() || env.GetWorkflowError() != nil {
@@ -120,12 +121,13 @@ func TestDreamIsIdempotent(t *testing.T) {
 // TestCostCapStopsLLMSteps catches a run that keeps calling the model past $8: once spent + the next step's budget
 // would pass the cap, every later LLM step is skipped with the reason, and the deterministic steps still finish.
 func TestCostCapStopsLLMSteps(t *testing.T) {
-	acts, fake := newBrain(t, 3.0) // learn (opus) → $3, file (haiku) → $6, link would need $6 + $2.50 > $8
+	// learn has nothing to judge in the sample session; file (haiku) → $3, link (opus) → $6, hubs would need $8.50
+	acts, fake := newBrain(t, 3.0)
 	rep := runDream(t, acts, Input{Force: true}, time.Now().UTC())
 	if fake.Calls() != 2 || rep.CostUSD > RunCapUSD {
 		t.Fatalf("calls=%d cost=$%.2f", fake.Calls(), rep.CostUSD)
 	}
-	for _, name := range []string{"curate.link", "curate.hubs", "verify"} {
+	for _, name := range []string{"curate.hubs", "verify"} {
 		if s := step(rep, name); s.Status != "skipped" || !strings.Contains(s.Reason, "run cap") {
 			t.Fatalf("%s: %+v", name, s)
 		}

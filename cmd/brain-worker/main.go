@@ -73,6 +73,9 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 	dreamWorker.RegisterWorkflow(dream.DreamWorkflow)
 	dreamWorker.RegisterWorkflow(dream.DreamTickWorkflow)
 	dreamWorker.RegisterWorkflow(dream.EvalWorkflow)
+	dreamWorker.RegisterWorkflow(dream.BackfillWorkflow)
+	dreamWorker.RegisterWorkflow(dream.BackfillBatchWorkflow)
+	dreamWorker.RegisterWorkflow(dream.LearnSessionWorkflow)
 	dreamWorker.RegisterActivity(acts)
 	// One Opus call at a time and two Haiku calls bound spend rate and memory; the queues share nothing else.
 	opus := worker.New(c, dream.QueueOpus, worker.Options{MaxConcurrentActivityExecutionSize: 1})
@@ -80,6 +83,10 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 	for _, w := range []worker.Worker{opus, haiku} {
 		w.RegisterActivityWithOptions(acts.SkillStep, activity.RegisterOptions{Name: "LLMStep"})
 	}
+	opus.RegisterActivityWithOptions(acts.BackfillCampaign, activity.RegisterOptions{Name: "BackfillCampaign"})
+	opus.RegisterActivityWithOptions(acts.LearnReflect, activity.RegisterOptions{Name: "LearnReflect"})
+	haiku.RegisterActivityWithOptions(acts.BackfillCard, activity.RegisterOptions{Name: "BackfillCard"})
+	haiku.RegisterActivityWithOptions(acts.LearnJudge, activity.RegisterOptions{Name: "LearnJudge"})
 	for _, w := range []worker.Worker{dreamWorker, opus, haiku} {
 		if err := w.Start(); err != nil {
 			return err
