@@ -47,6 +47,8 @@ var AllowedSteps = map[string]Step{
 	"cutover-manifest-after": {Args: []string{"cutover", "manifest", config.LaptopHome + "/brain/work", "--out",
 		cutoverDir + "/laptop-after.tsv", "--skip-hash-under", "**/artifacts/**", "--skip-hash-under", "**/.venv/**",
 		"--skip-hash-under", "**/venv/**"}, Timeout: 2 * time.Hour, Only: config.Laptop},
+	"cutover-compare": {Args: []string{"cutover", "compare", cutoverDir + "/laptop-before.tsv", cutoverDir + "/laptop-after.tsv",
+		"--allow-newer"}, Timeout: 30 * time.Minute, Only: config.Laptop},
 	"cutover-find-names": {Args: []string{"cutover", "find-names", config.LaptopHome + "/brain/work",
 		config.LaptopHome + "/Documents", config.LaptopHome + "/.claude", "--out", cutoverDir + "/laptop-names.txt"},
 		Timeout: time.Hour, Only: config.Laptop},
