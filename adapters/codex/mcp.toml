@@ -1,0 +1,3 @@
+[mcp_servers.brain]
+command = "/Users/test-user/.local/bin/brain"
+args = ["mcp"]
