@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ const (
 type Digest struct {
 	Text    string
 	Sources []string // what made it in, by brain path (hot.md, work/<box>/STATE.md, hub:<id>)
+	Blocks  []string // each source's block as it went in, parallel to Sources
 	Work    []string
 	Hubs    []string
 }
@@ -79,7 +81,14 @@ func Start(env Env, in Input) ([]byte, error) {
 // BuildDigest: hot.md, then the current work's STATE.md head and CARD.md, then its hubs' start-here lists, cut to
 // 8,000 chars. aliases (optional) lists CARD aliases per box from the index for the folder-name match.
 func BuildDigest(env Env, cwd string, aliases func(string) []string) Digest {
+	return buildDigest(env, cwd, aliases, nil)
+}
+
+// buildDigest reads only the brain paths visible accepts (session notes, work box folders, the files it quotes);
+// nil accepts all.
+func buildDigest(env Env, cwd string, aliases func(string) []string, visible func(string) bool) Digest {
 	var d Digest
+	seen := func(p string) bool { return visible == nil || visible(p) }
 	var b strings.Builder
 	add := func(source, title, text string, most int) {
 		text = strings.TrimSpace(text)
@@ -99,16 +108,22 @@ func BuildDigest(env Env, cwd string, aliases func(string) []string) Digest {
 		}
 		b.WriteString(block)
 		d.Sources = append(d.Sources, source)
+		d.Blocks = append(d.Blocks, block)
 	}
-	if hot, err := os.ReadFile(filepath.Join(env.Root, "hot.md")); err == nil {
+	if hot, err := os.ReadFile(filepath.Join(env.Root, "hot.md")); err == nil && seen("hot.md") {
 		add("hot.md", "This week (hot.md)", parse.Markdown(hot).Body, hotChars)
 	}
-	d.Work = currentWork(env, cwd, aliases)
+	d.Work = currentWork(env, cwd, aliases, visible)
 	var hubs []string
 	for _, box := range d.Work {
 		dir := env.workDir(box)
-		raw, _ := readHead(filepath.Join(dir, "STATE.md"), 2*stateHeadBytes)
-		card, _ := readHead(filepath.Join(dir, "CARD.md"), config.CardMaxBytes)
+		var raw, card string
+		if seen("work/" + box + "/STATE.md") {
+			raw, _ = readHead(filepath.Join(dir, "STATE.md"), 2*stateHeadBytes)
+		}
+		if seen("work/" + box + "/CARD.md") {
+			card, _ = readHead(filepath.Join(dir, "CARD.md"), config.CardMaxBytes)
+		}
 		state := parse.Markdown([]byte(raw))
 		body := strings.TrimSpace(state.Body) // its frontmatter repeats what the body says
 		if len(body) > stateHeadBytes {
@@ -122,6 +137,7 @@ func BuildDigest(env Env, cwd string, aliases func(string) []string) Digest {
 			hubs = appendNew(hubs, hubsByName(env.Root, box)...)
 		}
 	}
+	hubs = slices.DeleteFunc(hubs, func(h string) bool { return !seen("hubs/" + h + ".md") })
 	if len(hubs) > maxWorkHubs {
 		hubs = hubs[:maxWorkHubs]
 	}
@@ -140,20 +156,20 @@ func BuildDigest(env Env, cwd string, aliases func(string) []string) Digest {
 
 // currentWork: the work boxes of the latest session note for this cwd, else the box whose name or CARD aliases
 // best match the worktree folder; only boxes that exist.
-func currentWork(env Env, cwd string, aliases func(string) []string) []string {
+func currentWork(env Env, cwd string, aliases func(string) []string, visible func(string) bool) []string {
 	if cwd == "" {
 		return nil
 	}
 	var out []string
-	for _, box := range worksFromSessions(env.Root, cwd) {
-		if env.workDir(box) != "" && len(out) < maxWorks {
+	for _, box := range worksFromSessions(env.Root, cwd, visible) {
+		if env.workDir(box) != "" && (visible == nil || visible("work/"+box)) && len(out) < maxWorks {
 			out = append(out, box)
 		}
 	}
 	if len(out) > 0 {
 		return out
 	}
-	if box := workByFolder(env, cwd, aliases); box != "" {
+	if box := workByFolder(env, cwd, aliases, visible); box != "" {
 		return []string{box}
 	}
 	return nil
@@ -161,8 +177,9 @@ func currentWork(env Env, cwd string, aliases func(string) []string) []string {
 
 var monthDirRE = regexp.MustCompile(`^\d{4}/\d{2}$`)
 
-// worksFromSessions reads session-note headers newest first until one has this cwd; bounded in files and time.
-func worksFromSessions(root, cwd string) []string {
+// worksFromSessions reads session-note headers newest first until one has this cwd; bounded in files and time. Notes
+// visible rejects are skipped uncounted (the brain they replay did not hold them), and the replay has no time bound.
+func worksFromSessions(root, cwd string, visible func(string) bool) []string {
 	type month struct{ key, dir string }
 	var months []month
 	machines, _ := os.ReadDir(filepath.Join(root, "sessions"))
@@ -187,7 +204,12 @@ func worksFromSessions(root, cwd string) []string {
 		}
 		sort.Slice(files, func(a, b int) bool { return filepath.Base(files[a]) > filepath.Base(files[b]) })
 		for _, f := range files {
-			if scanned++; scanned > maxSessionScan || time.Now().After(deadline) {
+			if visible != nil {
+				if rel, err := filepath.Rel(root, f); err != nil || !visible(filepath.ToSlash(rel)) {
+					continue
+				}
+			}
+			if scanned++; scanned > maxSessionScan || (visible == nil && time.Now().After(deadline)) {
 				return nil
 			}
 			if noteCwd, works := sessionHeader(f); noteCwd == cwd && len(works) > 0 {
@@ -273,7 +295,7 @@ func overlap(folder, name []string) (float64, int) {
 	return float64(shared) / float64(len(folder)), shared
 }
 
-func workByFolder(env Env, cwd string, aliases func(string) []string) string {
+func workByFolder(env Env, cwd string, aliases func(string) []string, visible func(string) bool) string {
 	folder := nameTokens(folderName(cwd))
 	if len(folder) == 0 {
 		return ""
@@ -286,7 +308,7 @@ func workByFolder(env Env, cwd string, aliases func(string) []string) string {
 		entries, _ := os.ReadDir(dir)
 		for _, ent := range entries {
 			box := ent.Name()
-			if !ent.IsDir() || strings.HasPrefix(box, ".") || seen[box] {
+			if !ent.IsDir() || strings.HasPrefix(box, ".") || seen[box] || (visible != nil && !visible("work/"+box)) {
 				continue
 			}
 			seen[box] = true

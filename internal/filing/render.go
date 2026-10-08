@@ -3,6 +3,7 @@ package filing
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -58,17 +59,29 @@ var typeRank = map[string]int{"anti-pattern": 0, "lesson": 1, "playbook": 2, "de
 // RenderMemoryIndex overwrites memory/MEMORY.md, the baseline Claude Code loads in every repo: the current global
 // notes as one-line facts (the summary itself, then its link) and the hubs as entry points, within 200 lines / 25 KB.
 func RenderMemoryIndex(root string) error {
-	hubs, err := Hubs(root)
+	out, err := MemoryIndexText(root, nil)
 	if err != nil {
 		return err
 	}
+	return writeAtomic(filepath.Join(root, "memory", "MEMORY.md"), []byte(out))
+}
+
+// MemoryIndexText is MEMORY.md's text over the notes and hubs keep accepts by brain path (notes/<id>.md,
+// hubs/<id>.md); nil keeps all. Evals render it as of a past session's start with the same order and caps.
+func MemoryIndexText(root string, keep func(brainPath string) bool) (string, error) {
+	kept := func(dir, id string) bool { return keep == nil || keep(dir+"/"+id+".md") }
+	hubs, err := Hubs(root)
+	if err != nil {
+		return "", err
+	}
+	hubs = slices.DeleteFunc(hubs, func(h HubEntry) bool { return !kept("hubs", h.ID) })
 	notes, err := readNotes(filepath.Join(root, "notes"))
 	if err != nil {
-		return err
+		return "", err
 	}
 	var facts []delta.Note
 	for _, n := range notes {
-		if n.Scope == "global" && n.Status == "current" {
+		if n.Scope == "global" && n.Status == "current" && kept("notes", n.ID) {
 			facts = append(facts, n)
 		}
 	}
@@ -108,8 +121,7 @@ func RenderMemoryIndex(root string) error {
 		}
 		factLines, used, lines = append(factLines, line), used+len(line)+1, lines+1
 	}
-	out := header + "\n## Facts and rules\n" + strings.Join(factLines, "\n") + "\n\n## Hubs\n" + strings.Join(hubLines, "\n") + "\n"
-	return writeAtomic(filepath.Join(root, "memory", "MEMORY.md"), []byte(out))
+	return header + "\n## Facts and rules\n" + strings.Join(factLines, "\n") + "\n\n## Hubs\n" + strings.Join(hubLines, "\n") + "\n", nil
 }
 
 func rank(t string) int {
