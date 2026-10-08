@@ -1,6 +1,7 @@
 package rank
 
 import (
+	"context"
 	"database/sql"
 	"path"
 	"regexp"
@@ -55,12 +56,18 @@ func DocFreqs(db *sql.DB, words []string) (map[string]int, error) {
 	if len(words) == 0 {
 		return out, nil
 	}
-	if _, err := db.Exec(vocabTable); err != nil {
+	// a temp table lives on one connection: create and read it on the same one
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), vocabTable); err != nil {
 		return nil, err
 	}
 	for _, w := range words {
 		lo := w[:max(min(3, len(w)), len(w)-3)]
-		rows, err := db.Query(`SELECT term, doc FROM temp.fts_vocab WHERE term >= ? AND term <= ?`, lo, w)
+		rows, err := conn.QueryContext(context.Background(), `SELECT term, doc FROM temp.fts_vocab WHERE term >= ? AND term <= ?`, lo, w)
 		if err != nil {
 			return nil, err
 		}
