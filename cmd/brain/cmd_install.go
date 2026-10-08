@@ -30,14 +30,15 @@ func cmdInstall(args []string) int {
 	if len(added) == 0 {
 		fmt.Println("claude hooks: already installed")
 	}
-	// the brain is linked into every repo at the cut-over; the link must never be committed
+	// the brain is linked at the root of every repo at the cut-over; the link must never be committed. Anchored:
+	// an unanchored `brain` would also hide every folder named brain (cmd/brain in this repo).
 	ignorePath := install.GlobalGitIgnorePath()
-	ignored, err := install.AddGlobalGitIgnore(ignorePath, "brain", "brain/")
+	ignored, err := install.AddGlobalGitIgnore(ignorePath, []string{"brain", "brain/"}, "/brain")
 	if err != nil {
 		return fail("global git ignore: %v", err)
 	}
 	if len(ignored) > 0 {
-		fmt.Printf("added %v to %s\n", ignored, ignorePath)
+		fmt.Printf("global git ignore %s: %v\n", ignorePath, ignored)
 	}
 	return 0
 }
