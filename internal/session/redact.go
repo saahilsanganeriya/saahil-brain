@@ -1,6 +1,7 @@
 package session
 
 import (
+	"math"
 	"regexp"
 	"strings"
 )
@@ -28,11 +29,24 @@ var redactions = []struct {
 var suspiciousBlob = regexp.MustCompile(`(?i)(?:\b|_)(?:key|secret|token|signature|sig|credential|password|passwd|auth|hmac|private)` +
 	`[^\n]{0,30}?\b([A-Za-z0-9+_=-]{40,})`)
 
+// bareToken is a long base64/base64url/hex run on its own, e.g. a token pasted after a URL with no "Bearer" or "key="
+// beside it (a laptop MCP token reached a session note that way, 2026-09-29).
+var bareToken = regexp.MustCompile(`[A-Za-z0-9_+/=-]{32,}`)
+
+// RedactVersion changes when the rules change, so notes written by an older redactor are rewritten.
+const RedactVersion = 2
+
 // Redact replaces secrets with REDACTED-<kind> markers. It over-redacts on purpose: the note is indexed and synced.
 func Redact(text string) string {
 	for _, r := range redactions {
 		text = r.re.ReplaceAllString(text, r.repl)
 	}
+	text = bareToken.ReplaceAllStringFunc(text, func(s string) string {
+		if IsLikelySecret(s) {
+			return "REDACTED-token"
+		}
+		return s
+	})
 	return suspiciousBlob.ReplaceAllStringFunc(text, func(match string) string {
 		sub := suspiciousBlob.FindStringSubmatch(match)
 		blob := sub[1]
@@ -58,4 +72,58 @@ func looksRandom(s string) bool {
 		}
 	}
 	return digits > 0 && letters > 0 && dashes*8 <= len(s)
+}
+
+// IsLikelySecret: random-looking (≥ 4.3 bits of entropy per char), upper AND lower case AND digits, no slash, few
+// dashes, and the character class (upper, lower, digit, other) changes on ≥ 25% of characters. A sha in hex (~3.9
+// bits, one case), a UUID, a run id like name_20260804ABC, a kebab-case name or a path does not qualify; random ids
+// (a Drive document id) do, which is fine where it is used: session notes over-redact on purpose, lint only warns.
+func IsLikelySecret(s string) bool {
+	if len(s) < 32 || strings.Contains(s, "/") || strings.Count(s, "-")*8 > len(s) {
+		return false
+	}
+	class := func(c rune) int {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			return 0
+		case c >= 'a' && c <= 'z':
+			return 1
+		case c >= '0' && c <= '9':
+			return 2
+		}
+		return 3
+	}
+	changes, prev := 0, -1
+	for _, c := range s {
+		if k := class(c); k != prev {
+			changes++
+			prev = k
+		}
+	}
+	if changes*4 < len(s) {
+		return false
+	}
+	var upper, lower, digit bool
+	counts := map[rune]int{}
+	for _, c := range s {
+		counts[c]++
+		switch {
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		case c >= 'a' && c <= 'z':
+			lower = true
+		case c >= '0' && c <= '9':
+			digit = true
+		}
+	}
+	if !upper || !lower || !digit {
+		return false
+	}
+	var bits float64
+	n := float64(len(s))
+	for _, k := range counts {
+		p := float64(k) / n
+		bits -= p * math.Log2(p)
+	}
+	return bits >= 4.3
 }

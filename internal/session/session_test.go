@@ -275,3 +275,24 @@ func TestOversizedLineSkipped(t *testing.T) {
 		t.Fatalf("skipped=%d err=%v lines=%v", skipped, err, got)
 	}
 }
+
+// Catches a bare token pasted after a URL (no "Bearer", no "key=") surviving into a session note: a laptop MCP token
+// did on 2026-09-29. A sha, a UUID, a session id and a kebab-case path must survive.
+func TestRedactsBareHighEntropyToken(t *testing.T) {
+	fake := "Qx7Lm2Np9Rt4Vw8Yz3Ab6Cd1Ef5Gh0Jk-Ls_Mn2Op7" // synthetic, 43 chars, base64url
+	in := "added the mcp server http://127.0.0.1:65535/mcp " + fake + " ok"
+	if out := Redact(in); strings.Contains(out, fake) || !strings.Contains(out, "REDACTED-token") {
+		t.Fatalf("token survived: %q", out)
+	}
+	keep := []string{
+		"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // sha256 hex
+		"483fc905-54af-44d2-81f8-2a642b9f5cac",                             // uuid
+		"anti-pattern-relayed-instruction-is-a-post-for-the-owner",         // kebab id
+		"/Users/test-user/brain/work/box/plans/SPEC-UNIFY.md",      // path
+	}
+	for _, k := range keep {
+		if out := Redact("x " + k + " y"); !strings.Contains(out, k) {
+			t.Errorf("redacted a non-secret: %q -> %q", k, out)
+		}
+	}
+}

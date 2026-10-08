@@ -64,7 +64,7 @@ func Note(transcript string, opt Options) (Result, error) {
 	if newerCopy(transcript, info) {
 		return Result{Status: Skipped, Reason: "older copy"}, nil
 	}
-	fp := fingerprint{size: info.Size(), mtime: info.ModTime().UTC().Format(time.RFC3339Nano)}
+	fp := fingerprint{size: info.Size(), mtime: info.ModTime().UTC().Format(time.RFC3339Nano), redact: RedactVersion}
 	id := strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
 	existing := existingNotes(dir, id)
 	if !opt.Force {
@@ -127,9 +127,11 @@ func newerCopy(transcript string, info os.FileInfo) bool {
 	return false
 }
 
+// fingerprint decides whether a note is current: same transcript (size, mtime) AND written by the current redactor.
 type fingerprint struct {
-	size  int64
-	mtime string
+	size   int64
+	mtime  string
+	redact int
 }
 
 // existingNotes finds this session's notes (any month, any slug) by the session_id in their frontmatter.
@@ -142,7 +144,8 @@ func existingNotes(dir, id string) map[string]fingerprint {
 			continue
 		}
 		size, _ := strconv.ParseInt(front["transcript_size"], 10, 64)
-		out[path] = fingerprint{size: size, mtime: front["transcript_mtime"]}
+		redact, _ := strconv.Atoi(front["redact_version"])
+		out[path] = fingerprint{size: size, mtime: front["transcript_mtime"], redact: redact}
 	}
 	return out
 }
@@ -297,6 +300,7 @@ func render(s *Session, machine config.Machine, fp fingerprint, lim limits) stri
 	field("transcript", yamlScalar(s.Transcript))
 	field("transcript_size", strconv.FormatInt(fp.size, 10))
 	field("transcript_mtime", yamlScalar(fp.mtime))
+	field("redact_version", strconv.Itoa(fp.redact))
 	field("subagents", strconv.Itoa(s.Subagents))
 	field("works", yamlList(s.paths.works()))
 	field("touched", yamlList(touched))

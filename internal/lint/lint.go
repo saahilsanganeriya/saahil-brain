@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"saahil.local/brain/internal/session"
 	"sort"
 	"strings"
 
@@ -207,6 +208,9 @@ func (l *Linter) Check(rel string, data []byte) []Issue {
 	}
 	if kinds := Secrets(data); len(kinds) > 0 {
 		add(Error, "secret", "looks like a secret (%s): remove it, the brain syncs to both machines", strings.Join(kinds, ", "))
+	}
+	if n := MaybeSecrets(data); n > 0 {
+		add(Warn, "maybe-secret", "%d random-looking token(s): a credential must not be here (a document id is fine)", n)
 	}
 	kind := Kind(rel)
 	switch kind {
@@ -510,3 +514,17 @@ func Secrets(data []byte) []string {
 	}
 	return kinds
 }
+
+// MaybeSecrets counts random-looking bare tokens (credentials, but also random document ids): a warning, never an
+// error, so a Drive id in a note cannot fail a dream's check.
+func MaybeSecrets(data []byte) int {
+	n := 0
+	for _, m := range bareToken.FindAll(data, -1) {
+		if session.IsLikelySecret(string(m)) {
+			n++
+		}
+	}
+	return n
+}
+
+var bareToken = regexp.MustCompile(`[A-Za-z0-9_+/=-]{32,}`)
