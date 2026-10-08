@@ -86,6 +86,19 @@ func MemoryIndexText(root string, keep func(brainPath string) bool) (string, err
 		}
 	}
 	prio := indexPriority(root)
+	if prio == nil {
+		prio = map[string]int{}
+	}
+	// a note that supersedes one the owner's index ranked takes that place (the old one is no longer current)
+	for _, n := range facts {
+		for _, old := range n.Supersedes {
+			if p, ok := prio[old]; ok {
+				if have, set := prio[n.ID]; !set || p < have {
+					prio[n.ID] = p
+				}
+			}
+		}
+	}
 	sort.SliceStable(facts, func(i, j int) bool {
 		pi, iok := prio[facts[i].ID]
 		pj, jok := prio[facts[j].ID]

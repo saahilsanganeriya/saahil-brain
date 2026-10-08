@@ -63,4 +63,19 @@ func TestRenderPrioritizesOwnerIndex(t *testing.T) {
 	if i, j := strings.Index(text, "lesson-owner-rule"), strings.Index(text, "anti-pattern-newer"); i < 0 || j < 0 || i > j {
 		t.Fatalf("owner-index note not first:\n%s", text)
 	}
+
+	// a note that supersedes an owner-index note keeps its place; it used to fall to the end and past the byte cap
+	_ = os.WriteFile(filepath.Join(root, "notes", "lesson-owner-rule.md"), []byte("---\nid: lesson-owner-rule\ntype: lesson"+
+		"\nstatus: superseded\nsummary: fact lesson-owner-rule\nscope: global\nhubs: [git]\nas_of: 2026-09-01\n---\nbody\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "notes", "lesson-owner-rule-scoped.md"), []byte("---\nid: lesson-owner-rule-scoped"+
+		"\ntype: lesson\nstatus: current\nsummary: fact scoped\nscope: global\nhubs: [git]\nsupersedes: [lesson-owner-rule]"+
+		"\nas_of: 2026-10-08\n---\nbody\n"), 0o644)
+	if err := RenderMemoryIndex(root); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(root, "memory", "MEMORY.md"))
+	text = string(raw)
+	if i, j := strings.Index(text, "lesson-owner-rule-scoped"), strings.Index(text, "anti-pattern-newer"); i < 0 || j < 0 || i > j {
+		t.Fatalf("the successor of an owner-index note lost its place:\n%s", text)
+	}
 }
