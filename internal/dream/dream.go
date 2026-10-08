@@ -23,7 +23,7 @@ const (
 	ScheduleID = "brain-dream-hourly"
 
 	RunCapUSD   = 8.0
-	DailyCapUSD = 20.0
+	DailyCapUSD = 100.0
 	MaxEdits    = 50
 	MaxSessions = 60
 	MaxCaptures = 40

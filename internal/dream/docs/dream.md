@@ -59,7 +59,7 @@ no-op, not an edit. Every overwritten file is first copied to `.archive/dream/<r
 Key = sha256(workflow, step, model, sha(skill), sha(input)) in `llm_calls` (`.index/brain.db`); a `done` key is
 answered from `.data/llm/<key>.json` for $0, so a retry or rerun never pays twice. Before a paid call:
 run spent + step budget (Opus $2.50, Haiku $0.50) must be ≤ $8, and today's spend (UTC, failed attempts included)
-+ step budget ≤ $20; otherwise no more LLM calls this run, with the reason recorded, and the deterministic steps
++ step budget ≤ $100 (owner, 2026-10-08: up to $1,000 is fine; the $8 per-run cap stays); otherwise no more LLM calls this run, with the reason recorded, and the deterministic steps
 finish. The prompt text is never stored or logged — only its hash.
 
 ## Failure modes
