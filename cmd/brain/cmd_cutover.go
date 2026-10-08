@@ -221,6 +221,7 @@ func cmdCutoverRewrite(args []string) int {
 	var skip multiFlag
 	fs.Var(&skip, "skip", "top-level entry of <root> to leave untouched (repeatable), e.g. a box agents are still writing")
 	minAge := fs.Duration("min-age", 0, "leave files changed more recently than this untouched (an agent may be mid-edit), e.g. 30m")
+	linksOnly := fs.Bool("links-only", false, "repoint symlink targets only; leave every file's bytes as they are")
 	pos, err := parseInterleaved(fs, args)
 	if err != nil || len(pos) != 1 || len(from) == 0 || *to == "" {
 		return fail("cutover rewrite-paths <root> --from <old-prefix> [--from ...] --to <new-prefix> [--skip NAME]... [--min-age D] [--apply] [--backup-dir D]")
@@ -236,7 +237,7 @@ func cmdCutoverRewrite(args []string) int {
 	defer out.Flush()
 	report := func(c cutover.FileChange) { fmt.Fprintf(out, "%s\t%d\t%s\t%s\n", verb, c.Count, c.Category, c.Path) }
 	stats, err := cutover.Rewrite(cutover.RewriteOptions{Root: pos[0], From: from, To: *to, Apply: *apply, BackupDir: *backupDir,
-		Skip: skip, MinAge: *minAge, Workers: *jobs, Progress: os.Stderr, OnError: printErr}, report)
+		Skip: skip, MinAge: *minAge, LinksOnly: *linksOnly, Workers: *jobs, Progress: os.Stderr, OnError: printErr}, report)
 	if err != nil {
 		out.Flush()
 		return fail("%s: %v", pos[0], err)

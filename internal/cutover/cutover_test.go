@@ -226,6 +226,25 @@ func TestLiftState(t *testing.T) {
 	}
 }
 
+// TestRewriteLinksOnly: a box whose text is a record of the run may still need its links repointed before the old
+// path goes; LinksOnly rewrites a symlink's target and leaves every file's bytes alone.
+func TestRewriteLinksOnly(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{"evidence/run.log": "ran in " + oldPrefix + "box\n"})
+	if err := os.Symlink(oldPrefix+"box/model.onnx", filepath.Join(root, "evidence/model.onnx")); err != nil {
+		t.Fatal(err)
+	}
+	opts := rewriteOpts(root, true, filepath.Join(t.TempDir(), "rewrite-1"))
+	opts.LinksOnly = true
+	if _, err := Rewrite(opts, func(FileChange) {}); err != nil {
+		t.Fatal(err)
+	}
+	target, _ := os.Readlink(filepath.Join(root, "evidence/model.onnx"))
+	if target != newPrefix+"box/model.onnx" || readFile(t, filepath.Join(root, "evidence/run.log")) != "ran in "+oldPrefix+"box\n" {
+		t.Fatalf("link %q, log %q", target, readFile(t, filepath.Join(root, "evidence/run.log")))
+	}
+}
+
 // TestRewriteKeepsBackup: a dry run writes nothing, and --apply copies each original (bytes, mode, mtime) into the
 // backup dir and records sha256 before/after and the old mtime before replacing the file, keeping its mode.
 func TestRewriteKeepsBackup(t *testing.T) {

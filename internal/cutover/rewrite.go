@@ -174,6 +174,7 @@ type RewriteOptions struct {
 	BackupDir string
 	Skip      []string      // top-level entries of Root left untouched, e.g. a box agents are still writing
 	MinAge    time.Duration // files changed more recently than this are left untouched (an agent may be mid-edit)
+	LinksOnly bool          // repoint symlink targets only; every file's bytes stay as they are (text that records a run)
 	Workers   int
 	Progress  io.Writer
 	OnError   func(path string, err error)
@@ -226,7 +227,7 @@ func Rewrite(opt RewriteOptions, emit func(FileChange)) (RewriteStats, error) {
 		backup = bufio.NewWriter(f)
 		defer backup.Flush()
 	}
-	rw := rewriter{pattern: pattern, to: []byte(opt.To), apply: opt.Apply, backupDir: opt.BackupDir, minAge: opt.MinAge, now: time.Now()}
+	rw := rewriter{pattern: pattern, to: []byte(opt.To), apply: opt.Apply, backupDir: opt.BackupDir, minAge: opt.MinAge, now: time.Now(), linksOnly: opt.LinksOnly}
 	walkErrors, err := scanTree([]string{root}, opt.Skip, opt.Workers, onError, rw.process, func(r rewriteResult) error {
 		stats.Scanned++
 		if opt.Progress != nil && stats.Scanned%100_000 == 0 {
@@ -307,6 +308,7 @@ type rewriter struct {
 	backupDir string
 	minAge    time.Duration
 	now       time.Time
+	linksOnly bool
 }
 
 func (rw rewriter) replace(content []byte) ([]byte, int) {
@@ -329,7 +331,7 @@ func (rw rewriter) process(it scanItem) rewriteResult {
 	switch {
 	case it.mode&fs.ModeSymlink != 0:
 		res.err = rw.symlink(it, &res)
-	case it.mode.IsRegular():
+	case it.mode.IsRegular() && !rw.linksOnly:
 		res.err = rw.file(it, &res)
 	}
 	return res
