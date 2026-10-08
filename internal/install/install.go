@@ -32,6 +32,11 @@ type run struct {
 // Install ensures every present host's steps (only the named hosts when given) and records the result in m.
 func Install(m *Manifest, repo string, only []string, now time.Time, dryRun bool) ([]Report, error) {
 	r := run{now: now, dryRun: dryRun, action: "install"}
+	if !dryRun {
+		if err := dropOldModLink(); err != nil {
+			return nil, err
+		}
+	}
 	var reports []Report
 	for _, h := range Hosts(repo) {
 		if !selected(h.Name, only) {

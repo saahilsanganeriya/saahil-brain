@@ -47,18 +47,16 @@ func Hosts(repo string) []Host {
 	claudeSteps := []Step{
 		{Kind: "file", Path: filepath.Join(claude, "rules", "brain.md"), Label: "rules", Content: []byte(rules), Owned: []byte("<!-- " + fileMarker)},
 	}
-	// The mod carries every brain hook; it is listed in the owner's own marketplace when that exists, and enabled and
-	// listed only once the checkout holds it, so no marketplace entry ever points at a missing folder.
+	// The mod carries every brain hook. Claude Code refuses plugin files that resolve outside its marketplace folder,
+	// so the embedded files are written into the marketplace as ordinary managed files (no symlink).
 	if _, err := os.Stat(filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json")); err == nil {
-		claudeSteps = append(claudeSteps, Step{Kind: "symlink", Path: filepath.Join(ModsDir(), ModName), Label: "mod", Target: filepath.Join(repo, "mod")})
-		if _, err := os.Stat(filepath.Join(repo, "mod", ".claude-plugin", "plugin.json")); err == nil {
-			claudeSteps = append(claudeSteps,
-				Step{Kind: "json-item", Path: filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json"), Label: "mod",
-					Key: []string{"plugins"}, Value: map[string]any{"name": ModName, "source": "./" + ModName,
-						"description": "The brain in Claude Code: brain_* tools, a pane, a band, the write guard and the brain hooks"}},
-				Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "mod",
-					Key: []string{"enabledPlugins", ModName + "@" + ModMarketplace}, Value: true})
-		}
+		claudeSteps = append(claudeSteps, modFileSteps()...)
+		claudeSteps = append(claudeSteps,
+			Step{Kind: "json-item", Path: filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json"), Label: "mod",
+				Key: []string{"plugins"}, Value: map[string]any{"name": ModName, "source": "./" + ModName,
+					"description": "The brain in Claude Code: brain_* tools, a pane, a band, the write guard and the brain hooks"}},
+			Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "mod",
+				Key: []string{"enabledPlugins", ModName + "@" + ModMarketplace}, Value: true})
 	}
 
 	codex := filepath.Join(home, ".codex")

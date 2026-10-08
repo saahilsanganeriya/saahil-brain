@@ -115,8 +115,12 @@ func TestInstallIsIdempotent(t *testing.T) {
 	if strings.Count(toml, "[mcp_servers.brain]") != 1 || !strings.Contains(toml, `"url" = "https://docs.example.com/mcp"`) {
 		t.Errorf("config.toml:\n%s", toml)
 	}
-	if link, _ := os.Readlink(filepath.Join(home, "mods/saahil-mods/saahil-brain")); link != filepath.Join(repo, "mod") {
-		t.Errorf("mod link → %q", link)
+	// Claude Code refuses plugin files that resolve outside the marketplace: the mod must be real files, no symlink
+	plugin := filepath.Join(home, "mods/saahil-mods/saahil-brain/.claude-plugin/plugin.json")
+	if fi, err := os.Lstat(filepath.Join(home, "mods/saahil-mods/saahil-brain")); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("mod folder missing or a symlink: %v", err)
+	} else if _, err := os.Stat(plugin); err != nil {
+		t.Errorf("mod plugin.json not written: %v", err)
 	}
 	backups, _ := filepath.Glob(filepath.Join(home, ".codex", "*.bak-brain-*"))
 	if len(backups) != 2 {
@@ -161,8 +165,8 @@ func TestOffRemovesOnlyOurEntries(t *testing.T) {
 	if now[rules] != "my own rule\n" {
 		t.Error("deleted the rules file the owner had changed")
 	}
-	if _, err := os.Lstat(filepath.Join(home, "mods/saahil-mods/saahil-brain")); err == nil {
-		t.Error("mod link left behind")
+	if _, err := os.Lstat(filepath.Join(home, "mods/saahil-mods/saahil-brain/.claude-plugin/plugin.json")); err == nil {
+		t.Error("mod files left behind")
 	}
 	market := now[filepath.Join(home, "mods/saahil-mods/.claude-plugin/marketplace.json")]
 	if strings.Contains(market, "saahil-brain") || !strings.Contains(market, "other-mod") {
