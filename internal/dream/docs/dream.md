@@ -81,8 +81,8 @@ one call for 15 groups went over a $1 budget, which is why each group now has it
 `brain dream merge` is a dry run against the brain: it shows the gate, the plan after the checks of the code, each
 file that would change, and the owner questions. It applies nothing, queues nothing, and keeps its ledger outside
 the brain (`--ledger <dir>`, else a temp folder). `--budget` (per call, default $1) and `--cap` (default $2) limit
-it; `--out <file>` writes the delta for `brain apply-delta`; `--find-answer` and `--bodies-answer` replay recorded
-answers instead of calling the model.
+it; `--out <file>` writes the delta for `brain apply-delta`. `--find-answer` uses a recorded find answer instead of a
+model call; the bodies calls then go to the model, unless `--bodies-answer` gives a recorded answer for them too.
 
 ## Cost and idempotency
 
