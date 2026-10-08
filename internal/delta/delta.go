@@ -101,6 +101,9 @@ type Report struct {
 	DeletesRejected int         `json:"deletes_rejected"`
 	Counters        int         `json:"counters"` // stored this time
 	PendingCounters []Counter   `json:"pending_counters,omitempty"`
+	// DroppedRefs are about/supersedes/related links to notes that do not exist yet: the note is kept without them
+	// and they wait in .brain/pending-links.jsonl until their target lands (ResolvePending).
+	DroppedRefs []PendingLink `json:"dropped_refs,omitempty"`
 }
 
 type entry struct {
@@ -109,16 +112,23 @@ type entry struct {
 }
 
 type applier struct {
-	root  string
-	opts  Options
-	files map[string]*entry // by id
+	root    string
+	opts    Options
+	files   map[string]*entry // by id
+	adding  map[string]bool   // ids this delta adds, so notes in one batch may cite each other
+	dropped []PendingLink
 }
 
 // Apply checks every op, applies the valid ones in order and writes each changed file atomically. It never deletes:
 // a delete op is refused and counted, and supersede only marks the old note.
 func Apply(ctx context.Context, root string, d Delta, opts Options) (Report, error) {
 	var rep Report
-	a := &applier{root: root, opts: opts, files: map[string]*entry{}}
+	a := &applier{root: root, opts: opts, files: map[string]*entry{}, adding: map[string]bool{}}
+	for _, op := range d.Ops {
+		if op.Op == "add_note" && op.Note != nil {
+			a.adding[op.Note.ID] = true
+		}
+	}
 	for i, op := range d.Ops {
 		if err := ctx.Err(); err != nil {
 			return rep, err
@@ -136,6 +146,8 @@ func Apply(ctx context.Context, root string, d Delta, opts Options) (Report, err
 			rep.Noop++
 		}
 	}
+	a.dropRefsToRejected()
+	rep.DroppedRefs = a.dropped
 	ids := make([]string, 0, len(a.files))
 	for id := range a.files {
 		ids = append(ids, id)
@@ -154,6 +166,11 @@ func Apply(ctx context.Context, root string, d Delta, opts Options) (Report, err
 			if err := writeAtomic(filepath.Join(root, e.note.Path()), content); err != nil {
 				return rep, err
 			}
+		}
+	}
+	if len(rep.DroppedRefs) > 0 && !opts.DryRun {
+		if err := appendPending(root, rep.DroppedRefs); err != nil {
+			return rep, err
 		}
 	}
 	if len(rep.PendingCounters) > 0 && opts.Stats != nil && !opts.DryRun {
@@ -317,11 +334,85 @@ func (a *applier) commit(n Note, orig []byte) error {
 	if p := n.Path(); filepath.Clean(p) != p || strings.Count(p, "/") != 1 {
 		return fmt.Errorf("refusing path %q: a delta writes only notes/<id>.md and hubs/<id>.md", p)
 	}
-	if probs := Check(n, Render(n), a.resolve); len(probs) > 0 {
+	if orig == nil {
+		// a new note may cite notes that land later; an edit (link, update) must name an existing target
+		a.dropUnresolved(&n)
+	}
+	resolve := func(kind, ref string) bool { return (kind == "id" && a.adding[ref]) || a.resolve(kind, ref) }
+	if probs := Check(n, Render(n), resolve); len(probs) > 0 {
 		return errors.New(strings.Join(probs, "; "))
 	}
 	a.files[n.ID] = &entry{note: n, orig: orig}
 	return nil
+}
+
+// dropUnresolved removes links to notes that neither exist nor are added by this delta; they are queued, not lost.
+func (a *applier) dropUnresolved(n *Note) {
+	known := func(ref string) bool { return ref != n.ID && (a.adding[ref] || a.resolve("id", ref)) }
+	keep := func(field string, refs []string) []string {
+		var out []string
+		for _, ref := range refs {
+			if known(ref) {
+				out = append(out, ref)
+			} else {
+				a.dropped = append(a.dropped, PendingLink{Note: n.ID, Field: field, Ref: ref})
+			}
+		}
+		return out
+	}
+	n.About = keep("about", n.About)
+	n.Supersedes = keep("supersedes", n.Supersedes)
+	var related []Related
+	for _, r := range n.Related {
+		if known(r.ID) {
+			related = append(related, r)
+		} else {
+			a.dropped = append(a.dropped, PendingLink{Note: n.ID, Field: "related", Ref: r.ID, Why: r.Why})
+		}
+	}
+	n.Related = related
+}
+
+// dropRefsToRejected removes links to notes this delta meant to add but rejected, after every op has run.
+func (a *applier) dropRefsToRejected() {
+	for id, e := range a.files {
+		exists := func(ref string) bool {
+			if _, ok := a.files[ref]; ok {
+				return true
+			}
+			_, err := os.Stat(filepath.Join(a.root, "notes", ref+".md"))
+			return err == nil
+		}
+		n := e.note
+		changed := false
+		filter := func(field string, refs []string) []string {
+			var out []string
+			for _, ref := range refs {
+				if exists(ref) {
+					out = append(out, ref)
+				} else {
+					changed = true
+					a.dropped = append(a.dropped, PendingLink{Note: id, Field: field, Ref: ref})
+				}
+			}
+			return out
+		}
+		n.About = filter("about", n.About)
+		n.Supersedes = filter("supersedes", n.Supersedes)
+		var related []Related
+		for _, r := range n.Related {
+			if exists(r.ID) {
+				related = append(related, r)
+			} else {
+				changed = true
+				a.dropped = append(a.dropped, PendingLink{Note: id, Field: "related", Ref: r.ID, Why: r.Why})
+			}
+		}
+		n.Related = related
+		if changed {
+			e.note = n
+		}
+	}
 }
 
 // load finds an id in this delta's pending files, then under notes/ or hubs/.

@@ -33,6 +33,7 @@ func cmdFile(args []string) int {
 	machine := fset.String("machine", "all", "devbox | laptop | all")
 	batch := fset.Int("batch", 20, "memories per call (≤ 20)")
 	limit := fset.Int("limit", 0, "file at most N memories this run (0: all)")
+	parallel := fset.Int("parallel", 4, "model calls in flight at once (results applied in batch order)")
 	dryRun := fset.Bool("dry-run", false, "print the batch plan and the reconcile; call no model, write nothing")
 	model := fset.String("model", "haiku", "haiku | opus")
 	budget := fset.Float64("budget", 15, "stop before a call would take this run past $N")
@@ -73,7 +74,7 @@ func cmdFile(args []string) int {
 	}
 	defer ledger.Close()
 	res, err := filing.Run(context.Background(), filing.Config{Root: root, Machines: machines, Batch: *batch,
-		Limit: *limit, Model: modelID, Runner: llm.DefaultClaude(),
+		Limit: *limit, Parallel: *parallel, Model: modelID, Runner: llm.DefaultClaude(),
 		Ledger: ledger, Skill: string(skill), BudgetUSD: *budget, Now: time.Now()})
 	res.Skips = nil // the full list is in .brain/filing-report.json
 	out, _ := json.MarshalIndent(res, "", "  ")

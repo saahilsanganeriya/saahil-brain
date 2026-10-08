@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"saahil.local/brain/internal/config"
@@ -311,6 +312,7 @@ type Config struct {
 	Ledger    *llm.Ledger
 	Skill     string
 	BudgetUSD float64 // run cap; a batch is sent only while spent + its per-call budget fits
+	Parallel  int     // model calls in flight at once (results are still applied in batch order)
 	Now       time.Time
 }
 
@@ -324,8 +326,12 @@ type Result struct {
 	CostUSD    float64   `json:"cost_usd"`
 	Rejected   int       `json:"rejected_ops"`
 	BadAnswers int       `json:"bad_answers,omitempty"` // not a delta: its memories count as left out
-	Stopped    string    `json:"stopped,omitempty"`
-	Skips      []Skip    `json:"skips,omitempty"`
+	// links to notes not filed yet are dropped from the note, queued, and added once their target exists
+	LinksDropped  int    `json:"links_dropped"`
+	LinksResolved int    `json:"links_resolved"`
+	LinksWaiting  int    `json:"links_waiting"`
+	Stopped       string `json:"stopped,omitempty"`
+	Skips         []Skip `json:"skips,omitempty"`
 }
 
 type batchInput struct {
@@ -360,87 +366,116 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if cfg.Model == config.ModelJudgment {
 		perCall = 2.50
 	}
-	for _, batch := range plan.Batches {
-		if res.CostUSD+perCall > cfg.BudgetUSD {
-			res.Stopped = fmt.Sprintf("budget: $%.2f spent + $%.2f per call > $%.2f", res.CostUSD, perCall, cfg.BudgetUSD)
-			break
+	parallel := max(cfg.Parallel, 1)
+	var mu sync.Mutex // guards res and the ledger while a wave's calls run together
+	for start := 0; start < len(plan.Batches); start += parallel {
+		wave := plan.Batches[start:min(start+parallel, len(plan.Batches))]
+		if left := cfg.BudgetUSD - res.CostUSD; left < perCall*float64(len(wave)) {
+			wave = wave[:max(0, int(left/perCall))]
+			if len(wave) == 0 {
+				res.Stopped = fmt.Sprintf("budget: $%.2f spent + $%.2f per call > $%.2f", res.CostUSD, perCall, cfg.BudgetUSD)
+				break
+			}
 		}
-		in := batchInput{Step: "file", Today: cfg.Now.UTC().Format("2006-01-02"), Hubs: hubs}
-		for _, it := range batch {
-			b, err := os.ReadFile(filepath.Join(cfg.Root, it.Path))
-			if err != nil {
+		answers := make([][]byte, len(wave))
+		errs := make([]error, len(wave))
+		var wg sync.WaitGroup
+		for i, batch := range wave {
+			in := batchInput{Step: "file", Today: cfg.Now.UTC().Format("2006-01-02"), Hubs: hubs}
+			for _, it := range batch {
+				b, err := os.ReadFile(filepath.Join(cfg.Root, it.Path))
+				if err != nil {
+					return res, err
+				}
+				m := material{Item: it, Truncated: len(b) > contentCap}
+				m.Content = string(b[:min(len(b), contentCap)])
+				in.Material = append(in.Material, m)
+			}
+			input, _ := json.Marshal(in)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				answers[i], errs[i] = ask(ctx, cfg, string(input), perCall, &res, &mu)
+			}()
+		}
+		wg.Wait()
+		// apply in batch order: file writes and the filing state stay strictly sequential
+		for i, batch := range wave {
+			if errs[i] != nil {
+				return res, errs[i]
+			}
+			res.Batches++
+			var d delta.Delta
+			cited := map[string][]string{}
+			if err := json.Unmarshal(answers[i], &d); err != nil {
+				res.BadAnswers++ // its memories count as left out; their attempt marker makes the retry a new question
+			} else {
+				rep, err := delta.Apply(ctx, cfg.Root, d, delta.Options{Now: cfg.Now})
+				if err != nil {
+					return res, err
+				}
+				res.Rejected += len(rep.Rejected)
+				res.LinksDropped += len(rep.DroppedRefs)
+				cited = citedSources(d, rep)
+			}
+			for _, it := range batch {
+				notes := cited[it.Path]
+				for _, c := range it.Copies {
+					notes = append(notes, cited[c]...)
+				}
+				if len(notes) == 0 {
+					st.Attempts[it.SHA]++
+					res.Unfiled++
+					continue
+				}
+				for _, s := range it.shas {
+					st.Filed[s] = filed{Path: it.Path, Notes: notes, At: cfg.Now}
+				}
+				delete(st.Attempts, it.SHA)
+				res.FiledNow++
+			}
+			b, _ := json.MarshalIndent(st, "", " ")
+			if err := writeAtomic(statePath(cfg.Root), b); err != nil {
 				return res, err
 			}
-			m := material{Item: it, Truncated: len(b) > contentCap}
-			m.Content = string(b[:min(len(b), contentCap)])
-			in.Material = append(in.Material, m)
 		}
-		input, _ := json.Marshal(in)
-		answer, err := ask(ctx, cfg, string(input), perCall, &res)
-		if err != nil {
-			return res, err
-		}
-		res.Batches++
-		var d delta.Delta
-		cited := map[string][]string{}
-		if err := json.Unmarshal(answer, &d); err != nil {
-			res.BadAnswers++ // its memories count as left out; their attempt marker makes the retry a new question
-		} else {
-			rep, err := delta.Apply(ctx, cfg.Root, d, delta.Options{Now: cfg.Now})
-			if err != nil {
-				return res, err
-			}
-			res.Rejected += len(rep.Rejected)
-			cited = citedSources(d, rep)
-		}
-		for _, it := range batch {
-			notes := cited[it.Path]
-			for _, c := range it.Copies {
-				notes = append(notes, cited[c]...)
-			}
-			if len(notes) == 0 {
-				st.Attempts[it.SHA]++
-				res.Unfiled++
-				continue
-			}
-			for _, s := range it.shas {
-				st.Filed[s] = filed{Path: it.Path, Notes: notes, At: cfg.Now}
-			}
-			delete(st.Attempts, it.SHA)
-			res.FiledNow++
-		}
-		b, _ := json.MarshalIndent(st, "", " ")
-		if err := writeAtomic(statePath(cfg.Root), b); err != nil {
-			return res, err
-		}
+	}
+	if res.LinksResolved, res.LinksWaiting, err = delta.ResolvePending(cfg.Root, cfg.Now); err != nil {
+		return res, err
 	}
 	b, _ := json.MarshalIndent(res, "", " ")
 	return res, writeAtomic(filepath.Join(cfg.Root, ".brain", "filing-report.json"), b)
 }
 
 // ask answers from the ledger when this exact batch was answered before; otherwise it pays for one call.
-func ask(ctx context.Context, cfg Config, input string, perCall float64, res *Result) ([]byte, error) {
+func ask(ctx context.Context, cfg Config, input string, perCall float64, res *Result, mu *sync.Mutex) ([]byte, error) {
 	key := llm.Key("filing", "file", cfg.Model, cfg.Skill, input)
+	mu.Lock()
 	out, ok, err := cfg.Ledger.Done(key)
-	if err != nil {
-		return nil, err
+	if err == nil && !ok {
+		err = cfg.Ledger.Begin(key, "filing", "file", cfg.Model, time.Now())
 	}
 	if ok {
 		res.Cached++
-	} else {
-		if err := cfg.Ledger.Begin(key, "filing", "file", cfg.Model, time.Now()); err != nil {
-			return nil, err
-		}
+	}
+	mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		var runErr error
 		out, runErr = cfg.Runner.Run(ctx, llm.Call{Skill: cfg.Skill, Input: input, Model: cfg.Model,
 			MaxBudgetUSD: perCall, JSONSchema: delta.Schema})
-		res.Calls++
-		res.CostUSD += out.CostUSD
 		status := "done"
 		if runErr != nil {
 			status = "failed"
 		}
-		if err := cfg.Ledger.Finish(key, out, status, time.Now()); err != nil || runErr != nil {
+		mu.Lock()
+		res.Calls++
+		res.CostUSD += out.CostUSD
+		err := cfg.Ledger.Finish(key, out, status, time.Now())
+		mu.Unlock()
+		if err != nil || runErr != nil {
 			return nil, errors.Join(runErr, err)
 		}
 	}
