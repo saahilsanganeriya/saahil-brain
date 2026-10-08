@@ -295,3 +295,57 @@ func TestBriefPointsAtNamedAndOwnDocs(t *testing.T) {
 		t.Fatalf("pointers %v: want the brief first, then the cascade-5 report, never cascade-4's", got)
 	}
 }
+
+// TestNamingAFolderDoesNotDoubleItsNamedFiles catches a brief's subject losing to files the brief names once that
+// also anchor a folder it names: the mention and the folder credit were added, one piece of evidence counted twice
+// (image-lane briefs on 2026-10-08 put plans/SPEC.md fourth behind three recon files, on 20 DEV items).
+func TestNamingAFolderDoesNotDoubleItsNamedFiles(t *testing.T) {
+	f := newFixture(t, true, map[string]string{
+		"work/lane-z/CARD.md":       "---\ntype: card\nstatus: live\nsummary: lane z\n---\n# Lane Z\n",
+		"work/lane-z/STATE.md":      "# State\n\nRunning.\n",
+		"work/lane-z/GOAL.md":       "# Goal\n\nShip it.\n",
+		"work/lane-z/plans/SPEC.md": "---\ntype: spec\nstatus: live\n---\n# Lane Z spec\n\nThe design.\n",
+		"work/lane-z/recon/a.md":    "# Recon a\n\nFirst probe.\n",
+		"work/lane-z/recon/b.md":    "# Recon b\n\nSecond probe.\n",
+		"work/lane-z/recon/c.md":    "# Recon c\n\nThird probe.\n",
+	})
+	nm, err := BuildNames(f.db, func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b })
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief := "=== TASK === Attack the design in work/lane-z/plans/SPEC.md. Inputs in work/lane-z/recon/: " +
+		"work/lane-z/recon/a.md, work/lane-z/recon/b.md and work/lane-z/recon/c.md."
+	lk, err := Pointers(f.db, brief, Seeds{}, nm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(lk.Chosen, func(p Pointer) bool { return p.ID == "work/lane-z/plans/SPEC.md" }) {
+		t.Fatalf("pointers %+v: the spec the brief names must be one", lk.Chosen)
+	}
+}
+
+// TestNoPointerToTheBriefThePromptHolds catches a slot spent on the brief file a dispatch was pasted from: the
+// session already holds its text (33 of 121 DEV items had one among their pointers on 2026-10-08).
+func TestNoPointerToTheBriefThePromptHolds(t *testing.T) {
+	const text = "Measure the OCR recall on the scanned census pages and write the numbers into the census report."
+	f := newFixture(t, true, map[string]string{
+		"work/slice-x/briefs/w9.md":  "# W9\n\n" + text + "\n",
+		"work/slice-x/plans/PLAN.md": "# Plan\n\nThe census plan.\n",
+	})
+	nm, err := BuildNames(f.db, func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b })
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief := "=== TASK === W9 " + text + " Brief: work/slice-x/briefs/w9.md; plan: work/slice-x/plans/PLAN.md."
+	lk, err := Pointers(f.db, brief, Seeds{}, nm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range lk.Chosen {
+		got = append(got, p.ID)
+	}
+	if slices.Contains(got, "work/slice-x/briefs/w9.md") || !slices.Contains(got, "work/slice-x/plans/PLAN.md") {
+		t.Fatalf("pointers %v: want the plan, never the brief the prompt holds", got)
+	}
+}

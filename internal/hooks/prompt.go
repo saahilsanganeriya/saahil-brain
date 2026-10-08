@@ -107,6 +107,7 @@ type cand struct {
 	alias, prox, scope                        float64
 	mention, folder                           float64
 	own                                       bool // named like the session's folder
+	echo                                      bool // the prompt holds its text
 	via, viaRel                               string
 	score                                     float64
 }
@@ -177,8 +178,9 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	for i := range cands {
 		c := &cands[i]
 		c.scope = scopeFit(c, seeds)
+		// naming a document and naming its folder are one piece of evidence, not two
 		c.score = wRelevance*c.rel + wAlias*c.alias + wProximity*c.prox + wScope*c.scope + typePrior[c.typ] +
-			wMention*c.mention + wFolder*c.folder
+			max(wMention*c.mention, wFolder*c.folder)
 		if strings.HasPrefix(c.path, "memory-import/") {
 			c.score -= 0.05 // the filed note in notes/ is the canonical form
 		}
@@ -187,11 +189,14 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 		return cands[i].score > cands[j].score || (cands[i].score == cands[j].score && cands[i].id < cands[j].id)
 	})
 	cands = dedupe(cands)
+	if err := markEchoes(db, cands, text); err != nil {
+		return lk, err
+	}
 	for i := 0; i < len(cands) && i < 10; i++ {
 		lk.Candidates = append(lk.Candidates, cands[i].id)
 	}
 	for _, c := range cands {
-		if c.typ != "hub" {
+		if c.answer() {
 			lk.Best = round3(c.score)
 			break
 		}
@@ -202,8 +207,7 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	}
 	var chosen []cand
 	for _, c := range cands {
-		// a hub is context, not an answer: it seeds the hop and reaches the session through the digest
-		if c.typ != "hub" && c.score >= Threshold && len(chosen) < config.MaxPointers {
+		if c.answer() && c.score >= Threshold && len(chosen) < config.MaxPointers {
 			chosen = append(chosen, c)
 		}
 	}
@@ -545,6 +549,38 @@ func hop(db *sql.DB, cands []cand, seeds Seeds) ([]cand, error) {
 	return cands, rows.Err()
 }
 
+// maxEchoReads bounds the bodies one prompt reads to find echoes: the top candidates, where the pointers come from.
+const maxEchoReads = 8
+
+// markEchoes flags the candidates that could be chosen whose text the prompt already holds.
+func markEchoes(db *sql.DB, cands []cand, prompt string) error {
+	var shingles map[uint64]bool
+	read := 0
+	for i := range cands {
+		c := &cands[i]
+		if read == maxEchoReads || c.score < exploreFrac*Threshold {
+			break
+		}
+		if c.typ == "hub" {
+			continue
+		}
+		if shingles == nil {
+			shingles = rank.Shingles(prompt)
+		}
+		body, err := rank.Body(db, c.id)
+		if err != nil {
+			return err
+		}
+		read++
+		c.echo = rank.Echo(body, shingles) >= rank.EchoShare
+	}
+	return nil
+}
+
+// answer: a hub is context, not an answer (it seeds the hop and reaches the session through the digest), and a
+// document the prompt already holds (the brief a dispatch was pasted from) tells the session nothing new.
+func (c cand) answer() bool { return c.typ != "hub" && !c.echo }
+
 // scopeFit: the candidate lives in an active work box or sits in one of its hubs.
 func scopeFit(c *cand, seeds Seeds) float64 {
 	for _, w := range seeds.Work {
@@ -584,7 +620,7 @@ func ownSlot(chosen, cands []cand) []cand {
 		return chosen
 	}
 	for _, c := range cands {
-		if c.own && c.typ != "hub" && c.score >= Threshold {
+		if c.own && c.answer() && c.score >= Threshold {
 			chosen[len(chosen)-1] = c
 			return chosen
 		}
@@ -613,7 +649,7 @@ func explore(chosen, cands []cand) []cand {
 		floor = max(floor, exploreFrac*chosen[len(chosen)-1].score)
 	}
 	for _, c := range cands {
-		if !picked[c.id] && under(c) && c.typ != "hub" && c.score >= floor {
+		if !picked[c.id] && under(c) && c.answer() && c.score >= floor {
 			if len(chosen) < config.MaxPointers {
 				return append(chosen, c)
 			}
