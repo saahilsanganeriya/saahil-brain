@@ -317,7 +317,7 @@ func (a *applier) commit(n Note, orig []byte) error {
 	if p := n.Path(); filepath.Clean(p) != p || strings.Count(p, "/") != 1 {
 		return fmt.Errorf("refusing path %q: a delta writes only notes/<id>.md and hubs/<id>.md", p)
 	}
-	if probs := problems(n, Render(n), a.resolve); len(probs) > 0 {
+	if probs := Check(n, Render(n), a.resolve); len(probs) > 0 {
 		return errors.New(strings.Join(probs, "; "))
 	}
 	a.files[n.ID] = &entry{note: n, orig: orig}

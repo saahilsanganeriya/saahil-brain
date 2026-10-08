@@ -275,8 +275,8 @@ func yamlScalar(s string) string {
 	return string(q)
 }
 
-// problems lists every FORMAT.md rule the note breaks; resolve reports whether a referenced id or path exists.
-func problems(n Note, rendered []byte, resolve func(kind, ref string) bool) []string {
+// Check lists every FORMAT.md rule the note breaks; resolve reports whether a referenced id or path exists.
+func Check(n Note, rendered []byte, resolve func(kind, ref string) bool) []string {
 	var out []string
 	bad := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
 	isHub := n.Type == "hub"
