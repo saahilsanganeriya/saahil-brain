@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ func init() {
 	register("cutover compare", "prove a move: <before.tsv> <after.tsv> [--allow-newer]; exit 1 on any missing file", cmdCutoverCompare)
 	register("cutover reconcile", "laptop vs devbox text conflicts: <laptop.tsv> <devbox.tsv> --out R.md [--apply --machine M --root DIR]", cmdCutoverReconcile)
 	register("cutover rewrite-paths", "old saahil-docs paths → new in text files and symlinks: <root> --from P... --to P [--apply] [--backup-dir D]", cmdCutoverRewrite)
+	register("cutover lift-state", "a STATE.md over the cap: map its sections, or move it to log/ and lift the chosen ones: <box> [--keep HEADING]... [--note F] [--apply]", cmdCutoverLiftState)
 	register("cutover find-names", "every non-history name, text mention and link target of saahil-docs: <root>... [--out F]", cmdCutoverFindNames)
 }
 
@@ -307,5 +309,49 @@ func cmdCutoverFindNames(args []string) int {
 	printCounts(os.Stdout, stats.Names)
 	fmt.Println("text files by category:")
 	printCounts(os.Stdout, stats.ByCategory)
+	return 0
+}
+
+func cmdCutoverLiftState(args []string) int {
+	fs := flag.NewFlagSet("cutover lift-state", flag.ContinueOnError)
+	var keep multiFlag
+	fs.Var(&keep, "keep", "heading of a section to lift, exactly as written (repeatable); none prints the section map")
+	notePath := fs.String("note", "", "markdown file placed before the lifted sections (a status when a current section is over the cap)")
+	apply := fs.Bool("apply", false, "move STATE.md to log/ and write the lifted one (default: show the result)")
+	minAge := fs.Duration("min-age", 30*time.Minute, "refuse a STATE.md changed more recently than this (an agent may be writing it)")
+	pos, err := parseInterleaved(fs, args)
+	if err != nil || len(pos) != 1 {
+		return fail("cutover lift-state <box> [--keep HEADING]... [--apply] [--min-age D]")
+	}
+	note := ""
+	if *notePath != "" {
+		b, err := os.ReadFile(*notePath)
+		if err != nil {
+			return fail("%v", err)
+		}
+		note = string(b)
+	}
+	now := time.Now().UTC()
+	plan, err := cutover.LiftState(cutover.LiftOptions{Box: pos[0], Keep: keep, Note: note, Date: now.Format(time.DateOnly),
+		Cap: config.StateMaxBytes, MinAge: *minAge, Apply: *apply, Now: now})
+	if errors.Is(err, cutover.ErrWithinCap) {
+		fmt.Printf("%s: %d bytes, within the cap of %d: nothing to lift\n", plan.State, plan.Bytes, config.StateMaxBytes)
+		return 0
+	}
+	if err != nil {
+		return fail("%v", err)
+	}
+	if len(keep) == 0 && note == "" {
+		fmt.Printf("%s: %d bytes (cap %d); its sections:\n", plan.State, plan.Bytes, config.StateMaxBytes)
+		for _, s := range plan.Sections {
+			fmt.Printf("  %6d B  lines %5d-%-5d  %s\n", s.Bytes, s.LineStart, s.LineEnd, s.Heading)
+		}
+		return 0
+	}
+	if !*apply {
+		fmt.Printf("%s would become %d bytes; the old file would move to %s\n----\n%s", plan.State, len(plan.Lifted), plan.Log, plan.Lifted)
+		return 0
+	}
+	fmt.Printf("lifted %s: %d bytes now; the old %d bytes are in %s\n", plan.State, len(plan.Lifted), plan.Bytes, plan.Log)
 	return 0
 }

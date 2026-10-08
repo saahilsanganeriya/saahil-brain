@@ -198,6 +198,34 @@ func TestRewriteSkipAndMinAge(t *testing.T) {
 	}
 }
 
+// TestLiftState: the giant moves to log/ byte for byte and the new STATE.md holds only the chosen sections, verbatim, in
+// their original order (a newest-last ledger keeps its last round); a file changed within MinAge is refused.
+func TestLiftState(t *testing.T) {
+	box := t.TempDir()
+	giant := "# STATE — demo\n\n## Facts\nf\n\n## Round 1\n" + strings.Repeat("old ruling\n", 200) + "\n## Round 2\nnewest ruling\n"
+	writeTree(t, box, map[string]string{"STATE.md": giant})
+	opts := LiftOptions{Box: box, Keep: []string{"Round 2", "Facts"}, Note: "## Where it stands\nmerged\n", Date: "2026-10-08", Cap: 1024, MinAge: 30 * time.Minute,
+		Apply: true, Now: t0.Add(time.Hour)}
+
+	if _, err := LiftState(LiftOptions{Box: box, Date: "2026-10-08", Cap: 1024, MinAge: 2 * time.Hour, Now: t0.Add(time.Hour)}); err == nil ||
+		!strings.Contains(err.Error(), "may be writing it") {
+		t.Fatalf("a file changed within MinAge must be refused, got %v", err)
+	}
+	plan, err := LiftState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, plan.Log) != giant {
+		t.Fatal("the log copy must be the old STATE.md unchanged")
+	}
+	lifted := readFile(t, filepath.Join(box, "STATE.md"))
+	facts, round2 := strings.Index(lifted, "## Facts"), strings.Index(lifted, "## Round 2\nnewest ruling")
+	if note := strings.Index(lifted, "## Where it stands\nmerged"); !strings.HasPrefix(lifted, "# STATE — demo\n") || note < 0 ||
+		facts < note || round2 < facts || strings.Contains(lifted, "old ruling") {
+		t.Fatalf("lifted STATE.md:\n%s", lifted)
+	}
+}
+
 // TestRewriteKeepsBackup: a dry run writes nothing, and --apply copies each original (bytes, mode, mtime) into the
 // backup dir and records sha256 before/after and the old mtime before replacing the file, keeping its mode.
 func TestRewriteKeepsBackup(t *testing.T) {
