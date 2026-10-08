@@ -171,6 +171,9 @@ func cmdSync(args []string) int {
 	}
 	fmt.Printf("%d per-file skip lines (full output: %s)\n", skipped, filepath.Join(config.StateDir(), "unison-last.out"))
 	if !*dry {
+		if n, err := archiveStaleTemps(root, out, rec.Started); n > 0 || err != nil {
+			fmt.Printf("moved %d stale unison half-copies into .archive/conflicts (err %v)\n", n, err)
+		}
 		raw, _ := json.Marshal(rec)
 		_ = os.WriteFile(syncRecordPath(), raw, 0o600)
 		// each machine keeps its own index (.index never syncs): fold in what the sync just brought
@@ -226,6 +229,11 @@ func archiveConflicts(root string, now time.Time) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return archiveMoves(dest, root, moves, now)
+}
+
+// archiveMoves renames each file into the archive (same disk) and appends what moved to its log.
+func archiveMoves(dest, root string, moves [][2]string, now time.Time) (int, error) {
 	var log strings.Builder
 	for _, m := range moves {
 		if err := os.MkdirAll(filepath.Dir(m[1]), 0o755); err != nil {
@@ -246,4 +254,28 @@ func archiveConflicts(root string, now time.Time) (int, error) {
 		_, _ = f.WriteString(log.String())
 	}
 	return len(moves), nil
+}
+
+// archiveStaleTemps moves unison's half-copies (.unison.<name>.<hash>.unison.tmp) that predate this run from the
+// folders of files that failed to transfer: an aborted transfer of a file a live agent was writing leaves them.
+func archiveStaleTemps(root string, unisonOut []byte, started time.Time) (int, error) {
+	dest := filepath.Join(root, ".archive", "conflicts", string(config.ThisMachine()))
+	dirs := map[string]bool{}
+	for _, line := range strings.Split(string(unisonOut), "\n") {
+		if rel, ok := strings.CutPrefix(strings.TrimSpace(line), "failed: "); ok {
+			dirs[filepath.Dir(filepath.Clean(rel))] = true
+		}
+	}
+	var moves [][2]string
+	for dir := range dirs {
+		entries, _ := os.ReadDir(filepath.Join(root, dir))
+		for _, e := range entries {
+			info, err := e.Info()
+			if err != nil || !strings.HasPrefix(e.Name(), ".unison.") || !info.ModTime().Before(started) {
+				continue
+			}
+			moves = append(moves, [2]string{filepath.Join(root, dir, e.Name()), filepath.Join(dest, dir, e.Name())})
+		}
+	}
+	return archiveMoves(dest, root, moves, time.Now())
 }

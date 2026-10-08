@@ -7,9 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"slices"
-	"strings"
 	"syscall"
 	"time"
 
@@ -83,32 +80,16 @@ func cmdHookBench(args []string) int {
 	if _, err := parseAll(fs, args); err != nil {
 		return 2
 	}
-	raw, err := os.ReadFile(filepath.Join(config.BrainRoot(), ".brain", "evals", "sets", "qa.jsonl"))
+	prompts, err := hooks.BenchQuestions(config.BrainRoot(), *n)
 	if err != nil {
 		return fail("qa set: %v (brain eval build makes it)", err)
 	}
-	var questions []string
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var item struct{ Question string }
-		if json.Unmarshal([]byte(line), &item) == nil && item.Question != "" {
-			questions = append(questions, item.Question)
-		}
+	took, abstained, err := hooks.Bench(hooks.DefaultEnv(), prompts, config.BrainRoot())
+	if err != nil || len(took) == 0 {
+		return fail("bench: %v", err)
 	}
-	if len(questions) == 0 || *n <= 0 {
-		return fail("no questions in the qa set")
-	}
-	var prompts []string
-	for i := 0; i < *n; i++ {
-		prompts = append(prompts, questions[i*len(questions) / *n])
-	}
-	env := hooks.DefaultEnv()
-	took, abstained, err := hooks.Bench(env, prompts, config.BrainRoot())
-	if err != nil {
-		return fail("%v", err)
-	}
-	slices.Sort(took)
-	at := func(q float64) time.Duration { return took[min(len(took)-1, int(q*float64(len(took))))] }
 	fmt.Printf("prompt hook on %s: n %d · p50 %s · p95 %s · max %s · abstained %d (budget p95 150ms)\n", config.ThisMachine(),
-		len(took), at(0.5).Round(time.Millisecond), at(0.95).Round(time.Millisecond), took[len(took)-1].Round(time.Millisecond), abstained)
+		len(took), hooks.Quantile(took, 0.5).Round(time.Millisecond), hooks.Quantile(took, 0.95).Round(time.Millisecond),
+		hooks.Quantile(took, 1).Round(time.Millisecond), abstained)
 	return 0
 }

@@ -143,6 +143,7 @@ func checkSync(ctx context.Context) (Status, string) {
 // checkConflicts counts sync conflict copies left in the brain (Unison's and the cut-over reconcile's).
 func checkConflicts(context.Context) (Status, string) {
 	var found []string
+	inFlight := 0
 	root := config.BrainRoot()
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -154,12 +155,21 @@ func checkConflicts(context.Context) (Status, string) {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {
+			// unison's half-copy of a file it is moving now, or just failed to: the next sync retries and cleans it
+			if info, err := d.Info(); err == nil && strings.HasPrefix(d.Name(), ".unison.") && time.Since(info.ModTime()) < 2*time.Hour {
+				inFlight++
+				return nil
+			}
 			found = append(found, strings.TrimPrefix(p, root+"/"))
 		}
 		return nil
 	})
 	if len(found) == 0 {
-		return OK, "0 unhandled conflict copies in the brain (losers are kept in .archive/conflicts)"
+		detail := "0 unhandled conflict copies in the brain (losers are kept in .archive/conflicts)"
+		if inFlight > 0 {
+			detail += fmt.Sprintf("; %d unison half-copies under 2 h old (in flight)", inFlight)
+		}
+		return OK, detail
 	}
 	return Fail, fmt.Sprintf("%d conflict copies: %s", len(found), strings.Join(found[:min(len(found), 5)], ", "))
 }

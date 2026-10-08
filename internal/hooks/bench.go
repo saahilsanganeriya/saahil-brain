@@ -1,6 +1,14 @@
 package hooks
 
-import "time"
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+)
 
 // Bench times the prompt hook's own work (open the index, load the names, rank pointers) for each prompt, the span
 // Prompt records as its latency, without logging a lookup: the doctor's p95 stays the record of real sessions.
@@ -26,4 +34,34 @@ func Bench(env Env, prompts []string, cwd string) (took []time.Duration, abstain
 		}
 	}
 	return took, abstained, nil
+}
+
+// BenchQuestions picks n questions spread over the QA eval set (.brain/evals/sets/qa.jsonl).
+func BenchQuestions(root string, n int) ([]string, error) {
+	raw, err := os.ReadFile(filepath.Join(root, ".brain", "evals", "sets", "qa.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	var questions []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var item struct{ Question string }
+		if json.Unmarshal([]byte(line), &item) == nil && item.Question != "" {
+			questions = append(questions, item.Question)
+		}
+	}
+	if len(questions) == 0 || n <= 0 {
+		return nil, errors.New("no questions in the qa set")
+	}
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, questions[i*len(questions)/n])
+	}
+	return out, nil
+}
+
+// Quantile reads a sorted copy of took at q (0.5, 0.95).
+func Quantile(took []time.Duration, q float64) time.Duration {
+	s := slices.Clone(took)
+	slices.Sort(s)
+	return s[min(len(s)-1, int(q*float64(len(s))))]
 }
