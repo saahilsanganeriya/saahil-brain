@@ -149,7 +149,8 @@ func checkConflicts(context.Context) (Status, string) {
 			return nil
 		}
 		// .archive holds the losers already handled (brain sync --archive-conflicts); only live copies are unhandled
-		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive") {
+		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive" ||
+			config.IsSyncBulkDir(d.Name())) {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {

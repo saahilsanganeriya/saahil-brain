@@ -114,6 +114,20 @@ const (
 	ModelBulk     = "claude-haiku-5-5"
 )
 
+// SyncBulkDirs are folder-name patterns (filepath.Match) the sync never carries, wherever they sit: bulk, caches and
+// environments. Nothing under them is synced, so nothing under them can be a sync conflict copy either.
+var SyncBulkDirs = []string{"artifacts", ".sync-backups", "ctx", "target*", "*.egg-info", "node_modules", "__pycache__", ".venv", "venv"}
+
+// IsSyncBulkDir reports whether a folder name matches SyncBulkDirs.
+func IsSyncBulkDir(name string) bool {
+	for _, pat := range SyncBulkDirs {
+		if ok, _ := filepath.Match(pat, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // IsSyncConflictCopy names a conflict copy left by a sync: Unison's "<file> (conflict…_on_<date>…)", the cut-over
 // reconcile's "<file>.conflict-<machine>-<time>", or Unison's temporary ".unison.*" files.
 func IsSyncConflictCopy(name string) bool {

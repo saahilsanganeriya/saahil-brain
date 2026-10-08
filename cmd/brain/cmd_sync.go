@@ -25,12 +25,19 @@ func init() {
 // backups, dream before-copies), git history (devbox only), locks, temp files.
 // work/ carries what the old hourly rsync carried — text (md txt py sh js toml yml yaml and small extensionless files)
 // up to 2 MB — never the bulk: the boxes hold ~600 GB on the devbox and ~220 GB on the laptop.
-var syncIgnores = []string{
-	"Name artifacts", "Name .sync-backups", "Name ctx", "Name target*", "Name *.egg-info",
+var syncIgnores = append(prefixed("Name ", config.SyncBulkDirs),
 	`Regex work/.*\.[A-Za-z0-9]+`,
 	"Path .index", "Path .data", "Name .git", "Path .archive", "Path .brain/dream.lock",
 	"Path .brain/dream-state.json", "Name .consolidate-lock", "Name .DS_Store", "Name *.tmp", "Name .brain-tmp",
-	"Name *.db", "Name *.db-wal", "Name *.db-shm", "Name node_modules", "Name __pycache__", "Name .venv", "Name venv",
+	"Name *.db", "Name *.db-wal", "Name *.db-shm",
+)
+
+func prefixed(prefix string, items []string) []string {
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = prefix + it
+	}
+	return out
 }
 
 type syncRecord struct {
