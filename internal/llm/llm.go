@@ -50,6 +50,10 @@ const maxSkillBytes = 120 * 1024
 type Claude struct {
 	Bin    string
 	Prefix []string
+	// Login uses the claude CLI's own sign-in (keychain) instead of --bare's API key, still loading no settings,
+	// hooks, plugins or MCP servers: the laptop has no API key, only the owner's login (an interactive shell only;
+	// launchd cannot read the keychain).
+	Login bool
 }
 
 // DefaultClaude is ~/.local/bin/claude, behind devbox-exec when this machine has it.
@@ -59,16 +63,26 @@ func DefaultClaude() Claude {
 	if _, err := os.Stat(wrapper); err == nil {
 		return Claude{Bin: wrapper, Prefix: []string{bin}}
 	}
-	return Claude{Bin: bin}
+	return Claude{Bin: bin, Login: os.Getenv("BRAIN_LLM_LOGIN") == "1"}
+}
+
+// isolation keeps a call free of the owner's setup: --bare, or for a signed-in call only the (empty) local settings
+// of its empty working folder, no hooks, no MCP servers, no skills.
+func (c Claude) isolation() []string {
+	if !c.Login {
+		return []string{"--bare"}
+	}
+	return []string{"--setting-sources", "local", "--settings", `{"disableAllHooks": true}`, "--strict-mcp-config",
+		"--disable-slash-commands"}
 }
 
 func (c Claude) Run(ctx context.Context, call Call) (Result, error) {
 	if len(call.Skill) > maxSkillBytes {
 		return Result{}, fmt.Errorf("skill is %d bytes, over the %d argv limit", len(call.Skill), maxSkillBytes)
 	}
-	args := []string{"--bare", "-p", "--model", call.Model, "--output-format", "json",
+	args := append(c.isolation(), "-p", "--model", call.Model, "--output-format", "json",
 		"--max-budget-usd", strconv.FormatFloat(call.MaxBudgetUSD, 'f', 2, 64),
-		"--no-session-persistence", "--append-system-prompt", call.Skill}
+		"--no-session-persistence", "--append-system-prompt", call.Skill)
 	if call.JSONSchema != "" {
 		args = append(args, "--json-schema", call.JSONSchema)
 	}

@@ -46,3 +46,21 @@ func TestClaudeRunnerParsesCostAndUsage(t *testing.T) {
 		t.Fatalf("budget hit: err=%v res=%+v", err, res)
 	}
 }
+
+// TestLoginModeStaysIsolated catches a signed-in call (the laptop has no API key, only the owner's login) that drops
+// --bare without its replacement isolation: the owner's hooks, plugins, MCP servers and skills would run inside it.
+func TestLoginModeStaysIsolated(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+cat >/dev/null
+case "$*" in *--bare*) echo "bare in login mode" >&2; exit 3;; esac
+case "$*" in "--setting-sources local --settings {\"disableAllHooks\": true} --strict-mcp-config --disable-slash-commands -p --model "*) ;; *) echo "bad args: $*" >&2; exit 3;; esac
+echo '{"type":"result","subtype":"success","is_error":false,"result":"ok","total_cost_usd":0.01,"usage":{}}'
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Claude{Bin: bin, Login: true}).Run(context.Background(), Call{Skill: "S", Input: "in", Model: "m", MaxBudgetUSD: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
