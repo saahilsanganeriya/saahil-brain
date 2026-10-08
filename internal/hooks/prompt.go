@@ -29,20 +29,19 @@ const (
 	exploreShown  = 3 // a note shown fewer times than this may take the explore slot
 
 	// relevance saturates as bm25/(bm25+relHalf): a match worth relHalf is half way to certain
-	relHalf      = 12.0
-	wRelevance   = 0.3
-	wAlias       = 0.4 // times the name's weight (Names): 1 multi-word alias, 0.8 note id or title, 0.5 one word
-	wProximity   = 0.35
-	wScope       = 0.1
-	wMention     = 0.6  // a document the prompt names by path
-	wFolder      = 0.45 // times the folder's strength: an anchor document of a folder the prompt or session names
-	linkShare    = 0.5  // a document a named document links to gets this share of wMention
-	aliasPhrases = 8.0  // up to this many named phrases keep their full alias weight
-	maxLinks     = 30   // links read per named document
-	workFolder   = 0.6  // the strength of the session's own work box as a folder
-	anchorStep   = 0.15 // each later anchor of a folder counts this much less
-	anchorsPer   = 3
-	exploreFrac  = 0.85 // the explore slot takes a note scoring ≥ this share of the threshold
+	relHalf     = 12.0
+	wRelevance  = 0.3
+	wAlias      = 0.4 // times the name's weight (Names): 1 multi-word alias, 0.8 note id or title, 0.5 one word
+	wProximity  = 0.35
+	wScope      = 0.1
+	wMention    = 0.6  // a document the prompt names by path
+	wFolder     = 0.45 // times the folder's strength: an anchor document of a folder the prompt or session names
+	linkShare   = 0.5  // a document a named document links to gets this share of wMention
+	maxLinks    = 30   // links read per named document
+	workFolder  = 0.6  // the strength of the session's own work box as a folder
+	anchorStep  = 0.15 // each later anchor of a folder counts this much less
+	anchorsPer  = 3
+	exploreFrac = 0.85 // the explore slot takes a note scoring ≥ this share of the threshold
 )
 
 // Threshold is the score the best pointer must reach or the hook abstains. Calibrated on the 209 real prompts
@@ -105,7 +104,7 @@ type cand struct {
 	rel                                       float64 // saturated BM25, 0 for graph-only candidates
 	alias, prox, scope                        float64
 	mention, folder                           float64
-	own                                       bool // named like the session (its folder or a file it names)
+	own                                       bool // named like the session's folder
 	via, viaRel                               string
 	score                                     float64
 }
@@ -125,8 +124,8 @@ const rankable = `
 const candCols = `n.id, n.kind, n.type, n.path, n.title, n.summary, n.hubs, coalesce(s.shown, 0)`
 
 // Pointers ranks the index for a prompt and picks ≤ 3 pointers, or abstains. nm is the alias gate's dictionary.
-// The gate passes when the prompt names something: a note by alias, a path, a work box, or a folder named like the
-// session.
+// The gate passes when the prompt names something (a note by alias, a path, a work box) or the session's folder
+// names a folder or doc; the work box the session runs in only adds its anchors.
 func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error) {
 	var lk Lookup
 	text := cleanPrompt(prompt)
@@ -155,7 +154,7 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	if err != nil {
 		return lk, err
 	}
-	if len(named) == 0 && len(direct) == 0 {
+	if spelled := len(named) > 0 || len(mentioned) > 0 || len(own) > 0 || len(related) > 0; !spelled || len(named)+len(direct) == 0 {
 		lk.Abstained = true
 		return lk, nil
 	}
@@ -219,7 +218,7 @@ func sessionFolders(db *sql.DB, seeds Seeds, mentioned []string) (own, related m
 	boxes := slices.Clone(seeds.Work)
 	var stems []string
 	for _, id := range mentioned {
-		if b := boxOf(id); b != "" && !slices.Contains(boxes, b) {
+		if b := rank.BoxOf(id); b != "" && !slices.Contains(boxes, b) {
 			boxes = append(boxes, b)
 		}
 		stems = append(stems, strings.TrimSuffix(path.Base(id), path.Ext(id)))
@@ -296,15 +295,6 @@ func pointed(db *sql.DB, mentioned []string, folders, own map[string]float64) ([
 func isDir(db *sql.DB, id string) bool {
 	var kind string
 	return db.QueryRow(`SELECT kind FROM node WHERE id = ?`, id).Scan(&kind) == nil && kind == "dir"
-}
-
-// boxOf is a work node's box name, or "" outside work/.
-func boxOf(id string) string {
-	parts := strings.SplitN(id, "/", 3)
-	if len(parts) < 2 || parts[0] != "work" {
-		return ""
-	}
-	return parts[1]
 }
 
 // fetch loads the named nodes that may be ranked, strongest names first.

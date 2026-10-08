@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -137,7 +138,8 @@ type Report struct {
 	SetsBuilt    time.Time `json:"sets_built"`
 	IndexUpdated string    `json:"index_updated"`
 	Ranker       string    `json:"ranker"`
-	Metrics      []Metric  `json:"metrics"`
+	Metrics      []Metric  `json:"metrics"`       // over every item; what the marks are judged on
+	SplitMetrics []Metric  `json:"split_metrics"` // the same metrics over the DEV and the TEST half alone
 	Notes        []string  `json:"notes"`
 	Rows         any       `json:"rows"`
 	Worst        any       `json:"worst"`
@@ -146,9 +148,9 @@ type Report struct {
 	worstCells   [][]string
 }
 
-func newReport[R tableRow](e *Env, eval string, metrics []Metric, rows, worst []R, notes []string) Report {
+func newReport[R tableRow](e *Env, eval string, metrics, splits []Metric, rows, worst []R, notes []string) Report {
 	r := Report{Eval: eval, Ran: e.Now.UTC(), SetsBuilt: e.sets.Manifest.Built, Ranker: fmt.Sprintf("%T", e.Ranker),
-		Metrics: metrics, Notes: notes, Rows: rows, Worst: worst}
+		Metrics: metrics, SplitMetrics: splits, Notes: notes, Rows: rows, Worst: worst}
 	_ = e.Index.DB().QueryRow(`SELECT coalesce((SELECT value FROM meta WHERE key = 'run.updated_at'), 'never')`).Scan(&r.IndexUpdated)
 	var zero R
 	r.header = zero.header()
@@ -194,7 +196,7 @@ func (r Report) markdown() string {
 	fmt.Fprintf(&b, "# Eval: %s — %s\n\nran %s · sets built %s · index updated %s · ranker `%s`\n\n", r.Eval,
 		r.Ran.Format(time.DateOnly), r.Ran.Format(time.RFC3339), r.SetsBuilt.Format(time.RFC3339), r.IndexUpdated, r.Ranker)
 	b.WriteString("| split | metric | all | human-typed | dispatched | verdict |\n|---|---|---|---|---|---|\n")
-	for _, m := range r.Metrics {
+	for _, m := range append(slices.Clone(r.Metrics), r.SplitMetrics...) {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", cmp.Or(m.Split, "all"), m.Name, m.format(&m.All), m.format(m.Human), m.format(m.Dispatched), cell(m.verdict()))
 	}
 	b.WriteString("\n## Notes\n\n")

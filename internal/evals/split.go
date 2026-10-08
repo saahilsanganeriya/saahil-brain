@@ -25,9 +25,8 @@ func (e *Env) Only(split string) {
 	e.sets.QA = slices.DeleteFunc(slices.Clone(e.sets.QA), func(it QAItem) bool { return keep(it.ID) })
 }
 
-// perSplit computes the metrics over every row, then again over each split's rows alone.
-func perSplit[R any](rows []R, splitOf func(R) string, build func([]R) []Metric) []Metric {
-	out := build(rows)
+// perSplit computes the metrics over every row, and again over each split's rows alone.
+func perSplit[R any](rows []R, splitOf func(R) string, build func([]R) []Metric) (all, splits []Metric) {
 	for _, s := range Splits {
 		var sub []R
 		for _, r := range rows {
@@ -37,8 +36,8 @@ func perSplit[R any](rows []R, splitOf func(R) string, build func([]R) []Metric)
 		}
 		for _, m := range build(sub) {
 			m.Split = s
-			out = append(out, m)
+			splits = append(splits, m)
 		}
 	}
-	return out
+	return build(rows), splits
 }

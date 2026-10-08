@@ -171,7 +171,7 @@ func Mentions(db *sql.DB, text string, boxes []string) ([]string, error) {
 			continue
 		}
 		add(id)
-		if b := boxOf(id); b != "" && !haveBox[b] {
+		if b := BoxOf(id); b != "" && !haveBox[b] {
 			haveBox[b] = true
 			boxes = append(boxes, b)
 		}
@@ -230,8 +230,8 @@ func lookupPath(db *sql.DB, p string) (string, error) {
 	return id, err
 }
 
-// boxOf is a work node's box name, or "" outside work/.
-func boxOf(id string) string {
+// BoxOf is a work node's box name, or "" outside work/.
+func BoxOf(id string) string {
 	parts := strings.SplitN(id, "/", 3)
 	if len(parts) < 2 || parts[0] != "work" {
 		return ""

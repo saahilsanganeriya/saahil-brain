@@ -469,7 +469,7 @@ func (e *Env) Navigation() (Report, error) {
 		rows = append(rows, r)
 	}
 	ok := func(r NavRow) bool { return r.Error == "" }
-	metrics := perSplit(rows, func(r NavRow) string { return r.Split }, func(rows []NavRow) []Metric {
+	metrics, splits := perSplit(rows, func(r NavRow) string { return r.Split }, func(rows []NavRow) []Metric {
 		return []Metric{
 			split("navigation", "top-3 hit rate (pointer ranker)", rows, ok, func(r NavRow) bool { return r.Top3 }, func(r NavRow) bool { return r.Dispatched }, 0.70),
 			split("navigation", "reachable within 3 tool calls", rows, ok, func(r NavRow) bool { return r.Calls > 0 }, func(r NavRow) bool { return r.Dispatched }, 0.80),
@@ -491,7 +491,7 @@ func (e *Env) Navigation() (Report, error) {
 		return a.ID < b.ID
 	})
 	worst = slices.DeleteFunc(worst, func(r NavRow) bool { return r.Top3 && r.Calls > 0 })
-	return newReport(e, "navigation", metrics, rows, worst[:min(20, len(worst))], e.navNotes(rows)), nil
+	return newReport(e, "navigation", metrics, splits, rows, worst[:min(20, len(worst))], e.navNotes(rows)), nil
 }
 
 // boxOf is a work doc's box (work/<box>), or "" outside work/.
@@ -578,7 +578,7 @@ func (e *Env) QA() (Report, error) {
 		rows = append(rows, r)
 	}
 	answerable := func(r QARow) bool { return r.Kind != QAUnknown }
-	metrics := perSplit(rows, func(r QARow) string { return r.Split }, func(rows []QARow) []Metric {
+	metrics, splits := perSplit(rows, func(r QARow) string { return r.Split }, func(rows []QARow) []Metric {
 		metrics := []Metric{rate("qa", "recall@3 (brain_search)", rows, answerable, func(r QARow) bool { return r.Hit }, 0.80)}
 		for _, src := range [][2]string{{"note", "notes"}, {"memory", "imported memories"}} {
 			src, label := src[0], src[1]
@@ -607,7 +607,7 @@ func (e *Env) QA() (Report, error) {
 		"brain_search has no abstention (it falls back to partial matches), so unknowns are asked of the pointer ranker",
 		"diagnostic: the same questions without their template words; brain search requires every query word of two or more letters (bar a few stopwords), so a question's filler words ('do', 'know', 'about') can sink it",
 	}
-	return newReport(e, "qa", metrics, rows, worst[:min(20, len(worst))], notes), nil
+	return newReport(e, "qa", metrics, splits, rows, worst[:min(20, len(worst))], notes), nil
 }
 
 type MistakeRow struct {
@@ -640,7 +640,7 @@ func (e *Env) Mistakes() (Report, error) {
 		r.Surfaced = e.targetsByID(it.Lessons).any(r.Pointers)
 		rows = append(rows, r)
 	}
-	metrics := perSplit(rows, func(r MistakeRow) string { return r.Split }, func(rows []MistakeRow) []Metric {
+	metrics, splits := perSplit(rows, func(r MistakeRow) string { return r.Split }, func(rows []MistakeRow) []Metric {
 		m := split("mistakes", "relevant lesson surfaced before the correction", rows, func(MistakeRow) bool { return true },
 			func(r MistakeRow) bool { return r.Surfaced }, func(r MistakeRow) bool { return r.Dispatched }, 0)
 		m.Mark, m.Pass = "> 0 (the replay without the brain surfaces none)", boolPtr(m.All.N > 0 && m.All.Value > 0)
@@ -651,7 +651,7 @@ func (e *Env) Mistakes() (Report, error) {
 		return []Metric{m}
 	})
 	worst := slices.DeleteFunc(slices.Clone(rows), func(r MistakeRow) bool { return r.Surfaced })
-	return newReport(e, "mistakes", metrics, rows, worst[:min(20, len(worst))], []string{
+	return newReport(e, "mistakes", metrics, splits, rows, worst[:min(20, len(worst))], []string{
 		"the replayed moment is the owner prompt just before the correction; a hit is a pointer to a lesson or anti-pattern learned from that session",
 	}), nil
 }
@@ -704,7 +704,7 @@ func (e *Env) AB() (Report, error) {
 		}
 		return float64(n)
 	}
-	metrics := perSplit(rows, func(r ABRow) string { return r.Split }, func(rows []ABRow) []Metric {
+	metrics, splits := perSplit(rows, func(r ABRow) string { return r.Split }, func(rows []ABRow) []Metric {
 		return []Metric{
 			lift("ab", "top-3 hit rate lift (brain − grep)", rows, dispatched, func(r ABRow) float64 { return b2f(r.BrainTop3) - b2f(r.GrepTop3) }),
 			lift("ab", "within-3-calls lift (brain − grep)", rows, dispatched, func(r ABRow) float64 { return b2f(r.BrainCalls > 0) - b2f(r.GrepCalls > 0) }),
@@ -722,7 +722,7 @@ func (e *Env) AB() (Report, error) {
 		return worst[i].ID < worst[j].ID
 	})
 	worst = slices.DeleteFunc(worst, func(r ABRow) bool { return calls(r.BrainCalls) <= calls(r.GrepCalls) && (r.BrainTop3 || !r.GrepTop3) })
-	return newReport(e, "ab", metrics, rows, worst[:min(20, len(worst))], []string{
+	return newReport(e, "ab", metrics, splits, rows, worst[:min(20, len(worst))], []string{
 		"same navigation items and query words for both arms; budget-matched: the same number of results per call (8 for a search or grep, 3 for top-3) and the same 3-call budget",
 		"grep arm: whole-word, case-insensitive match over the same files' paths and text, ranked by distinct query words found; a read reveals the file's links",
 		"worst rows: items where the brain needed more calls than grep, or grep had a top-3 hit the brain missed",

@@ -254,6 +254,18 @@ func TestExploreSlotGoesToFreshNote(t *testing.T) {
 	}
 }
 
+// TestChatterInABoxWorktreeAbstains catches the session's own work box opening the gate by itself: "try now" typed
+// in the box's worktree must not get the box's STATE or CARD as pointers (the start digest already carries them).
+func TestChatterInABoxWorktreeAbstains(t *testing.T) {
+	f := newFixture(t, true, nil)
+	f.cwd = filepath.Join(filepath.Dir(f.cwd), "ocr-census")
+	for _, chatter := range []string{"try now", "continue please"} {
+		if got := f.prompt(t, "s1", chatter); got != "" {
+			t.Errorf("%q in the box's worktree got pointers:\n%s", chatter, got)
+		}
+	}
+}
+
 // TestBriefPointsAtNamedAndOwnDocs catches a dispatch brief pointed at a note its boilerplate names by alias instead
 // of the brief it names by path and the worker's own report (navigation top-3 was 5.5% on 2026-10-08), and a
 // sibling folder whose name differs only in a number (cascade-4 for a cascade-5 worker).

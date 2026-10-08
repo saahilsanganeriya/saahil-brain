@@ -157,7 +157,7 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, error) {
 	var boxes []string
 	for _, s := range seeds {
-		if b := boxOf(s); b != "" {
+		if b := BoxOf(s); b != "" {
 			boxes = append(boxes, b)
 		}
 	}
@@ -168,7 +168,7 @@ func addMentions(db *sql.DB, cands []cand, q string, seeds []string) ([]cand, er
 	rel := map[string]float64{}
 	var stems []string
 	for _, id := range named {
-		if b := boxOf(id); b != "" && !slices.Contains(boxes, b) {
+		if b := BoxOf(id); b != "" && !slices.Contains(boxes, b) {
 			boxes = append(boxes, b)
 		}
 		anchors, err := Anchors(db, id, anchorsPerDir)

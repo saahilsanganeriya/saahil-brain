@@ -281,7 +281,7 @@ func TestSplitsPartitionItemsBySession(t *testing.T) {
 	}
 	for _, rep := range reports {
 		byName := map[string]map[string]int{}
-		for _, m := range rep.Metrics {
+		for _, m := range append(rep.Metrics, rep.SplitMetrics...) {
 			if byName[m.Name] == nil {
 				byName[m.Name] = map[string]int{}
 			}

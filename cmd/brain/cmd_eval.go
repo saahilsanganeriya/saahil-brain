@@ -97,7 +97,7 @@ func withEvalEnv(build bool, run func(*evals.Env) int) int {
 
 func printReports(reports []evals.Report, root string) {
 	for _, r := range reports {
-		for _, m := range r.Metrics {
+		for _, m := range append(r.Metrics, r.SplitMetrics...) {
 			fmt.Println(m.Line())
 		}
 	}
