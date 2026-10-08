@@ -3,9 +3,13 @@ package hooks
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"saahil.local/brain/internal/rank"
 )
 
 const ocrPrompt = "what was the ocr recall on the image census?"
@@ -112,5 +116,40 @@ func TestEndCountsIgnoredOncePerSession(t *testing.T) {
 	ids, _ := json.Marshal(want)
 	if n := f.rows(t, "s1", "end", `["ignored"]`, string(ids)); n != 1 {
 		t.Errorf("%d end rows for %s, want 1", n, ids)
+	}
+}
+
+// TestDemotedNoteScoresItsPrior catches the dream's demotion never reaching the pointers: the same prompt must score
+// a note the dream marked demoted (shown ≥ 10 times, never opened) exactly rank.DemotedPrior lower.
+func TestDemotedNoteScoresItsPrior(t *testing.T) {
+	f := newFixture(t, true, nil)
+	// a borderline pointer drops under the threshold once demoted; keep it chosen to read its score
+	threshold := Threshold
+	Threshold = 0
+	t.Cleanup(func() { Threshold = threshold })
+	read := func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b }
+	nm, err := BuildNames(f.db, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	score := func() float64 {
+		lk, err := Pointers(f.db, ocrPrompt, Seeds{}, nm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range lk.Chosen {
+			if p.ID == "finding-ocr-recall" {
+				return p.Score
+			}
+		}
+		t.Fatalf("finding-ocr-recall not chosen: %+v", lk.Chosen)
+		return 0
+	}
+	before := score()
+	if _, err := f.db.Exec(`INSERT INTO node_stats(id, shown, demoted_at) VALUES ('finding-ocr-recall', 10, '2026-10-08T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if got := score() - before; math.Abs(got-rank.DemotedPrior) > 0.0015 {
+		t.Fatalf("demoted note moved %.3f, want %.3f", got, rank.DemotedPrior)
 	}
 }

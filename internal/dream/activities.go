@@ -20,6 +20,8 @@ import (
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/llm"
+	"saahil.local/brain/internal/rank"
+	"saahil.local/brain/internal/store"
 )
 
 type Config struct {
@@ -446,6 +448,26 @@ type StepOutcome struct {
 	Status   string // ok | skipped | failed
 	Reason   string
 	ExitCode int
+}
+
+// Demote applies the usage funnel's demotion to the index (rank.Demote): a ranking prior, never a status change or a
+// file edit, so it needs no snapshot and is the same in shadow.
+func (a *Activities) Demote(_ context.Context) (StepOutcome, error) {
+	path := a.path(".index", "brain.db")
+	if _, err := os.Stat(path); err != nil {
+		return StepOutcome{Status: "skipped", Reason: "no index yet"}, nil
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		return StepOutcome{}, err
+	}
+	defer st.Close()
+	demoted, restored, err := rank.Demote(st.DB, time.Now())
+	if err != nil {
+		return StepOutcome{}, err
+	}
+	return StepOutcome{Status: "ok", Reason: fmt.Sprintf("demoted %d, restored %d (shown ≥ %d times as a pointer, never opened)",
+		demoted, restored, rank.DemoteAfterShown)}, nil
 }
 
 // Reconcile reports sync-conflict copies; resolving them is manual until Unison runs (cut-over).

@@ -176,12 +176,16 @@ func Pointers(db *sql.DB, prompt string, seeds Seeds, nm *Names) (Lookup, error)
 	if cands, err = hop(db, cands, seeds); err != nil {
 		return lk, err
 	}
+	usage, err := rank.UsagePrior(db)
+	if err != nil {
+		return lk, err
+	}
 	for i := range cands {
 		c := &cands[i]
 		c.scope = scopeFit(c, seeds)
 		// naming a document and naming its folder are one piece of evidence, not two
 		c.score = wRelevance*c.rel + wAlias*c.alias + wProximity*c.prox + wScope*c.scope + typePrior[c.typ] +
-			max(wMention*c.mention, wFolder*c.folder)
+			max(wMention*c.mention, wFolder*c.folder) + usage[c.id]
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		return cands[i].score > cands[j].score || (cands[i].score == cands[j].score && cands[i].id < cands[j].id)

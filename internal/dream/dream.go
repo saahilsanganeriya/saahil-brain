@@ -165,6 +165,9 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 	} else {
 		r.learnSessions(r.gate.Sessions)
 	}
+	if workflow.GetVersion(ctx, "demote-unopened", workflow.DefaultVersion, 1) == 1 {
+		r.outcome("demote", workflow.ExecuteActivity(r.det, a.Demote))
+	}
 	r.llm(fileStep, r.gate.Captures)
 	r.llm(linkStep, nil)
 	r.llm(hubsStep, nil)
