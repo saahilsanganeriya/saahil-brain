@@ -276,7 +276,9 @@ type SnapshotResult struct {
 	Tarball string
 }
 
-var gitIgnored = []string{".index/", ".data/", ".archive/", ".import/", "*.db*", ".brain/dream.lock", ".tmp-*"}
+// work/ holds every box (hundreds of GB of artifacts); the dream only writes CARD.md there, so that is all git tracks
+var gitIgnored = []string{".index/", ".data/", ".archive/", ".import/", "*.db*", ".brain/dream.lock", ".tmp-*",
+	"/work/*", "!/work/*/", "/work/*/*", "!/work/*/CARD.md"}
 
 func (a *Activities) Snapshot(ctx context.Context, runID string) (SnapshotResult, error) {
 	if err := a.ensureRepo(ctx); err != nil {

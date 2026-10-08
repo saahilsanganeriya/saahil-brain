@@ -22,6 +22,7 @@ func init() {
 	Register(Check{Name: "brain.skeleton", Run: checkSkeleton})
 	Register(Check{Name: "sync.last", Run: checkSync})
 	Register(Check{Name: "sync.conflicts", Run: checkConflicts})
+	Register(Check{Name: "brain.work-root", Run: checkWorkRoot})
 }
 
 func checkPeer(ctx context.Context) (Status, string) {
@@ -160,4 +161,36 @@ func checkConflicts(context.Context) (Status, string) {
 		return OK, "0 unhandled conflict copies in the brain (losers are kept in .archive/conflicts)"
 	}
 	return Fail, fmt.Sprintf("%d conflict copies: %s", len(found), strings.Join(found[:min(len(found), 5)], ", "))
+}
+
+// checkWorkRoot guards work/'s top level: a .git there makes every git hook treat the brain as a worktree (and link
+// saahil-docs into it), and a link resolving back into the brain is a loop for every tool that follows links.
+func checkWorkRoot(context.Context) (Status, string) {
+	work := filepath.Join(config.BrainRoot(), "work")
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return Fail, err.Error()
+	}
+	brainReal, err := filepath.EvalSymlinks(config.BrainRoot())
+	if err != nil {
+		return Fail, err.Error()
+	}
+	var bad []string
+	for _, e := range entries {
+		p := filepath.Join(work, e.Name())
+		if e.Name() == ".git" {
+			bad = append(bad, "work/.git (git hooks would treat the brain as a worktree)")
+			continue
+		}
+		if e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil && (real == brainReal || strings.HasPrefix(real, brainReal+"/")) {
+			bad = append(bad, "work/"+e.Name()+" links back into the brain")
+		}
+	}
+	if len(bad) == 0 {
+		return OK, fmt.Sprintf("%d entries in work/, no .git and no link back into the brain", len(entries))
+	}
+	return Fail, strings.Join(bad, "; ")
 }
