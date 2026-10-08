@@ -648,7 +648,7 @@ func (f *Squad) Move(ctx context.Context, session, name string, force, noBoxHint
 	}
 	f.printf("\n%s runs in Orca (host devbox-host-server); its screen:  brain agents screen %s\n", name, name)
 	if !noBoxHint {
-		f.printf("if it has a saahil-docs box with artifacts/:  brain agents box <box>\n")
+		f.printf("if its box has artifacts/ to bring along:  brain agents box <box>\n")
 	}
 	return nil
 }
@@ -721,8 +721,8 @@ func underRoot(dir, root string) (string, bool) {
 	return clean, err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
-// Box copies a saahil-docs box from the laptop to the devbox, artifacts included: it adds files and replaces older
-// ones, and never deletes on the devbox.
+// Box copies a box of the brain's work/ from the laptop to the devbox with the bulk Unison leaves out (artifacts,
+// big files): it adds files and replaces older ones, and never deletes on the devbox.
 func (f *Squad) Box(ctx context.Context, box string, excludes []string, withVenv bool) error {
 	if f.Here != config.Laptop || !f.Host.Remote {
 		return errors.New("box copies a laptop box to the devbox: run it on the laptop")
@@ -732,7 +732,7 @@ func (f *Squad) Box(ctx context.Context, box string, excludes []string, withVenv
 	}
 	local := strings.TrimRight(box, "/")
 	if !filepath.IsAbs(local) {
-		local = filepath.Join(f.Repo, local)
+		local = filepath.Join(config.BrainRoot(), "work", local)
 	}
 	if st, err := os.Stat(local); err != nil || !st.IsDir() {
 		return fmt.Errorf("no such box on the laptop: %s", local)

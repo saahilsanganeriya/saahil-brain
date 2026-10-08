@@ -23,7 +23,7 @@ func init() {
 	register("agents resume", "resume a saved devbox conversation in Orca: <name> <session> [--force]", cmdAgentsResume)
 	register("agents move", "move a laptop session to the devbox (exit it first): <session> <name> [--force]", cmdAgentsMove)
 	register("agents stop", "end a finished agent, transcript kept: <name> [--rm-worktree]", cmdAgentsStop)
-	register("agents box", "copy a saahil-docs box to the devbox, never deleting: <box> [--exclude PATH]… [--with-venv]", cmdAgentsBox)
+	register("agents box", "copy a work/ box with its bulk to the devbox, never deleting: <box> [--exclude PATH]… [--with-venv]", cmdAgentsBox)
 	register("machine login", "renew the devbox sign-ins: [github|aws|gcloud]… (all three by default)", cmdMachineLogin)
 	for verb, summary := range map[string]string{
 		"up":     "start the EC2 (~1–2 min) and sync laptop → devbox",

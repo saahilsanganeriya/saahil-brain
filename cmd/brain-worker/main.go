@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.temporal.io/sdk/activity"
@@ -58,9 +59,12 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 		return err
 	}
 	defer ledger.Close()
+	shadow, forbidden := []string{shadowDocs}, []string{shadowDocs, config.ClaudeDir()}
+	if !separateFrom(shadowDocs, root) {
+		shadow, forbidden = nil, []string{config.ClaudeDir()}
+	}
 	acts := &dream.Activities{LLM: runner, Ledger: ledger, Cfg: dream.Config{
-		BrainRoot: root, ShadowDocs: []string{shadowDocs}, SkillsDir: skills, BrainBin: brainBin,
-		Forbidden: []string{shadowDocs, config.ClaudeDir()},
+		BrainRoot: root, ShadowDocs: shadow, SkillsDir: skills, BrainBin: brainBin, Forbidden: forbidden,
 	}}
 
 	c, err := dial(logger, address)
@@ -125,4 +129,18 @@ func dial(logger *slog.Logger, address string) (client.Client, error) {
 		time.Sleep(2 * time.Second)
 	}
 	return nil, fmt.Errorf("temporal at %s not reachable: %w", address, lastErr)
+}
+
+// separateFrom is true while the shadow docs are their own tree; after the cut-over the old path links into (or no
+// longer exists beside) the brain, and keeping it read-only would refuse every write to the brain's own work/.
+func separateFrom(shadowDocs, root string) bool {
+	realShadow, err := filepath.EvalSymlinks(shadowDocs)
+	if err != nil {
+		return false
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return true
+	}
+	return realShadow != realRoot && !strings.HasPrefix(realShadow, realRoot+string(filepath.Separator))
 }
