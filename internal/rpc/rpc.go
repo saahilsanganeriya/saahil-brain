@@ -14,6 +14,7 @@ import (
 
 	"saahil.local/brain/internal/agents"
 	"saahil.local/brain/internal/config"
+	"saahil.local/brain/internal/squad"
 )
 
 type Request struct {
@@ -27,6 +28,8 @@ type Request struct {
 	SessionID string `json:"sessionId,omitempty"`
 	// step
 	Step string `json:"step,omitempty"`
+	// screen (To names the agent)
+	Lines int `json:"lines,omitempty"`
 }
 
 type Response struct {
@@ -110,9 +113,44 @@ func (h *Handler) Handle(ctx context.Context, req Request) Response {
 			return fail(err)
 		}
 		return ok(job)
+
+	// ---- squad: read-only views of this machine's agents for the other machine ----
+	case "screen":
+		return h.screen(ctx, req)
+
 	default:
 		return failf("unknown op %q", req.Op)
 	}
+}
+
+// screen reads an agent's terminal tail on this machine; it types nothing and starts nothing.
+func (h *Handler) screen(ctx context.Context, req Request) Response {
+	if req.To == "" {
+		return failf("screen needs to")
+	}
+	lines := req.Lines
+	if lines <= 0 {
+		lines = 40
+	}
+	host, err := squad.HostFor(config.ThisMachine(), config.ThisMachine(), h.Run)
+	if err != nil {
+		return fail(err)
+	}
+	f := squad.New(config.ThisMachine(), host)
+	f.Sessions = func(ctx context.Context) ([]agents.Session, error) {
+		sessions, err := agents.LocalSessions(h.RegistryDir)
+		agents.FillOrcaHandles(ctx, h.Run, sessions)
+		return sessions, err
+	}
+	_, name, found := strings.Cut(req.To, ":")
+	if !found {
+		name = req.To
+	}
+	res, err := f.Screen(ctx, name, min(lines, 2000))
+	if err != nil {
+		return fail(err)
+	}
+	return ok(res)
 }
 
 func (h *Handler) note(ctx context.Context, req Request) Response {
