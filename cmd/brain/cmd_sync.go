@@ -95,7 +95,11 @@ func cmdSync(args []string) int {
 	_ = os.MkdirAll(config.StateDir(), 0o700)
 	uargs := unisonArgs(root)
 	if *dry {
-		uargs = append(uargs, "-testonly")
+		// -noupdate alone still CREATES new files (learned 2026-10-08); block creation, update and deletion on
+		// both replicas so unison only prints its plan
+		for _, root := range []string{uargs[0], uargs[1]} {
+			uargs = append(uargs, "-nocreation", root, "-noupdate", root, "-nodeletion", root)
+		}
 	}
 	rec := syncRecord{Started: time.Now().UTC()}
 	cmd := exec.Command(unison, uargs...)
