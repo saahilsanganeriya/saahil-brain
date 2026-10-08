@@ -47,6 +47,11 @@ func Hosts(repo string) []Host {
 	claudeSteps := []Step{
 		{Kind: "file", Path: filepath.Join(claude, "rules", "brain.md"), Label: "rules", Content: []byte(rules), Owned: []byte("<!-- " + fileMarker)},
 	}
+	// after the cut-over (the brain is live) every repo's Claude Code memory is the brain's one global folder
+	if _, err := os.Stat(filepath.Join(config.BrainRoot(), ".brain", "live")); err == nil {
+		claudeSteps = append(claudeSteps, Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "memory",
+			Key: []string{"autoMemoryDirectory"}, Value: filepath.Join(config.LaptopHome, "brain", "memory")})
+	}
 	// The mod carries every brain hook. Claude Code refuses plugin files that resolve outside its marketplace folder,
 	// so the embedded files are written into the marketplace as ordinary managed files (no symlink).
 	if _, err := os.Stat(filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json")); err == nil {
