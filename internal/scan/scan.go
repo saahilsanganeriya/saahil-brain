@@ -7,13 +7,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"saahil.local/brain/internal/config"
@@ -23,8 +26,9 @@ const (
 	MaxDocBytes     = 2_500_000 // markdown/html read cap; the rest of a bigger file is not indexed
 	MaxShapeBytes   = 64 << 10  // data files: shape from this prefix
 	maxHashedData   = 16 << 20  // bigger data files are not hashed, so they never join a copy group
-	bulkDataEntries = 64        // a folder of more data files than this, and no docs, is bulk
+	bulkDataEntries = 64        // a subtree with no docs and more data files than this is bulk
 	bulkAnyEntries  = 2000
+	censusWorkers   = 8
 )
 
 // Root is a folder presented under Prefix in node paths ("" for the brain itself, "work" for saahil-docs).
@@ -64,7 +68,7 @@ type Entry struct {
 	Size   int64 // bytes; entries for Bulk
 	MTime  int64 // unix nanoseconds
 	Reason string
-	Shape  string // Bulk: what the folder holds
+	Shape  string // Bulk: subtree counts when the census read it; BulkShape adds the listing
 	Target string // Link: presented path when inside a root, else the canonical absolute path
 }
 
@@ -90,12 +94,14 @@ func isBulkName(name string) bool {
 
 // Walk emits every entry under roots in sorted order. emit runs on the caller's goroutine.
 func Walk(ctx context.Context, roots []Root, emit func(Entry) error) (Stats, error) {
-	w := &walker{ctx: ctx, roots: roots, emit: emit}
+	w := &walker{ctx: ctx, roots: roots, emit: emit, sem: make(chan struct{}, censusWorkers),
+		bulk: map[string]bulkDir{}, listings: map[string][]os.DirEntry{}}
 	for _, r := range roots {
 		list, err := os.ReadDir(r.Abs)
 		if err != nil {
 			continue
 		}
+		w.census(r.Abs, list)
 		if err := w.dir(r.Abs, r.Prefix, list); err != nil {
 			return w.stats, err
 		}
@@ -104,10 +110,14 @@ func Walk(ctx context.Context, roots []Root, emit func(Entry) error) (Stats, err
 }
 
 type walker struct {
-	ctx   context.Context
-	roots []Root
-	emit  func(Entry) error
-	stats Stats
+	ctx      context.Context
+	roots    []Root
+	emit     func(Entry) error
+	stats    Stats
+	sem      chan struct{}
+	mu       sync.Mutex
+	bulk     map[string]bulkDir       // by absolute path, from the census
+	listings map[string][]os.DirEntry // census reads of folders with docs below, reused by the walk
 }
 
 func (w *walker) dir(abs, presented string, list []os.DirEntry) error {
@@ -147,40 +157,145 @@ func (w *walker) dir(abs, presented string, list []os.DirEntry) error {
 }
 
 func (w *walker) child(name, abs, presented string) error {
-	if skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".data" && name != ".archive") {
+	if skippedDir(name) {
 		return nil
 	}
-	list, err := os.ReadDir(abs)
-	if err != nil {
-		return w.emit(Entry{Path: presented, Abs: abs, Kind: Skip, Reason: "unreadable-dir"})
-	}
-	if bulk, class := isBulk(name, list); bulk {
-		e := Entry{Path: presented, Abs: abs, Kind: Bulk, Class: class, Size: int64(len(list)), Shape: listingShape(list)}
+	if b, ok := w.bulk[abs]; ok {
+		e := Entry{Path: presented, Abs: abs, Kind: Bulk, Class: b.class, Size: int64(b.subtree.files)}
+		if b.subtree.files > 0 {
+			e.Shape = fmt.Sprintf("%d data files, %d files, %d folders below", b.subtree.data, b.subtree.files, b.subtree.dirs)
+		}
 		if fi, err := os.Lstat(abs); err == nil {
 			e.MTime = fi.ModTime().UnixNano()
 		}
 		return w.emit(e)
 	}
+	list, cached := w.listings[abs]
+	if !cached {
+		var err error
+		if list, err = os.ReadDir(abs); err != nil {
+			return w.emit(Entry{Path: presented, Abs: abs, Kind: Skip, Reason: "unreadable-dir"})
+		}
+	}
+	delete(w.listings, abs)
 	return w.dir(abs, presented, list)
 }
 
-func isBulk(name string, list []os.DirEntry) (bool, string) {
-	data, docs := 0, 0
-	for _, de := range list {
-		if de.Name() == ".git" {
-			return true, "repo"
-		}
-		switch classOf(de.Name()) {
-		case "md", "html":
-			docs++
-		case "data":
-			data++
-		}
-	}
-	return isBulkName(name) || (docs == 0 && (data > bulkDataEntries || len(list) > bulkAnyEntries)), "data"
+func skippedDir(name string) bool {
+	return skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".data" && name != ".archive")
 }
 
-// listingShape summarises a folder from its names alone, so a 400k-file cache costs one readdir.
+var repoMarkers = map[string]bool{".git": true, "go.mod": true, "package.json": true, "Cargo.toml": true,
+	"pyproject.toml": true, "setup.py": true}
+
+type tally struct{ docs, data, files, dirs int }
+
+type bulkDir struct {
+	class   string // data | repo
+	subtree tally  // zero for folders bulk by name, which are never read
+}
+
+// census counts every subtree once, before the walk, and marks the folders recorded as a single node: code
+// checkouts, folders bulk by name, and subtrees with no docs anywhere below but many data files (run outputs).
+// It reads folders on up to censusWorkers goroutines and keeps the listings of non-bulk folders for the walk.
+func (w *walker) census(abs string, list []os.DirEntry) tally {
+	var t tally
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	add := func(ct tally) {
+		mu.Lock()
+		t.docs, t.data, t.files, t.dirs = t.docs+ct.docs, t.data+ct.data, t.files+ct.files, t.dirs+ct.dirs
+		mu.Unlock()
+	}
+	for _, de := range list {
+		name := de.Name()
+		switch {
+		case de.Type()&os.ModeSymlink != 0:
+		case de.IsDir():
+			if skippedDir(name) {
+				continue
+			}
+			add(tally{dirs: 1})
+			child := filepath.Join(abs, name)
+			select {
+			case w.sem <- struct{}{}:
+				wg.Add(1)
+				go func() {
+					defer func() { <-w.sem; wg.Done() }()
+					add(w.censusDir(name, child))
+				}()
+			default:
+				add(w.censusDir(name, child))
+			}
+		default:
+			ct := tally{files: 1}
+			switch classOf(name) {
+			case "md", "html":
+				ct.docs = 1
+			case "data":
+				ct.data = 1
+			}
+			add(ct)
+		}
+	}
+	wg.Wait()
+	return t
+}
+
+func (w *walker) censusDir(name, abs string) tally {
+	if isBulkName(name) {
+		w.mark(abs, bulkDir{class: "data"})
+		return tally{}
+	}
+	sub, err := readDirUnsorted(abs)
+	if err != nil {
+		return tally{}
+	}
+	if slices.ContainsFunc(sub, func(de os.DirEntry) bool { return repoMarkers[de.Name()] }) {
+		w.mark(abs, bulkDir{class: "repo"})
+		return tally{}
+	}
+	ct := w.census(abs, sub)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	switch {
+	case ct.docs == 0 && (ct.data > bulkDataEntries || ct.files > bulkAnyEntries):
+		w.bulk[abs] = bulkDir{class: "data", subtree: ct}
+	case ct.docs > 0: // never inside a bulk subtree, so the walk will want it
+		slices.SortFunc(sub, func(a, b os.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
+		w.listings[abs] = sub
+	}
+	return ct
+}
+
+func (w *walker) mark(abs string, b bulkDir) {
+	w.mu.Lock()
+	w.bulk[abs] = b
+	w.mu.Unlock()
+}
+
+func readDirUnsorted(abs string) ([]os.DirEntry, error) {
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.ReadDir(-1)
+}
+
+// BulkShape describes a bulk folder from its names alone (one readdir, even for a 400k-file cache); the graph
+// calls it only when the folder changed.
+func BulkShape(e Entry) string {
+	list, err := readDirUnsorted(e.Abs)
+	if err != nil {
+		return e.Shape
+	}
+	if e.Shape != "" {
+		return e.Shape + "; here " + listingShape(list)
+	}
+	return listingShape(list)
+}
+
 func listingShape(list []os.DirEntry) string {
 	counts := map[string]int{}
 	for _, de := range list {

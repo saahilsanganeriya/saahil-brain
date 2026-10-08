@@ -13,34 +13,39 @@ import (
 
 // migrations are applied in order; the index of the last applied one is meta.schema_version. Append, never edit.
 var migrations = []string{
-	`CREATE TABLE node(
+	`CREATE TABLE IF NOT EXISTS node(
 		id TEXT PRIMARY KEY, kind TEXT NOT NULL, type TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
 		hubs TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT '', as_of TEXT NOT NULL DEFAULT '',
 		updated TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0, sha256 TEXT NOT NULL DEFAULT '',
 		mtime INTEGER NOT NULL DEFAULT 0, canonical_of TEXT NOT NULL DEFAULT '', pagerank REAL NOT NULL DEFAULT 0);
-	CREATE INDEX node_sha ON node(sha256) WHERE sha256 != '';
-	CREATE INDEX node_kind ON node(kind);
-	CREATE TABLE edge(src TEXT NOT NULL, dst TEXT NOT NULL, rel TEXT NOT NULL, why TEXT NOT NULL DEFAULT '',
+	CREATE INDEX IF NOT EXISTS node_sha ON node(sha256) WHERE sha256 != '';
+	CREATE INDEX IF NOT EXISTS node_kind ON node(kind);
+	CREATE TABLE IF NOT EXISTS edge(src TEXT NOT NULL, dst TEXT NOT NULL, rel TEXT NOT NULL, why TEXT NOT NULL DEFAULT '',
 		source TEXT NOT NULL);
-	CREATE UNIQUE INDEX edge_key ON edge(src, rel, dst, source);
-	CREATE INDEX edge_dst ON edge(dst, rel);
-	CREATE INDEX edge_source ON edge(source);
-	CREATE VIRTUAL TABLE fts USING fts5(id UNINDEXED, title, aliases, summary, body, tokenize='porter unicode61');
-	CREATE TABLE section(doc TEXT NOT NULL, idx INTEGER NOT NULL, heading TEXT NOT NULL, line_start INTEGER NOT NULL,
+	CREATE UNIQUE INDEX IF NOT EXISTS edge_key ON edge(src, rel, dst, source);
+	CREATE INDEX IF NOT EXISTS edge_dst ON edge(dst, rel);
+	CREATE INDEX IF NOT EXISTS edge_source ON edge(source);
+	` + FTSSchema + `;
+	CREATE TABLE IF NOT EXISTS section(doc TEXT NOT NULL, idx INTEGER NOT NULL, heading TEXT NOT NULL, line_start INTEGER NOT NULL,
 		line_end INTEGER NOT NULL, bytes INTEGER NOT NULL, summary TEXT NOT NULL DEFAULT '', PRIMARY KEY(doc, idx));
-	CREATE TABLE node_stats(id TEXT PRIMARY KEY, shown INTEGER NOT NULL DEFAULT 0, opened INTEGER NOT NULL DEFAULT 0,
+	CREATE TABLE IF NOT EXISTS node_stats(id TEXT PRIMARY KEY, shown INTEGER NOT NULL DEFAULT 0, opened INTEGER NOT NULL DEFAULT 0,
 		followed INTEGER NOT NULL DEFAULT 0, helpful INTEGER NOT NULL DEFAULT 0, harmful INTEGER NOT NULL DEFAULT 0,
 		owner_confirmed INTEGER NOT NULL DEFAULT 0, last_shown_at TEXT NOT NULL DEFAULT '',
 		last_helpful_at TEXT NOT NULL DEFAULT '');
-	CREATE TABLE lookups(time TEXT NOT NULL, session TEXT NOT NULL, hook TEXT NOT NULL, candidates TEXT NOT NULL,
+	CREATE TABLE IF NOT EXISTS lookups(time TEXT NOT NULL, session TEXT NOT NULL, hook TEXT NOT NULL, candidates TEXT NOT NULL,
 		chosen TEXT NOT NULL, abstained INTEGER NOT NULL, ms REAL NOT NULL);
-	CREATE TABLE llm_calls(key TEXT PRIMARY KEY, workflow TEXT NOT NULL, step TEXT NOT NULL, model TEXT NOT NULL,
+	CREATE TABLE IF NOT EXISTS llm_calls(key TEXT PRIMARY KEY, workflow TEXT NOT NULL, step TEXT NOT NULL, model TEXT NOT NULL,
 		cost_usd REAL NOT NULL DEFAULT 0, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
 		started TEXT NOT NULL DEFAULT '', ended TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '');`,
+	`CREATE INDEX IF NOT EXISTS node_path ON node(path);`,
 }
 
 var SchemaVersion = strconv.Itoa(len(migrations))
+
+// FTSSchema is also used by a full rebuild, which drops and recreates the table: deleting every row of an FTS5
+// table costs more than building it.
+const FTSSchema = `CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(id UNINDEXED, title, aliases, summary, body, tokenize='porter unicode61')`
 
 type Store struct{ DB *sql.DB }
 
@@ -92,6 +97,19 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// Compact rewrites the file when more than a quarter of it is free pages (after a full rebuild).
+func (s *Store) Compact() error {
+	var free, total int64
+	if err := s.DB.QueryRow(`SELECT (SELECT freelist_count FROM pragma_freelist_count), (SELECT page_count FROM pragma_page_count)`).Scan(&free, &total); err != nil {
+		return err
+	}
+	if free*4 <= total {
+		return nil
+	}
+	_, err := s.DB.Exec(`VACUUM`)
+	return err
 }
 
 // Meta returns the value for key, or "" when unset.

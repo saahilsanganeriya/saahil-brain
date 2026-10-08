@@ -347,13 +347,9 @@ func (d *Doc) applyFrontmatter(fm map[string]any) {
 var (
 	mdLinkRE   = regexp.MustCompile(`\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
 	wikiRE     = regexp.MustCompile(`\[\[([^\]|#\n]+)(?:[#|][^\]\n]*)?\]\]`)
-	absPathRE  = regexp.MustCompile("(?:/Users/test-user|/home/test-user)/[^\\s)\\]\"'`<>|,;*]+")
 	hrefRE     = regexp.MustCompile(`(?i)href="([^"#]+)`)
-	repoPRRE   = regexp.MustCompile(`\b([A-Za-z][\w-]*/[A-Za-z][\w.-]*)#(\d{1,6})\b`)
 	pullURLRE  = regexp.MustCompile(`github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)`)
-	barePRRE   = regexp.MustCompile(`(?i)\bPRs?[\s:]*#(\d{3,6})\b`)
 	ticketRE   = regexp.MustCompile(`\b(?:ABC|XYZ)-\d{1,5}\b`)
-	pathShaRE  = regexp.MustCompile(`\b([\w./-]+\.[A-Za-z0-9]+)@([0-9a-f]{7,40})\b`)
 	defaultPRs = "example-org/work-repo"
 )
 
@@ -372,8 +368,17 @@ func links(body string) []Link {
 	for _, m := range wikiRE.FindAllStringSubmatch(body, -1) {
 		add(Link{Target: strings.TrimSpace(m[1]), Wiki: true})
 	}
-	for _, m := range absPathRE.FindAllString(body, -1) {
-		add(Link{Target: strings.TrimRight(m, ".:")})
+	for _, home := range []string{"/Users/test-user/", "/home/test-user/"} {
+		for at := 0; ; {
+			i := strings.Index(body[at:], home)
+			if i < 0 {
+				break
+			}
+			i += at
+			j := i + strings.IndexAny(body[i:]+" ", " \t\r\n)]\"'`<>|,;*")
+			add(Link{Target: trimLineSuffix(strings.TrimRight(body[i:j], ".:"))})
+			at = j
+		}
 	}
 	return out
 }
@@ -388,25 +393,22 @@ func localTarget(t string) string {
 	if u, err := url.PathUnescape(t); err == nil {
 		t = u
 	}
-	return strings.Trim(t, "<>")
+	return trimLineSuffix(strings.Trim(t, "<>"))
 }
 
 func mentions(body string) []string {
 	set := map[string]bool{}
-	for _, m := range repoPRRE.FindAllStringSubmatch(body, -1) {
-		set["pr:"+m[1]+"#"+m[2]] = true
+	hashRefs(body, set)
+	shaRefs(body, set)
+	if strings.Contains(body, "/pull/") {
+		for _, m := range pullURLRE.FindAllStringSubmatch(body, -1) {
+			set["pr:"+m[1]+"#"+m[2]] = true
+		}
 	}
-	for _, m := range pullURLRE.FindAllStringSubmatch(body, -1) {
-		set["pr:"+m[1]+"#"+m[2]] = true
-	}
-	for _, m := range barePRRE.FindAllStringSubmatch(body, -1) {
-		set["pr:"+defaultPRs+"#"+m[1]] = true
-	}
-	for _, m := range ticketRE.FindAllString(body, -1) {
-		set["ticket:"+m] = true
-	}
-	for _, m := range pathShaRE.FindAllStringSubmatch(body, -1) {
-		set["code:"+m[1]+"@"+m[2]] = true
+	if strings.Contains(body, "ABC-") || strings.Contains(body, "XYZ-") {
+		for _, m := range ticketRE.FindAllString(body, -1) {
+			set["ticket:"+m] = true
+		}
 	}
 	out := make([]string, 0, len(set))
 	for k := range set {
@@ -415,6 +417,94 @@ func mentions(body string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// The scanners below find an anchor byte and expand around it: unanchored regexps that start with a character
+// class cost most of a full index run on multi-megabyte docs.
+
+func isWord(c byte) bool {
+	return c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+func isLetter(c byte) bool { return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
+
+// hashRefs finds owner/repo#123 and "PR #1234" (bare numbers go to the default repo).
+func hashRefs(body string, set map[string]bool) {
+	for i := strings.IndexByte(body, '#'); i >= 0; {
+		j := i + 1
+		for j < len(body) && isDigit(body[j]) {
+			j++
+		}
+		if n := j - i - 1; n > 0 && n <= 6 && (j == len(body) || !isWord(body[j])) {
+			num := body[i+1 : j]
+			k := i
+			for k > 0 && (isWord(body[k-1]) || strings.IndexByte("./-", body[k-1]) >= 0) {
+				k--
+			}
+			segs := strings.Split(body[k:i], "/")
+			if len(segs) >= 2 {
+				owner, repo := segs[len(segs)-2], segs[len(segs)-1]
+				if owner != "" && repo != "" && isLetter(owner[0]) && isLetter(repo[0]) && !strings.Contains(owner, ".") {
+					set["pr:"+owner+"/"+repo+"#"+num] = true
+				}
+			} else if n >= 3 && saysPR(body[:i]) {
+				set["pr:"+defaultPRs+"#"+num] = true
+			}
+		}
+		next := strings.IndexByte(body[i+1:], '#')
+		if next < 0 {
+			break
+		}
+		i += 1 + next
+	}
+}
+
+// saysPR: the text before '#' ends in "PR" or "PRs", then optional spaces or colons.
+func saysPR(before string) bool {
+	before = strings.TrimRight(before, " \t\r\n:")
+	for _, w := range []string{"PRs", "PR"} {
+		if len(before) >= len(w) && strings.EqualFold(before[len(before)-len(w):], w) {
+			start := len(before) - len(w)
+			return start == 0 || !isWord(before[start-1])
+		}
+	}
+	return false
+}
+
+// shaRefs finds path.ext@abcdef1 (7–40 lowercase hex).
+func shaRefs(body string, set map[string]bool) {
+	for at := 0; ; {
+		i := strings.IndexByte(body[at:], '@')
+		if i < 0 {
+			return
+		}
+		i += at
+		at = i + 1
+		j := i + 1
+		for j < len(body) && (isDigit(body[j]) || 'a' <= body[j] && body[j] <= 'f') {
+			j++
+		}
+		if n := j - i - 1; n < 7 || n > 40 || (j < len(body) && isWord(body[j])) {
+			continue
+		}
+		k := i
+		for k > 0 && (isWord(body[k-1]) || strings.IndexByte("./-", body[k-1]) >= 0) {
+			k--
+		}
+		p := body[k:i]
+		dot := strings.LastIndexByte(p, '.')
+		if dot < 0 || dot == len(p)-1 || strings.IndexFunc(p[dot+1:], func(r rune) bool { return r > 127 || !isWord(byte(r)) || r == '_' }) >= 0 {
+			continue
+		}
+		set["code:"+p+"@"+body[i+1:j]] = true
+	}
+}
+
+var lineSuffixRE = regexp.MustCompile(`:\d+(-\d+)?$`)
+
+// trimLineSuffix drops an editor-style line reference: graph.py:995 → graph.py.
+func trimLineSuffix(t string) string { return lineSuffixRE.ReplaceAllString(t, "") }
 
 // ---- html ----
 
@@ -425,11 +515,12 @@ var (
 	tagRE     = regexp.MustCompile(`(?s)<[^>]*>`)
 	spaceRE   = regexp.MustCompile(`\s+`)
 	htmlLimit = 64 << 10
+	htmlScan  = 256 << 10 // title, headings, links and text come from this prefix; the rest is markup or data
 )
 
 // HTML reads title, headings, local links and visible text (no line numbers: html has no sections).
 func HTML(data []byte) Doc {
-	src := string(data)
+	src := string(data[:min(len(data), htmlScan)])
 	var d Doc
 	if m := titleRE.FindStringSubmatch(src); m != nil {
 		d.Title = textOf(m[1])
@@ -446,7 +537,7 @@ func HTML(data []byte) Doc {
 			d.Links = append(d.Links, Link{Target: t})
 		}
 	}
-	text := textOf(scriptRE.ReplaceAllString(src[:min(len(src), 4*htmlLimit)], " "))
+	text := textOf(scriptRE.ReplaceAllString(src, " "))
 	d.Body = clip(text, htmlLimit)
 	d.Summary = clip(text, SummaryMax)
 	d.Mentions = mentions(d.Body)

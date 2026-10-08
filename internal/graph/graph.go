@@ -18,6 +18,7 @@ import (
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/parse"
 	"saahil.local/brain/internal/scan"
+	"saahil.local/brain/internal/store"
 )
 
 const ftsBodyMax = 32 << 10
@@ -27,6 +28,7 @@ const fileKinds = `('doc', 'artifact', 'link', 'skip')`
 
 type Stats struct {
 	Walked, Changed, Deleted, Ignored int
+	GraphChanged                      bool // a node, edge or mtime was written; false means derived data still holds
 	Took                              time.Duration
 }
 
@@ -45,6 +47,7 @@ type result struct {
 	sections  []parse.Section
 	fts       []ftsRow
 	touchOnly bool // same bytes, new mtime
+	known     bool // the path was indexed before, so its old rows must go
 }
 
 type prevFile struct {
@@ -71,8 +74,8 @@ func Update(ctx context.Context, db *sql.DB, roots []scan.Root, full bool) (Stat
 	}
 	defer tx.Rollback()
 	if full {
-		for _, t := range []string{"node", "edge", "section", "fts"} {
-			if _, err := tx.Exec(`DELETE FROM ` + t); err != nil {
+		for _, q := range []string{`DELETE FROM node`, `DELETE FROM edge`, `DELETE FROM section`, `DROP TABLE fts`, store.FTSSchema} {
+			if _, err := tx.Exec(q); err != nil {
 				return st, err
 			}
 		}
@@ -114,7 +117,10 @@ func Update(ctx context.Context, db *sql.DB, roots []scan.Root, full bool) (Stat
 		go func() {
 			defer wg.Done()
 			for e := range jobs {
-				results <- process(e, prev[e.Path], roots)
+				p, known := prev[e.Path]
+				r := process(e, p, roots)
+				r.known = known
+				results <- r
 			}
 		}()
 	}
@@ -144,8 +150,11 @@ func Update(ctx context.Context, db *sql.DB, roots []scan.Root, full bool) (Stat
 			st.Deleted++
 		}
 	}
-	if err := derive(tx); err != nil {
-		return st, err
+	st.GraphChanged = full || st.Changed > 0 || st.Deleted > 0
+	if st.GraphChanged {
+		if err := derive(tx); err != nil {
+			return st, err
+		}
 	}
 	st.Took = time.Since(start)
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES ('run.updated_at', ?)`,
@@ -186,7 +195,7 @@ func process(e scan.Entry, prev prevFile, roots []scan.Root) result {
 		n.kind, n.typ, n.summary = "skip", e.Reason, e.Reason
 		return result{node: n}
 	case scan.Bulk:
-		n.kind, n.typ, n.summary = "artifact", "bulk", e.Shape
+		n.kind, n.typ, n.summary = "artifact", "bulk", scan.BulkShape(e)
 		if e.Class == "repo" {
 			n.typ = "repo"
 		}
@@ -404,8 +413,10 @@ func (w *writer) write(r result) error {
 		_, err := w.touch.Exec(n.mtime, n.size, n.id)
 		return err
 	}
-	if err := w.clear(n.id, n.path); err != nil {
-		return err
+	if r.known {
+		if err := w.clear(n.id, n.path); err != nil {
+			return err
+		}
 	}
 	if err := w.upsert(n); err != nil {
 		return err
@@ -518,15 +529,18 @@ func deriveDirs(tx *sql.Tx) error {
 	return nil
 }
 
-// deriveCopies keeps one canonical node per content hash: the oldest file, then the smallest id.
+// deriveCopies keeps one canonical node per content hash: the oldest file, then the smallest id. Only rows whose
+// canonical changed are written.
 func deriveCopies(tx *sql.Tx) error {
 	for _, q := range []string{
-		`UPDATE node SET canonical_of = '' WHERE canonical_of != ''`,
-		`WITH g AS (SELECT id, first_value(id) OVER (PARTITION BY kind, sha256 ORDER BY mtime, id) AS canon
-			FROM node WHERE sha256 != '' AND size > 0 AND kind IN ('doc', 'artifact'))
-		 UPDATE node SET canonical_of = g.canon FROM g WHERE node.id = g.id AND g.canon != g.id`,
-		`DELETE FROM edge WHERE source = 'derived:copy'`,
-		`INSERT INTO edge(src, dst, rel, source) SELECT id, canonical_of, 'copy_of', 'derived:copy' FROM node WHERE canonical_of != ''`,
+		`WITH g AS (SELECT id, CASE WHEN first_value(id) OVER w = id THEN '' ELSE first_value(id) OVER w END AS canon
+			FROM node WHERE sha256 != '' AND size > 0 AND kind IN ('doc', 'artifact')
+			WINDOW w AS (PARTITION BY kind, sha256 ORDER BY mtime, id))
+		 UPDATE node SET canonical_of = g.canon FROM g WHERE node.id = g.id AND node.canonical_of != g.canon`,
+		`DELETE FROM edge WHERE source = 'derived:copy'
+			AND NOT EXISTS (SELECT 1 FROM node n WHERE n.id = edge.src AND n.canonical_of = edge.dst)`,
+		`INSERT OR IGNORE INTO edge(src, dst, rel, source)
+			SELECT id, canonical_of, 'copy_of', 'derived:copy' FROM node WHERE canonical_of != ''`,
 	} {
 		if _, err := tx.Exec(q); err != nil {
 			return err

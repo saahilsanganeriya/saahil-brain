@@ -37,3 +37,29 @@ func TestSchemaHasFTS5(t *testing.T) {
 		t.Fatalf("journal_mode = %q, want wal", mode)
 	}
 }
+
+// TestOpenAdoptsTablesOthersCreated catches a migration that fails with "table llm_calls already exists" when the
+// dream's cost ledger opened brain.db first (it happened on the devbox), and one that drops the ledger's rows.
+func TestOpenAdoptsTablesOthersCreated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "brain.db")
+	pre, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`DROP TABLE node`, `DELETE FROM meta`, `INSERT INTO llm_calls(key, workflow, step, model) VALUES ('k1', 'dream', 'file', 'm')`} {
+		if _, err := pre.DB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pre.Close()
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen over a foreign llm_calls: %v", err)
+	}
+	defer st.Close()
+	var n int
+	if err := st.DB.QueryRow(`SELECT (SELECT count(*) FROM llm_calls) + (SELECT count(*) FROM node)`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("ledger rows + nodes = %d (err %v), want 1", n, err)
+	}
+}
