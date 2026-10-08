@@ -313,6 +313,10 @@ func (a *applier) edit(id string, change func(*Note) error) (*Counter, bool, err
 }
 
 func (a *applier) commit(n Note, orig []byte) error {
+	// work/ stays empty until the cut-over renames saahil-docs into it; a delta only ever writes these two folders
+	if p := n.Path(); filepath.Clean(p) != p || strings.Count(p, "/") != 1 {
+		return fmt.Errorf("refusing path %q: a delta writes only notes/<id>.md and hubs/<id>.md", p)
+	}
 	if probs := problems(n, Render(n), a.resolve); len(probs) > 0 {
 		return errors.New(strings.Join(probs, "; "))
 	}

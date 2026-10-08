@@ -168,3 +168,37 @@ func TestApplyRejectsInvalidOpsOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestDeltaNeverWritesUnderWork catches a delta that reaches outside notes/ and hubs/ — above all into work/, which
+// must stay empty in the shadow phase so the cut-over can rename saahil-docs into it — while work/… evidence still
+// resolves through the read-only shadow root.
+func TestDeltaNeverWritesUnderWork(t *testing.T) {
+	root := newRoot(t)
+	shadow := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(shadow, "box"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shadow, "box", "CARD.md"), []byte("card\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := parse(t, `{"ops":[
+ {"op":"add_note","note":{"id":"finding-x/../../work/box/CARD","type":"finding","status":"current","summary":"s","scope":"work",
+  "hubs":["git"],"evidence":["work/box/CARD.md"],"body":"b"}},
+ {"op":"add_note","note":{"id":"card-box","type":"card","status":"current","summary":"s","scope":"work","hubs":["git"],"body":"b"}},
+ {"op":"add_note","note":{"id":"finding-box-state","type":"finding","status":"current","summary":"s","scope":"work",
+  "hubs":["git"],"evidence":["work/box/CARD.md#status"],"body":"b"}}
+]}`)
+	rep, err := Apply(context.Background(), root, d, Options{Now: time.Now(), WorkRoot: shadow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rejected) != 2 || len(rep.Files) != 1 || rep.Files[0].Path != "notes/finding-box-state.md" {
+		t.Fatalf("want the two escapes rejected and the work/ evidence note written: %+v", rep)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "work")); len(entries) != 0 {
+		t.Fatalf("work/ is not empty: %v", entries)
+	}
+}
