@@ -7,8 +7,8 @@ you search the web or guess, and before you redo work someone may have done.
 
 | Level | What | How |
 |---|---|---|
-| L0 loaded | `BRAIN.md`, `memory/MEMORY.md`, the start digest (hot.md, your work's STATE + CARD, hub start-here) | already in your context |
-| L1 nudged | ≤ 3 pointers on a prompt — or none | open one if it fits; ignore it if not |
+| L0 loaded | `BRAIN.md`, `memory/MEMORY.md`, hot.md; with your first prompt, your work's STATE + CARD and hub start-here | already in your context |
+| L1 nudged | ≤ 3 pointers on a prompt, never to your own work — or none | open one if it fits; ignore it if not |
 | L2 pulled | the tools below | when you need a fact you do not have |
 | L3 read | one file, one section by line range, one artifact | the smallest piece that answers |
 

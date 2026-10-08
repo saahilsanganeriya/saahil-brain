@@ -191,14 +191,6 @@ func (q promptRead) namedBoxes() []boxName {
 	return out
 }
 
-func boxesOf(names []boxName) []string {
-	out := make([]string, len(names))
-	for i, n := range names {
-		out[i] = n.box
-	}
-	return out
-}
-
 // pointers ranks for a read prompt. The gate passes when the prompt names something: a note by name, a path or a
 // work box.
 func pointers(db *sql.DB, q promptRead, seeds Seeds, nm *Names) (Lookup, error) {
@@ -250,7 +242,7 @@ func pointers(db *sql.DB, q promptRead, seeds Seeds, nm *Names) (Lookup, error) 
 	sort.SliceStable(cands, func(i, j int) bool {
 		return cands[i].score > cands[j].score || (cands[i].score == cands[j].score && cands[i].id < cands[j].id)
 	})
-	if cands, err = held(db, dedupe(cands), seeds, boxesOf(q.namedBoxes())); err != nil {
+	if cands, err = held(db, dedupe(cands), seeds, q.namedBoxes()); err != nil {
 		return lk, err
 	}
 	for i := 0; i < len(cands) && i < 10; i++ {
@@ -670,20 +662,21 @@ var loadedFiles = map[string]bool{"memory/MEMORY.md": true, "BRAIN.md": true, "h
 
 // held drops what the session already holds or should not see: its own work boxes (the digest carries them), the
 // files every session loads, and boxes whose CARD is paused or done unless the prompt names them.
-func held(db *sql.DB, cands []cand, seeds Seeds, named []string) ([]cand, error) {
-	var boxes []any
+func held(db *sql.DB, cands []cand, seeds Seeds, named []boxName) ([]cand, error) {
+	var cards []any
 	seen := map[string]bool{}
 	for _, c := range cands {
-		card := "work/" + rank.BoxOf(c.path) + "/CARD.md"
-		if rank.BoxOf(c.path) != "" && !seen[card] && (seeds.Hide == nil || !seeds.Hide(card)) {
-			seen[card] = true
-			boxes = append(boxes, card)
+		if b := rank.BoxOf(c.path); b != "" && !seen[b] {
+			seen[b] = true
+			if card := "work/" + b + "/CARD.md"; seeds.Hide == nil || !seeds.Hide(card) {
+				cards = append(cards, card)
+			}
 		}
 	}
 	idle := map[string]bool{}
-	if len(boxes) > 0 {
+	if len(cards) > 0 {
 		rows, err := db.Query(`SELECT path FROM node WHERE status IN ('paused', 'done') AND path IN (`+
-			strings.TrimSuffix(strings.Repeat("?,", len(boxes)), ",")+`)`, boxes...)
+			strings.TrimSuffix(strings.Repeat("?,", len(cards)), ",")+`)`, cards...)
 		if err != nil {
 			return nil, err
 		}
@@ -702,7 +695,8 @@ func held(db *sql.DB, cands []cand, seeds Seeds, named []string) ([]cand, error)
 	}
 	return slices.DeleteFunc(cands, func(c cand) bool {
 		b := rank.BoxOf(c.path)
-		return loadedFiles[c.path] || slices.Contains(seeds.Work, b) || (idle[b] && !slices.Contains(named, b))
+		return loadedFiles[c.path] || slices.Contains(seeds.Work, b) ||
+			(idle[b] && !slices.ContainsFunc(named, func(n boxName) bool { return n.box == b }))
 	}), nil
 }
 
