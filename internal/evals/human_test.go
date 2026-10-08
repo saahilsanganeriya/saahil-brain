@@ -226,7 +226,7 @@ func TestHumanEvalRereadsPromptsAndMergesTheOtherMachine(t *testing.T) {
 	ranker := &recordingRanker{}
 	env := NewEnv(ix, Sets{}, testNow)
 	env.Ranker = ranker
-	run, err := env.Human(set.Items, true)
+	run, err := env.Human(set, true)
 	if err != nil {
 		t.Fatal(err)
 	}

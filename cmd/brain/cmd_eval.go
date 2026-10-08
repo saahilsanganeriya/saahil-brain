@@ -152,7 +152,7 @@ func cmdEvalHuman(args []string) int {
 		return fail("--split: dev or test, not %q", *only)
 	}
 	return withIndex(func(ix *index.Index) int {
-		items, _, err := evals.LoadHuman(ix.Root, config.ThisMachine())
+		set, err := evals.LoadHuman(ix.Root, config.ThisMachine())
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -160,7 +160,7 @@ func cmdEvalHuman(args []string) int {
 		if *only != "" {
 			env.Only(*only)
 		}
-		run, err := env.Human(items, !*noWrite)
+		run, err := env.Human(set, !*noWrite)
 		if err != nil {
 			return fail("eval human: %v", err)
 		}

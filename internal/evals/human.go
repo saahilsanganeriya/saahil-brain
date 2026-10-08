@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/index"
@@ -27,9 +28,9 @@ import (
 	"saahil.local/brain/internal/session"
 )
 
-// The human set is the headline retrieval eval (DESIGN §9, owner fix D, 2026-10-08): prompts the owner typed, each
-// with the brain file that answered it. Each machine builds its own set from its own transcripts, since only that
-// machine can re-read the prompts, and the report merges both machines' rows.
+// The human set is the headline retrieval eval (DESIGN §9; asked for by the owner on 2026-10-08): prompts the owner
+// typed, each with the brain file that answered it. Each machine builds its own set from its own transcripts, since
+// only that machine can re-read the prompts, and the report merges both machines' rows.
 
 var DefaultHumanFrom = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 
@@ -266,13 +267,11 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	for n > 0 && !utf8Start(s[n]) {
+	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}
 	return s[:n] + "…"
 }
-
-func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
 
 // ---- candidates ----
 
@@ -621,20 +620,19 @@ func (b *builder) describe(p string) judgeCandidate {
 	return c
 }
 
-func LoadHuman(root string, m config.Machine) ([]HumanItem, HumanManifest, error) {
-	var items []HumanItem
-	var man HumanManifest
+func LoadHuman(root string, m config.Machine) (HumanSet, error) {
+	var set HumanSet
 	raw, err := os.ReadFile(humanManifestPath(root, m))
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, man, ErrNoHumanSet
+		return set, ErrNoHumanSet
 	}
 	if err != nil {
-		return nil, man, err
+		return set, err
 	}
-	if err := json.Unmarshal(raw, &man); err != nil {
-		return nil, man, err
+	if err := json.Unmarshal(raw, &set.Manifest); err != nil {
+		return set, err
 	}
-	return items, man, readLines(humanSetPath(root, m), &items)
+	return set, readLines(humanSetPath(root, m), &set.Items)
 }
 
 // ---- the eval ----
@@ -677,8 +675,9 @@ func humanSplit(it HumanItem) string { return SplitOf(slices.Min(it.Targets)) }
 
 // Human runs this machine's items, re-reading each prompt from its transcript, and merges the other machine's rows
 // from its latest report. With write, both reports land under ReportsDir: human-<machine> and the merged human.
-func (e *Env) Human(items []HumanItem, write bool) (HumanRun, error) {
+func (e *Env) Human(set HumanSet, write bool) (HumanRun, error) {
 	machine := config.ThisMachine()
+	items := set.Items
 	if e.only != "" {
 		items = slices.DeleteFunc(slices.Clone(items), func(it HumanItem) bool { return humanSplit(it) != e.only })
 	}
@@ -701,6 +700,7 @@ func (e *Env) Human(items []HumanItem, write bool) (HumanRun, error) {
 	}
 	all := append(slices.Clone(rows), other...)
 	run.Merged = e.humanReport("human", all, []string{note})
+	run.Own.SetsBuilt, run.Merged.SetsBuilt = set.Manifest.Built, set.Manifest.Built
 	run.Machines = map[string]int{string(machine): len(rows), string(machine.Other()): len(other)}
 	if write {
 		for _, r := range []Report{run.Own, run.Merged} {
@@ -713,17 +713,13 @@ func (e *Env) Human(items []HumanItem, write bool) (HumanRun, error) {
 }
 
 func (e *Env) humanRows(items []HumanItem) ([]HumanRow, error) {
-	prompts := map[string][]string{} // transcript → its owner prompts, read once
+	last := map[string]int{}
 	for _, it := range items {
-		if _, ok := prompts[it.Transcript]; !ok {
-			last := 0
-			for _, other := range items {
-				if other.Transcript == it.Transcript {
-					last = max(last, other.Turn)
-				}
-			}
-			prompts[it.Transcript] = ownerPrompts(it.Transcript, last+1)
-		}
+		last[it.Transcript] = max(last[it.Transcript], it.Turn)
+	}
+	prompts := map[string][]string{} // transcript → its owner prompts, read once
+	for tr, n := range last {
+		prompts[tr] = ownerPrompts(tr, n+1)
 	}
 	rows := make([]HumanRow, 0, len(items))
 	for _, it := range items {
