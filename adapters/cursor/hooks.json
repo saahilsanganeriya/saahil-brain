@@ -1,0 +1,4 @@
+[
+  { "event": "sessionStart", "command": "test \"$BRAIN_OFF\" = 1 || BRAIN_HOST=cursor /Users/test-user/.local/bin/brain hook start", "timeout": 5 },
+  { "event": "stop", "command": "BRAIN_HOST=cursor /Users/test-user/.local/bin/brain hook inbox", "timeout": 5 }
+]
