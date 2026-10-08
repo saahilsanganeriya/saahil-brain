@@ -3,11 +3,14 @@
 package parse
 
 import (
+	"fmt"
+	"gopkg.in/yaml.v3"
 	"html"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -192,7 +195,64 @@ func clip(s string, n int) string {
 
 // frontmatter reads `key: scalar`, `key: [a, {id: x, why: y}]`, block lists and one level of nested maps
 // (flattened as parent.child).
+// frontmatter reads YAML with yaml.v3 (flow lists may wrap over lines, e.g. related: [{id: …, why: '…'},\n  {…}]);
+// a block yaml.v3 rejects (hand-written legacy headers) falls back to the line reader.
 func frontmatter(lines []string) map[string]any {
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(strings.Join(lines, "\n")), &doc); err == nil && doc != nil {
+		out := map[string]any{}
+		for k, v := range doc {
+			flattenYAML(out, k, v)
+		}
+		return out
+	}
+	return frontmatterLines(lines)
+}
+
+// flattenYAML turns yaml.v3 values into the shapes the line reader produced: scalars as strings, lists as []any with
+// maps as map[string]string, nested maps as "parent.key".
+func flattenYAML(out map[string]any, key string, v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, x := range t {
+			flattenYAML(out, key+"."+k, x)
+		}
+	case []any:
+		items := make([]any, 0, len(t))
+		for _, x := range t {
+			if m, ok := x.(map[string]any); ok {
+				sm := map[string]string{}
+				for k, y := range m {
+					sm[k] = yamlScalar(y)
+				}
+				items = append(items, sm)
+			} else {
+				items = append(items, yamlScalar(x))
+			}
+		}
+		out[key] = items
+	default:
+		out[key] = yamlScalar(v)
+	}
+}
+
+func yamlScalar(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case time.Time:
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0 {
+			return t.Format("2006-01-02")
+		}
+		return t.Format(time.RFC3339Nano)
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+func frontmatterLines(lines []string) map[string]any {
 	out := map[string]any{}
 	parent := ""
 	for _, raw := range lines {
@@ -383,9 +443,12 @@ func links(body string) []Link {
 	return out
 }
 
-// localTarget drops external URLs and anchors-only links; "" means not a file link.
+// localTarget drops external URLs, anchors-only links and placeholders like (url); "" means not a file link.
 func localTarget(t string) string {
 	if strings.Contains(t, "://") || strings.HasPrefix(t, "mailto:") || strings.HasPrefix(t, "#") {
+		return ""
+	}
+	if !strings.ContainsAny(t, "/.") {
 		return ""
 	}
 	t, _, _ = strings.Cut(t, "#")

@@ -90,6 +90,11 @@ func dangling(db *sql.DB) (Status, string, error) {
 		if err := rows.Scan(&dst); err != nil {
 			return Fail, "", err
 		}
+		// an absolute path outside the brain is a mention of this machine's disk (a laptop folder, a build output),
+		// not a link the brain owns; the index counts those as external
+		if strings.HasPrefix(dst, "/") && !strings.HasPrefix(config.Canonical(dst), config.Canonical(config.BrainRoot())+"/") {
+			continue
+		}
 		if !l.Resolves(dst) {
 			n++
 		}

@@ -81,3 +81,22 @@ func TestShapeOfJSON(t *testing.T) {
 		t.Errorf("csv: %q", got)
 	}
 }
+
+// Catches the index losing a note's related edges (2 notes on the real brain): a related list that wraps over lines,
+// with quotes, commas and colons in its `why`, became one garbage edge.
+func TestFrontmatterWrappedFlowList(t *testing.T) {
+	src := "---\nid: finding-x\ntype: finding\nhubs: [git, ci-depot]\nrelated: [{id: finding-a, why: 'the 11b commits, on top: of 11c'},\n  {id: finding-b, why: \"it's the same, really\"}]\nas_of: 2026-10-04\n---\nbody\n"
+	d := Markdown([]byte(src))
+	var related []Rel
+	for _, r := range d.Authored {
+		if r.Rel == "related" {
+			related = append(related, r)
+		}
+	}
+	if len(related) != 2 || related[0].Dst != "finding-a" || related[1].Dst != "finding-b" || related[0].Why != "the 11b commits, on top: of 11c" {
+		t.Fatalf("related = %+v", related)
+	}
+	if len(d.Hubs) != 2 || d.AsOf != "2026-10-04" {
+		t.Fatalf("hubs %v as_of %q", d.Hubs, d.AsOf)
+	}
+}
