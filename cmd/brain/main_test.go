@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Catches a command that parses no flags running (and writing) when asked for --help.
@@ -33,5 +34,27 @@ func TestLintResolvesBrainRelativePaths(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if code := cmdLint([]string{"notes/idea-x.md"}); code == 2 {
 		t.Fatal("lint could not find a brain-relative path from another directory")
+	}
+}
+
+// Catches sync conflict copies left in the live tree (doctor's "0 unhandled conflicts" fails, agents read stale
+// copies): the newer file stays, the loser moves under .archive/conflicts/<machine>/ with the same relative path.
+func TestArchiveConflictsMovesLosersOnly(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("BRAIN_MACHINE", "devbox")
+	box := filepath.Join(root, "work", "box")
+	_ = os.MkdirAll(box, 0o755)
+	_ = os.WriteFile(filepath.Join(box, "a.md"), []byte("newer"), 0o644)
+	loser := "a.md (conflict_on_2026-10-08)"
+	_ = os.WriteFile(filepath.Join(box, loser), []byte("older"), 0o644)
+	n, err := archiveConflicts(root, time.Now())
+	if err != nil || n != 1 {
+		t.Fatalf("archived %d, %v", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(box, "a.md")); err != nil {
+		t.Fatal("the live file moved")
+	}
+	if b, err := os.ReadFile(filepath.Join(root, ".archive", "conflicts", "devbox", "work", "box", loser)); err != nil || string(b) != "older" {
+		t.Fatalf("loser not preserved: %v", err)
 	}
 }

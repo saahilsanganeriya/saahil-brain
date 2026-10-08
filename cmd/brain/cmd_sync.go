@@ -23,11 +23,12 @@ func init() {
 
 // Never synced: each machine's own index, bulk outputs and history (.archive: cut-over manifests of ~1 GB, rewrite
 // backups, dream before-copies), git history (devbox only), locks, temp files.
-// work/ stays out until the cut-over's sync step (C12) replaces this with bulk excludes: the devbox box tree is
-// 528 GB and must never stream to the laptop.
+// work/ carries what the old hourly rsync carried — text (md txt py sh js toml yml yaml and small extensionless files)
+// up to 2 MB — never the bulk: the boxes hold ~600 GB on the devbox and ~220 GB on the laptop.
 var syncIgnores = []string{
-	"Path work",
-	"Path .index", "Path .data", "Path .git", "Path .archive", "Path .brain/dream.lock",
+	"Name artifacts", "Name .sync-backups", "Name ctx", "Name target*", "Name *.egg-info",
+	`Regex work/.*\.[A-Za-z0-9]+`,
+	"Path .index", "Path .data", "Name .git", "Path .archive", "Path .brain/dream.lock",
 	"Path .brain/dream-state.json", "Name .consolidate-lock", "Name .DS_Store", "Name *.tmp", "Name .brain-tmp",
 	"Name *.db", "Name *.db-wal", "Name *.db-shm", "Name node_modules", "Name __pycache__", "Name .venv", "Name venv",
 }
@@ -41,6 +42,9 @@ type syncRecord struct {
 
 func syncRecordPath() string { return filepath.Join(config.StateDir(), "sync-last.json") }
 
+// workText un-ignores the text types inside work/ that the extension rule above ignores.
+var workText = `Regex work/.*\.(md|txt|py|sh|js|toml|yml|yaml)`
+
 func unisonArgs(root string) []string {
 	args := []string{root, "ssh://" + config.DevboxHost + "/" + root,
 		"-batch", "-auto", "-times", "-perms", "0", "-copyonconflict", "-prefer", "newer",
@@ -49,7 +53,7 @@ func unisonArgs(root string) []string {
 	for _, ig := range syncIgnores {
 		args = append(args, "-ignore", ig)
 	}
-	return args
+	return append(args, "-ignorenot", workText, "-maxsizethreshold", "2048")
 }
 
 func cmdSync(args []string) int {
@@ -57,8 +61,17 @@ func cmdSync(args []string) int {
 	dry := fs.Bool("dry-run", false, "list what would change, change nothing")
 	setup := fs.Bool("setup", false, "laptop: install unison (Homebrew) if missing")
 	enable := fs.Bool("enable", false, "laptop: load the hourly sync LaunchAgent")
+	archive := fs.Bool("archive-conflicts", false, "move sync conflict copies out of the live tree into .archive/conflicts/<machine>/ (newer stays live)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *archive {
+		n, err := archiveConflicts(config.BrainRoot(), time.Now())
+		if err != nil {
+			return fail("%v", err)
+		}
+		fmt.Printf("archived %d conflict copies into .archive/conflicts/%s/\n", n, config.ThisMachine())
+		return 0
 	}
 	if *setup || *enable {
 		if config.ThisMachine() != config.Laptop {
@@ -141,4 +154,47 @@ func cmdSyncStatus([]string) int {
 	}
 	fmt.Println(string(raw))
 	return 0
+}
+
+// archiveConflicts handles sync conflicts the way the brain handles every replaced version: the newer file stays live,
+// the losing copy moves into .archive/conflicts/<machine>/<same relative path>, and a log line records it.
+func archiveConflicts(root string, now time.Time) (int, error) {
+	dest := filepath.Join(root, ".archive", "conflicts", string(config.ThisMachine()))
+	var moves [][2]string
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && p != root && (d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive") {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {
+			rel, _ := filepath.Rel(root, p)
+			moves = append(moves, [2]string{p, filepath.Join(dest, rel)})
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	var log strings.Builder
+	for _, m := range moves {
+		if err := os.MkdirAll(filepath.Dir(m[1]), 0o755); err != nil {
+			return 0, err
+		}
+		if err := os.Rename(m[0], m[1]); err != nil {
+			return 0, err
+		}
+		rel, _ := filepath.Rel(root, m[0])
+		fmt.Fprintf(&log, "%s\t%s\n", now.UTC().Format(time.RFC3339), rel)
+	}
+	if len(moves) > 0 {
+		f, err := os.OpenFile(filepath.Join(dest, "log.tsv"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return len(moves), err
+		}
+		defer f.Close()
+		_, _ = f.WriteString(log.String())
+	}
+	return len(moves), nil
 }
