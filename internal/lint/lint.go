@@ -304,7 +304,7 @@ func (l *Linter) checkNote(rel string, data []byte, add addFn) {
 var (
 	docTypes    = map[string]bool{"spec": true, "plan": true, "report": true, "review": true, "experiment": true, "handoff": true, "readme": true}
 	docStatuses = map[string]bool{"live": true, "draft": true, "superseded": true, "done": true}
-	cardStatus  = map[string]bool{"live": true, "draft": true, "superseded": true, "done": true, "current": true, "proposed": true, "retired": true}
+	cardStatus  = map[string]bool{"live": true, "paused": true, "draft": true, "superseded": true, "done": true, "current": true, "proposed": true, "retired": true}
 )
 
 // Cap reports how a baseline or note breaks its size cap (DESIGN §4.6), or "" when it fits or has none.
