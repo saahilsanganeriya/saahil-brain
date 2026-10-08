@@ -21,6 +21,7 @@ import (
 type paid struct {
 	workflow, step, model, skill, input, schema string
 	spentUSD, capUSD                            float64
+	budgetUSD                                   float64 // per call; 0 → the model's step budget
 }
 
 // paidCall answers a key from the ledger for $0, or pays for one call when the cap and the daily guard allow it.
@@ -29,7 +30,10 @@ func (a *Activities) paidCall(ctx context.Context, p paid) (llm.Result, LLMStepR
 	if res, ok, err := a.Ledger.Done(key); err != nil || ok {
 		return res, LLMStepResult{Status: "ok", Reason: "cached", Cached: true}, err
 	}
-	budget := stepBudgetUSD[p.model]
+	budget := p.budgetUSD
+	if budget == 0 {
+		budget = stepBudgetUSD[p.model]
+	}
 	if p.spentUSD+budget > p.capUSD {
 		return llm.Result{}, LLMStepResult{Status: "skipped", StopLLM: true, Reason: fmt.Sprintf(
 			"cost cap: $%.2f spent + $%.2f step budget > $%.2f", p.spentUSD, budget, p.capUSD)}, nil
