@@ -20,7 +20,7 @@ inbox/          anything dropped for the dream to file
 .data/          bulk artifacts (hidden from Obsidian)
 .index/brain.db the SQLite index — per machine, never synced
 .archive/       superseded versions, byte copies, cut-over manifests
-.brain/         brain.toml, evals/, dream state, lock files
+.brain/         brain.toml, evals/, dream state, lock files, owner-questions.jsonl (rule pairs the dream could not settle), live
 .import/        shadow copies of old memory folders (Phase A)
 ```
 
