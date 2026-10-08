@@ -21,12 +21,13 @@ func init() {
 	register("sync status", "when the last sync ran and how it ended", cmdSyncStatus)
 }
 
-// Never synced: each machine's own index and bulk outputs, git history (devbox only), locks, temp files.
+// Never synced: each machine's own index, bulk outputs and history (.archive: cut-over manifests of ~1 GB, rewrite
+// backups, dream before-copies), git history (devbox only), locks, temp files.
 // work/ stays out until the cut-over's sync step (C12) replaces this with bulk excludes: the devbox box tree is
 // 528 GB and must never stream to the laptop.
 var syncIgnores = []string{
 	"Path work",
-	"Path .index", "Path .data", "Path .git", "Path .archive/snapshots", "Path .brain/dream.lock",
+	"Path .index", "Path .data", "Path .git", "Path .archive", "Path .brain/dream.lock",
 	"Path .brain/dream-state.json", "Name .consolidate-lock", "Name .DS_Store", "Name *.tmp", "Name .brain-tmp",
 	"Name *.db", "Name *.db-wal", "Name *.db-shm", "Name node_modules", "Name __pycache__", "Name .venv", "Name venv",
 }
