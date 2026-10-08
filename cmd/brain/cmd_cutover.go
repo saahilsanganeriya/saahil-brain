@@ -92,6 +92,9 @@ func createExclusive(path string, write func(io.Writer) error) error {
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("%s exists; manifests are evidence and are never overwritten", path)
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	partial := path + ".partial"
 	f, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
