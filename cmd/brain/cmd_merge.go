@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -40,7 +39,7 @@ func cmdDreamMerge(args []string) int {
 	fs.Float64Var(&o.capUSD, "cap", 2.0, "USD ceiling for the whole dry run")
 	fs.StringVar(&o.ledgerDir, "ledger", "", "keep the ledger and answers in this folder outside the brain (a rerun is then $0)")
 	fs.StringVar(&o.findAnswer, "find-answer", "", "replay this find answer (plan JSON or claude JSON output); no model call")
-	fs.StringVar(&o.bodiesAnswer, "bodies-answer", "", "replay this bodies answer, with --find-answer")
+	fs.StringVar(&o.bodiesAnswer, "bodies-answer", "", "replay this bodies answer too (else, with --find-answer, the bodies calls go to the model)")
 	fs.StringVar(&o.out, "out", "", "write the delta here (outside the brain)")
 	fs.StringVar(&o.today, "today", time.Now().UTC().Format("2006-01-02"), "the date on narrowing lines")
 	if err := fs.Parse(args); err != nil {
@@ -73,7 +72,7 @@ func dreamMergeDry(w io.Writer, root string, o mergeDryOptions) int {
 	defer ledger.Close()
 	var runner llm.Runner = llm.DefaultClaude()
 	if o.findAnswer != "" {
-		r, err := newReplayRunner(o.findAnswer, o.bodiesAnswer)
+		r, err := newReplayRunner(o.findAnswer, o.bodiesAnswer, runner)
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -182,12 +181,15 @@ func inside(path, root string) bool {
 	return abs == root || strings.HasPrefix(abs, root+string(filepath.Separator))
 }
 
-// replayRunner answers each stage from a recorded answer file, so tonight's manual sweep can be replayed through the
-// step's code with no model.
-type replayRunner struct{ find, bodies json.RawMessage }
+// replayRunner answers each stage from a recorded answer file (the 2026-10-08 sweep replays through the step's code
+// with no model); a stage with no recording goes to model, so a paid find answer is not paid for twice.
+type replayRunner struct {
+	find, bodies json.RawMessage
+	model        llm.Runner
+}
 
-func newReplayRunner(findPath, bodiesPath string) (*replayRunner, error) {
-	r := &replayRunner{}
+func newReplayRunner(findPath, bodiesPath string, model llm.Runner) (*replayRunner, error) {
+	r := &replayRunner{model: model}
 	var err error
 	if r.find, err = readAnswer(findPath); err != nil {
 		return nil, err
@@ -219,7 +221,7 @@ func readAnswer(path string) (json.RawMessage, error) {
 	return b, nil
 }
 
-func (r *replayRunner) Run(_ context.Context, c llm.Call) (llm.Result, error) {
+func (r *replayRunner) Run(ctx context.Context, c llm.Call) (llm.Result, error) {
 	var in struct{ Stage string }
 	_ = json.Unmarshal([]byte(c.Input), &in)
 	switch {
@@ -227,6 +229,9 @@ func (r *replayRunner) Run(_ context.Context, c llm.Call) (llm.Result, error) {
 		return llm.Result{JSON: r.find}, nil
 	case in.Stage == "bodies" && r.bodies != nil:
 		return llm.Result{JSON: r.bodies}, nil
+	case r.model != nil:
+		return r.model.Run(ctx, c)
 	}
-	return llm.Result{}, errors.New("no recorded answer for stage " + in.Stage)
+	// a model-side refusal, so the step lets that group wait instead of failing the run
+	return llm.Result{}, &llm.ModelError{Subtype: "no_recorded_answer", Message: "stage " + in.Stage}
 }
