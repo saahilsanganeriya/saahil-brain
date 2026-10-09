@@ -674,7 +674,7 @@ type HumanRun struct {
 func humanSplit(it HumanItem) string { return SplitOf(slices.Min(it.Targets)) }
 
 // Human runs this machine's items, re-reading each prompt from its transcript, and merges the other machine's rows
-// from its latest report. With write, both reports land under ReportsDir: human-<machine> and the merged human.
+// from its latest report. With write, human-<machine> lands under ReportsDir, and on the devbox the merged human too.
 func (e *Env) Human(set HumanSet, write bool) (HumanRun, error) {
 	machine := config.ThisMachine()
 	items := set.Items
@@ -703,7 +703,12 @@ func (e *Env) Human(set HumanSet, write bool) (HumanRun, error) {
 	run.Own.SetsBuilt, run.Merged.SetsBuilt = set.Manifest.Built, set.Manifest.Built
 	run.Machines = map[string]int{string(machine): len(rows), string(machine.Other()): len(other)}
 	if write {
-		for _, r := range []Report{run.Own, run.Merged} {
+		reports := []Report{run.Own}
+		// one writer for the merged view: both machines writing it gave the sync two copies to reconcile
+		if machine == config.Devbox {
+			reports = append(reports, run.Merged)
+		}
+		for _, r := range reports {
 			if _, err := r.Write(e.Index.Root); err != nil {
 				return run, err
 			}

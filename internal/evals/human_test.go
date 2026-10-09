@@ -252,6 +252,29 @@ func TestHumanEvalRereadsPromptsAndMergesTheOtherMachine(t *testing.T) {
 	}
 }
 
+// TestOnlyTheDevboxWritesTheMergedHumanReport catches the 2026-10-09 sync conflict: both machines wrote the merged
+// human.json, each from the other's last saved rows, so the sync kept two copies. The laptop writes its own rows only.
+func TestOnlyTheDevboxWritesTheMergedHumanReport(t *testing.T) {
+	ix, _ := humanFixture(t)
+	set, err := buildHuman(t, ix, fakeJudge(t, map[string][]string{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := NewEnv(ix, Sets{}, testNow)
+	env.Ranker = &recordingRanker{}
+	t.Setenv("BRAIN_MACHINE", "laptop") // the fixture builds on the devbox; this run is the laptop's
+	if _, err := env.Human(set, true); err != nil {
+		t.Fatal(err)
+	}
+	dir := ReportsDir(ix.Root, testNow)
+	if _, err := os.Stat(filepath.Join(dir, "human-laptop.json")); err != nil {
+		t.Errorf("the laptop's own rows were not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "human.json")); !os.IsNotExist(err) {
+		t.Errorf("the laptop wrote the merged human.json (err %v); only the devbox may", err)
+	}
+}
+
 // TestHumanSplitKeepsOneAnswerFileInOneHalf catches a split keyed by session or item, which puts prompts answered by
 // the same file in both halves: ranking tuned on DEV would then be judged on TEST prompts it was tuned for.
 func TestHumanSplitKeepsOneAnswerFileInOneHalf(t *testing.T) {
