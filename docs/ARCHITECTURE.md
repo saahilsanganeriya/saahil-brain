@@ -318,7 +318,7 @@ is kept as a conflict copy, never lost.
 |---|---|
 | tool | Unison over ssh, started by the laptop (LaunchAgent `com.saahil.brain-sync`: hourly and at load; `brain sync` by hand; the devbox asks through the bridge) |
 | options | `-batch -auto -times -prefer newer -copyonconflict -maxsizethreshold 2048` (files over 2 MB are skipped and listed) |
-| never synced | `.index`, `.data`, `.archive`, `.git`, `*.db*`, locks, `.DS_Store`, and folders named `artifacts`, `.sync-backups`, `ctx`, `target*`, `*.egg-info`, `node_modules`, `__pycache__`, `.venv`, `venv` |
+| never synced | `.index`, `.data`, `.archive`, `.git`, `*.db*`, locks, the dream's own state (`.brain/dream-state.json`, `.brain/dream-last-skip.json`), `.DS_Store`, and folders named `artifacts`, `.sync-backups`, `ctx`, `target*`, `*.egg-info`, `node_modules`, `__pycache__`, `.venv`, `venv` |
 | under `work/` | text only: `md txt py sh js toml yml yaml` and files with no extension |
 | conflicts | the loser stays as `<file> (conflict…)`; `brain sync --archive-conflicts` moves losers to `.archive/conflicts/<machine>/` |
 | half-copies | a Unison temp file (`.unison.*`) older than 2 h is an abandoned transfer; every sync archives it |
