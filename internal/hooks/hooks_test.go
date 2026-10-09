@@ -385,6 +385,32 @@ func TestLookupLogHasNoPromptText(t *testing.T) {
 	}
 }
 
+// TestPromptRowNamesWhereItsTimeWent catches a prompt row that logs only its total: the laptop's real prompts ran p95
+// 296 ms against a 150 ms budget (2026-10-09) and their rows could not say which part of the hook was slow.
+func TestPromptRowNamesWhereItsTimeWent(t *testing.T) {
+	f := newFixture(t, true, nil)
+	f.prompt(t, "s1", "what was the ocr recall on the image census")
+	var took float64
+	var raw string
+	if err := f.db.QueryRow(`SELECT ms, phases FROM lookups WHERE hook = 'prompt'`).Scan(&took, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var parts map[string]float64
+	if err := json.Unmarshal([]byte(raw), &parts); err != nil {
+		t.Fatalf("phases %q: %v", raw, err)
+	}
+	sum := 0.0
+	for _, part := range []string{"open", "names", "read", "digest", "pointers"} {
+		if parts[part] <= 0 {
+			t.Errorf("part %s is %v ms, want the time it took (phases %s)", part, parts[part], raw)
+		}
+		sum += parts[part]
+	}
+	if sum > took {
+		t.Errorf("parts add up to %v ms, more than the %v ms the row records", sum, took)
+	}
+}
+
 // Catches shadow mode leaking: before the cut-over neither start nor prompt may print anything, and node_stats
 // must not move, while each still logs its lookup.
 func TestShadowInjectsNothing(t *testing.T) {

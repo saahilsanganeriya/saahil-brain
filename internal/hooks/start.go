@@ -85,7 +85,7 @@ func Start(env Env, in Input) ([]byte, error) {
 	live := env.Live()
 	if ix != nil {
 		chosen := map[string]any{"chars": utf8.RuneCountInString(d.Text), "sources": nonNil(d.Sources)}
-		_ = logLookup(ix.DB(), env.Now(), in.session(), "start", nonNil(d.Sources), chosen, d.Text == "", env.Now().Sub(started))
+		_ = logLookup(ix.DB(), env.Now(), in.session(), "start", nonNil(d.Sources), chosen, d.Text == "", env.Now().Sub(started), "")
 	}
 	if !live || d.Text == "" {
 		return nil, nil

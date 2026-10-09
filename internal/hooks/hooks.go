@@ -57,7 +57,7 @@ type Env struct {
 	StateDir string // per-machine hook state: each session's work, hubs and what it was shown
 	Now      func() time.Time
 	Rebuild  func()             // starts RebuildNames in the background; nil rebuilds nothing
-	Mark     func(phase string) // when set (hook bench --cold), called as each part of a turn ends
+	Mark     func(phase string) // called as each part of a turn ends; Prompt and the bench time the parts with it
 }
 
 func DefaultEnv() Env {
@@ -208,11 +208,13 @@ func Output(event, text string) []byte {
 	return b
 }
 
-func logLookup(tx execer, now time.Time, session, hook string, candidates, chosen any, abstained bool, took time.Duration) error {
+func logLookup(tx execer, now time.Time, session, hook string, candidates, chosen any, abstained bool, took time.Duration,
+	phases string) error {
 	c, _ := json.Marshal(candidates)
 	ch, _ := json.Marshal(chosen)
-	_, err := tx.Exec(`INSERT INTO lookups(time, session, hook, candidates, chosen, abstained, ms) VALUES (?,?,?,?,?,?,?)`,
-		now.UTC().Format(time.RFC3339Nano), session, hook, string(c), string(ch), abstained, float64(took.Microseconds())/1000)
+	_, err := tx.Exec(`INSERT INTO lookups(time, session, hook, candidates, chosen, abstained, ms, phases)
+		VALUES (?,?,?,?,?,?,?,?)`, now.UTC().Format(time.RFC3339Nano), session, hook, string(c), string(ch), abstained,
+		float64(took.Microseconds())/1000, phases)
 	return err
 }
 

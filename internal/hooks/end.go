@@ -38,7 +38,7 @@ func End(env Env, in Input) error {
 			}
 		}
 	}
-	if err := logLookup(tx, env.Now(), session, "end", []string{"ignored"}, ignored, false, 0); err != nil {
+	if err := logLookup(tx, env.Now(), session, "end", []string{"ignored"}, ignored, false, 0, ""); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

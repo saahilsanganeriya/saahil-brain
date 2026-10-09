@@ -95,3 +95,42 @@ func TestSnapshotCountsTheLastDayFromEverySource(t *testing.T) {
 		t.Errorf("the next day's table must show the change since this snapshot:\n%s", Table(tomorrow, prev, ok))
 	}
 }
+
+// TestPromptPartsP95FromRowsThatTimedThem catches a breakdown the care agent would misread: rows written before the
+// hook timed its parts counted as 0 ms, which pulls every part's p95 down on a machine with few new prompts.
+func TestPromptPartsP95FromRowsThatTimedThem(t *testing.T) {
+	root := t.TempDir()
+	st, err := store.Open(filepath.Join(root, ".index", "brain.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	type promptRow struct {
+		ms     float64
+		phases string
+	}
+	rows := []promptRow{
+		{300, `{"open":20,"names":5,"read":10,"digest":0,"pointers":260,"stale_names":true}`},
+		{60, `{"open":10,"names":5,"read":10,"digest":0,"pointers":30}`},
+	}
+	for range 20 {
+		rows = append(rows, promptRow{90, ``})
+	}
+	for _, r := range rows {
+		if _, err := st.DB.Exec(`INSERT INTO lookups(time, session, hook, candidates, chosen, abstained, ms, phases)
+			VALUES ('2026-10-09T11:00:00Z', 's1', 'prompt', '[]', '[]', 1, ?, ?)`, r.ms, r.phases); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := Take(root, st.DB, "laptop", "test", time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Hooks.PromptPartsP95Ms; got["pointers"] != 260 || got["open"] != 20 || got["names"] != 5 {
+		t.Errorf("parts p95 %v, want the slow timed prompt's pointers 260, open 20, names 5", got)
+	}
+	if s.Hooks.PromptsTimed != 2 || s.Hooks.PromptsStaleNames != 1 {
+		t.Errorf("timed %d, stale names %d, want 2 timed prompts and 1 with a stale names cache", s.Hooks.PromptsTimed,
+			s.Hooks.PromptsStaleNames)
+	}
+}

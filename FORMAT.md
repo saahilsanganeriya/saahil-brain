@@ -87,7 +87,7 @@ SQLite via `modernc.org/sqlite` (no cgo), FTS5. Tables (owned by `internal/store
 title, summary, status, hubs, scope, as_of, updated, size, sha256, mtime, canonical_of)`, `edge(src, dst, rel, why,
 source)`, `fts(id, title, aliases, summary, body)`, `section(doc, idx, heading, line_start, line_end, bytes,
 summary)`, `node_stats(id, shown, opened, followed, helpful, harmful, owner_confirmed, last_shown_at,
-last_helpful_at, ignored, demoted_at)`, `lookups(time, session, hook, candidates, chosen, abstained, ms)` — never the
+last_helpful_at, ignored, demoted_at)`, `lookups(time, session, hook, candidates, chosen, abstained, ms, phases)` — never the
 prompt text, `llm_calls(key, workflow, step, model, cost_usd, tokens_in, tokens_out, started, ended, status)`
 (idempotency key unique), `meta(key, value)`.
 
@@ -97,6 +97,8 @@ grep) or brain show/sections. The learn step's judge writes `helpful` and `harmf
 The dream sets `demoted_at` on a node shown 10 times and never opened (an L1 ranking prior of −0.15, not a status
 change) and clears it when the node is opened. Lookup rows by hook: `start` and `prompt` (as above), `post`
 (`["opened"]` or `["followed"]`, the id), `pull` (`["brain_<verb>"]`, once per session), `end` (`["ignored"]`, the ids).
+A `prompt` row's `phases` says where its `ms` went: `open`, `names`, `read`, `digest` and `pointers` in ms, and
+`stale_names` when the names cache was older than the index (the hook started a rebuild). Other rows leave it empty.
 
 Never ranked: `status ∈ {superseded, retired}`, `canonical_of != ''` (byte copies), `type ∈ {session, day}`, paths
 under `log/` or `.archive/`.

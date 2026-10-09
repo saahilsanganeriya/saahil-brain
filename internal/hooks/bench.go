@@ -21,13 +21,45 @@ func Bench(env Env, prompts []string, cwd string) (took []time.Duration, abstain
 	return took, abstained, err
 }
 
-// Phases splits one prompt's span the way Prompt runs it.
+// Phases splits one prompt's span the way Prompt runs it; Prompt logs it in lookups.phases.
 type Phases struct {
 	Open, Names, Turn      time.Duration
 	Read, Digest, Pointers time.Duration // the turn's parts
+	StaleNames             bool          // the names cache was older than the index (or missing)
 }
 
 func (p Phases) Total() time.Duration { return p.Open + p.Names + p.Turn }
+
+// marker is an Env.Mark that stores each part of the turn as it ends, timed from start.
+func (p *Phases) marker(now func() time.Time, start time.Time) func(string) {
+	last := start
+	return func(phase string) {
+		t := now()
+		switch phase {
+		case "read":
+			p.Read = t.Sub(last)
+		case "digest":
+			p.Digest = t.Sub(last)
+		case "pointers":
+			p.Pointers = t.Sub(last)
+		}
+		last = t
+	}
+}
+
+// logged is the lookups.phases value: ms per part.
+func (p Phases) logged() string {
+	ms := func(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+	b, _ := json.Marshal(struct {
+		Open       float64 `json:"open"`
+		Names      float64 `json:"names"`
+		Read       float64 `json:"read"`
+		Digest     float64 `json:"digest"`
+		Pointers   float64 `json:"pointers"`
+		StaleNames bool    `json:"stale_names,omitempty"`
+	}{ms(p.Open), ms(p.Names), ms(p.Read), ms(p.Digest), ms(p.Pointers), p.StaleNames})
+	return string(b)
+}
 
 // BenchPhases is Bench with each prompt's span split into opening the index, loading the names cache and the turn.
 func BenchPhases(env Env, prompts []string, cwd string) (phases []Phases, abstained int, err error) {
@@ -38,23 +70,11 @@ func BenchPhases(env Env, prompts []string, cwd string) (phases []Phases, abstai
 			return phases, abstained, err
 		}
 		t1 := time.Now()
-		nm, _ := env.loadNames(ix.DB())
+		nm, stale := env.loadNames(ix.DB())
 		t2 := time.Now()
 		st := state{DigestOwed: true, CwdWork: folderWork(env, cwd)}
-		var ph Phases
-		last := t2
-		env.Mark = func(phase string) {
-			now := time.Now()
-			switch phase {
-			case "read":
-				ph.Read = now.Sub(last)
-			case "digest":
-				ph.Digest = now.Sub(last)
-			case "pointers":
-				ph.Pointers = now.Sub(last)
-			}
-			last = now
-		}
+		ph := Phases{StaleNames: stale}
+		env.Mark = ph.marker(time.Now, t2)
 		_, lk, err := env.turn(ix.DB(), nm, p, folderName(cwd), &st, false)
 		if err != nil {
 			ix.Close()

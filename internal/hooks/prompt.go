@@ -911,6 +911,7 @@ func Prompt(env Env, in Input) ([]byte, error) {
 		return nil, err
 	}
 	defer ix.Close()
+	opened := env.Now()
 	session := in.session()
 	st, ok := env.loadState(session)
 	withHot := false
@@ -922,13 +923,16 @@ func Prompt(env Env, in Input) ([]byte, error) {
 	if stale && env.Rebuild != nil {
 		env.Rebuild()
 	}
+	named := env.Now()
+	ph := Phases{Open: opened.Sub(started), Names: named.Sub(opened), StaleNames: stale}
+	env.Mark = ph.marker(env.Now, named)
 	owed := st.DigestOwed
 	d, lk, err := env.turn(ix.DB(), nm, in.Prompt, folderName(in.cwd()), &st, withHot)
 	if err != nil {
 		return nil, err
 	}
 	live := env.Live()
-	if err := record(ix.DB(), env, session, owed, d, lk, live, env.Now().Sub(started)); err != nil {
+	if err := record(ix.DB(), env, session, owed, d, lk, live, env.Now().Sub(started), ph); err != nil {
 		return nil, err
 	}
 	if len(lk.Chosen) > 0 {
@@ -993,7 +997,8 @@ func (e Env) turn(db *sql.DB, nm *Names, prompt, folder string, st *state, withH
 
 // record writes the lookup rows (the digest a first prompt owed, then the pointers) and, when live, bumps
 // node_stats.shown for what was injected.
-func record(db *sql.DB, env Env, session string, owed bool, d Digest, lk Lookup, live bool, took time.Duration) error {
+func record(db *sql.DB, env Env, session string, owed bool, d Digest, lk Lookup, live bool, took time.Duration,
+	ph Phases) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -1001,7 +1006,7 @@ func record(db *sql.DB, env Env, session string, owed bool, d Digest, lk Lookup,
 	defer tx.Rollback()
 	if owed {
 		digest := map[string]any{"chars": utf8.RuneCountInString(d.Text), "sources": nonNil(d.Sources)}
-		if err := logLookup(tx, env.Now(), session, "digest", nonNil(d.Sources), digest, d.Text == "", 0); err != nil {
+		if err := logLookup(tx, env.Now(), session, "digest", nonNil(d.Sources), digest, d.Text == "", 0, ""); err != nil {
 			return err
 		}
 	}
@@ -1009,7 +1014,8 @@ func record(db *sql.DB, env Env, session string, owed bool, d Digest, lk Lookup,
 	for _, p := range lk.Chosen {
 		chosen = append(chosen, p.ID)
 	}
-	if err := logLookup(tx, env.Now(), session, "prompt", nonNil(lk.Candidates), chosen, lk.Abstained, took); err != nil {
+	err = logLookup(tx, env.Now(), session, "prompt", nonNil(lk.Candidates), chosen, lk.Abstained, took, ph.logged())
+	if err != nil {
 		return err
 	}
 	if live {

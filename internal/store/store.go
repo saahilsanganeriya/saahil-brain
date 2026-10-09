@@ -44,6 +44,8 @@ var migrations = []string{
 	// usage feedback: pointers shown and never opened (hooks), and the dream's demotion of never-opened nodes
 	`ALTER TABLE node_stats ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;`,
 	`ALTER TABLE node_stats ADD COLUMN demoted_at TEXT NOT NULL DEFAULT '';`,
+	// where a real prompt's latency went (ms per part of the hook), so a machine over budget names its slow part
+	`ALTER TABLE lookups ADD COLUMN phases TEXT NOT NULL DEFAULT '';`,
 }
 
 var SchemaVersion = strconv.Itoa(len(migrations))

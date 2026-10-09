@@ -50,7 +50,7 @@ func Post(env Env, in Input) error {
 				return err
 			}
 		}
-		if err := logLookup(tx, env.Now(), session, "post", []string{use.field}, []string{id}, false, 0); err != nil {
+		if err := logLookup(tx, env.Now(), session, "post", []string{use.field}, []string{id}, false, 0, ""); err != nil {
 			return err
 		}
 	}
@@ -59,7 +59,7 @@ func Post(env Env, in Input) error {
 		if strings.HasPrefix(in.ToolName, "mcp__") {
 			channel = "mcp"
 		}
-		if err := logLookup(tx, env.Now(), session, "pull", []string{use.pull, channel}, []string{}, false, 0); err != nil {
+		if err := logLookup(tx, env.Now(), session, "pull", []string{use.pull, channel}, []string{}, false, 0, ""); err != nil {
 			return err
 		}
 	}

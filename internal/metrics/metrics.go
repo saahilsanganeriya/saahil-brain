@@ -53,7 +53,14 @@ type Hooks struct {
 	Shown        int     `json:"shown"`
 	Opened       int     `json:"opened"`
 	Ignored      int     `json:"ignored"`
+	// prompts whose row times the hook's parts (open, names, read, digest, pointers), and each part's p95 over them
+	PromptsTimed      int                `json:"prompts_timed"`
+	PromptsStaleNames int                `json:"prompts_stale_names"`
+	PromptPartsP95Ms  map[string]float64 `json:"prompt_parts_p95_ms,omitempty"`
 }
+
+// promptParts are the parts of the prompt hook that lookups.phases times, in the order they run.
+var promptParts = []string{"open", "names", "read", "digest", "pointers"}
 
 // Take reads the snapshot of the brain at root as of now.
 func Take(root string, db *sql.DB, machine, version string, now time.Time) (Snapshot, error) {
@@ -128,20 +135,21 @@ func (s *Snapshot) readLLM(db *sql.DB, from string) error {
 }
 
 func (s *Snapshot) readHooks(db *sql.DB, from string) error {
-	rows, err := db.Query(`SELECT session, hook, candidates, chosen, abstained, ms FROM lookups WHERE time >= ?`, from)
+	rows, err := db.Query(`SELECT session, hook, candidates, chosen, abstained, ms, phases FROM lookups WHERE time >= ?`, from)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	var ms []float64
+	parts := map[string][]float64{}
 	abstained := 0
 	sessions, pulled := map[string]bool{}, map[string]bool{}
 	shown, opened := map[string]bool{}, map[string]bool{}
 	for rows.Next() {
-		var session, hook, candJSON, chosenJSON string
+		var session, hook, candJSON, chosenJSON, phases string
 		var abst bool
 		var took float64
-		if err := rows.Scan(&session, &hook, &candJSON, &chosenJSON, &abst, &took); err != nil {
+		if err := rows.Scan(&session, &hook, &candJSON, &chosenJSON, &abst, &took, &phases); err != nil {
 			return err
 		}
 		var cands, chosen []string
@@ -150,6 +158,17 @@ func (s *Snapshot) readHooks(db *sql.DB, from string) error {
 		switch hook {
 		case "prompt":
 			ms = append(ms, took)
+			var timed map[string]any
+			if json.Unmarshal([]byte(phases), &timed) == nil && timed != nil {
+				s.Hooks.PromptsTimed++
+				if stale, _ := timed["stale_names"].(bool); stale {
+					s.Hooks.PromptsStaleNames++
+				}
+				for _, part := range promptParts {
+					v, _ := timed[part].(float64)
+					parts[part] = append(parts[part], v)
+				}
+			}
 			if abst {
 				abstained++
 			}
@@ -196,6 +215,13 @@ func (s *Snapshot) readHooks(db *sql.DB, from string) error {
 		s.Hooks.PromptP50Ms = quantile(ms, 0.50)
 		s.Hooks.PromptP95Ms = quantile(ms, 0.95)
 		s.Hooks.AbstainRate = float64(abstained) / float64(len(ms))
+	}
+	if s.Hooks.PromptsTimed > 0 {
+		s.Hooks.PromptPartsP95Ms = map[string]float64{}
+		for part, v := range parts {
+			sort.Float64s(v)
+			s.Hooks.PromptPartsP95Ms[part] = quantile(v, 0.95)
+		}
 	}
 	return nil
 }
@@ -312,6 +338,14 @@ func Table(cur, prev Snapshot, hasPrev bool) string {
 	row("model spend USD", cu, pu, "%.2f")
 	row("prompts seen by the hook", float64(cur.Hooks.Prompts), float64(prev.Hooks.Prompts), "%.0f")
 	row("prompt hook p95 ms", cur.Hooks.PromptP95Ms, prev.Hooks.PromptP95Ms, "%.0f")
+	if cur.Hooks.PromptsTimed > 0 {
+		row("prompts with their parts timed", float64(cur.Hooks.PromptsTimed), float64(prev.Hooks.PromptsTimed), "%.0f")
+		for _, part := range promptParts {
+			row("  p95 ms, "+part, cur.Hooks.PromptPartsP95Ms[part], prev.Hooks.PromptPartsP95Ms[part], "%.0f")
+		}
+		row("  names cache stale (rebuild started)", float64(cur.Hooks.PromptsStaleNames),
+			float64(prev.Hooks.PromptsStaleNames), "%.0f")
+	}
 	row("prompts with no pointer (abstain rate)", cur.Hooks.AbstainRate, prev.Hooks.AbstainRate, "%.2f")
 	row("sessions with prompts", float64(cur.Hooks.Sessions), float64(prev.Hooks.Sessions), "%.0f")
 	row("sessions pulling from the brain", float64(cur.Hooks.PullSessions), float64(prev.Hooks.PullSessions), "%.0f")
