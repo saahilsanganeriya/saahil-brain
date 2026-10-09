@@ -46,3 +46,32 @@ func TestUsageRatesCountSessionsAndPointersOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestUsageLabelSaysWhenPullsAndIgnoresBegan catches the label the laptop agent found over-promising on 2026-10-09:
+// "since <go-live>" while pull and end rows exist only from the usage logger's deployment hours later, so a session
+// that pulled before it was not counted. The label names that later start; opens are logged from go-live.
+func TestUsageLabelSaysWhenPullsAndIgnoresBegan(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "brain.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, r := range []struct{ at, session, hook, chosen string }{
+		{"2026-10-08T14:00:00Z", "s1", "prompt", `["a"]`},
+		{"2026-10-08T14:01:00Z", "s1", "post", `["a"]`},
+		{"2026-10-08T23:40:00Z", "s2", "prompt", `["c"]`},
+		{"2026-10-08T23:41:00Z", "s2", "pull", `[]`},
+	} {
+		if _, err := st.DB.Exec(`INSERT INTO lookups(time, session, hook, candidates, chosen, abstained, ms) VALUES (?,?,?,'[]',?,0,0)`,
+			r.at, r.session, r.hook, r.chosen); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, detail, err := usageRates(st.DB, time.Date(2026, 10, 8, 13, 43, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(detail, "pulls and ignores counted from 2026-10-08T23:41Z") {
+		t.Errorf("detail %q does not say when pull counting began", detail)
+	}
+}

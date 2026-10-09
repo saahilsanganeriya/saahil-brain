@@ -67,8 +67,16 @@ func usageRates(db *sql.DB, since time.Time) (Status, string, error) {
 	if sessions == 0 {
 		return Skip, "no prompts since " + since.UTC().Format("2006-01-02T15:04Z"), nil
 	}
-	return Info, fmt.Sprintf("since %s: pull rate %d of %d sessions (%s) · open rate %d of %d pointers shown (%s) · %d ignored",
-		since.UTC().Format("2006-01-02T15:04Z"), pulled, sessions, pct(pulled, sessions), used, shown, pct(used, shown), ignored), nil
+	detail := fmt.Sprintf("since %s: pull rate %d of %d sessions (%s) · open rate %d of %d pointers shown (%s) · %d ignored",
+		since.UTC().Format("2006-01-02T15:04Z"), pulled, sessions, pct(pulled, sessions), used, shown, pct(used, shown), ignored)
+	// pull and end rows began with a later build than the prompt and post rows: say from when they count
+	var first sql.NullString
+	if db.QueryRow(`SELECT min(time) FROM lookups WHERE hook IN ('pull', 'end')`).Scan(&first) == nil && first.Valid {
+		if t, err := time.Parse(time.RFC3339Nano, first.String); err == nil && t.After(since) {
+			detail += " (pulls and ignores counted from " + t.UTC().Format("2006-01-02T15:04Z") + ")"
+		}
+	}
+	return Info, detail, nil
 }
 
 func pct(n, of int) string {
