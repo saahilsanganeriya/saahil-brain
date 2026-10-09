@@ -10,7 +10,7 @@ import (
 )
 
 // TestOwnerIdentityKeepsTodaysValues catches a value the owner's identity.json sets being lost to a derived default
-// (a json tag misspelled, a key skipped): his machines would move to /Users/saahil, devbox-host and an
+// (a json tag misspelled, a key skipped): his machines would move to /Users/saahil, test-user-devbox and an
 // empty Orca environment.
 func TestOwnerIdentityKeepsTodaysValues(t *testing.T) {
 	identitytest.Owner(t)
@@ -24,7 +24,7 @@ func TestOwnerIdentityKeepsTodaysValues(t *testing.T) {
 		}
 	}
 	id := CurrentIdentity()
-	want := Identity{User: "saahilsanganeriya", LaptopHome: "/Users/test-user", DevboxHome: "/home/test-user",
+	want := Identity{User: "test-user", LaptopHome: "/Users/test-user", DevboxHome: "/home/test-user",
 		DevboxHost: "devbox-host", OrcaEnv: "00000000-0000-4000-8000-0000000000e1",
 		WorkRepo: "/Users/test-user/Documents/work-repo", WorkRepoOrca: "id:00000000-0000-4000-8000-0000000000a1",
 		BrainRepo: "/Users/test-user/Documents/saahil-brain", AWSSSOSession: "Example-Session",
@@ -36,7 +36,7 @@ func TestOwnerIdentityKeepsTodaysValues(t *testing.T) {
 	if LaptopHome() != want.LaptopHome || DevboxHome() != want.DevboxHome || DevboxHost() != want.DevboxHost {
 		t.Errorf("accessors = %s %s %s", LaptopHome(), DevboxHome(), DevboxHost())
 	}
-	if got := PersonalWords(); !slices.Equal(got, []string{"saahilsanganeriya", "saahil"}) {
+	if got := PersonalWords(); !slices.Equal(got, []string{"test", "user"}) {
 		t.Errorf("PersonalWords = %v", got)
 	}
 }

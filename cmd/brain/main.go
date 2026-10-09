@@ -68,7 +68,7 @@ func hasGroup(group string) bool {
 }
 
 func usage(group string) {
-	fmt.Println("brain — Saahil's brain: index, hooks, pointers, guards, MCP; and the two-machine agent mesh.")
+	fmt.Println("brain — a personal brain for coding agents: index, hooks, pointers, guards, MCP; and the two-machine agent mesh.")
 	fmt.Println()
 	paths := make([]string, 0, len(commands))
 	for path := range commands {

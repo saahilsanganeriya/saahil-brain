@@ -101,7 +101,7 @@ export default function saahilBrain(pi: any): void {
 	pi.registerTool({
 		name: "brain_search",
 		label: "Brain search",
-		description: "Search Saahil's brain (notes, hubs, work docs) and get ranked ids with one-line summaries.",
+		description: "Search the brain (notes, hubs, work docs) and get ranked ids with one-line summaries.",
 		parameters: Type.Object({ query: Type.String(), limit: Type.Optional(Type.Number()) }),
 		execute: async (_id: string, p: any) => text(await brain(["search", p.query, "--json", "--limit", String(p.limit ?? 8)])),
 	});

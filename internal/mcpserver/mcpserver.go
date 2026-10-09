@@ -59,7 +59,7 @@ func Server(root string) *mcp.Server {
 		}
 		return text(v), nil, nil
 	}
-	mcp.AddTool(s, &mcp.Tool{Name: "brain_search", Description: "Search Saahil's brain (notes, hubs, work docs) for ranked ids " +
+	mcp.AddTool(s, &mcp.Tool{Name: "brain_search", Description: "Search the brain (notes, hubs, work docs) for ranked ids " +
 		"with one-line summaries. Use it before re-deriving a decision or a lesson."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in SearchIn) (*mcp.CallToolResult, any, error) {
 			limit := in.Limit

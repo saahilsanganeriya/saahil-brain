@@ -16,7 +16,7 @@ const CONTEXT_EVENTS = ['SessionStart', 'SubagentStart', 'UserPromptSubmit', 'Po
 
 const TOOLS = {
   brain_search: {
-    description: "Search Saahil's brain (notes, hubs, work docs, sessions) and get ranked ids with one-line summaries. Use it before re-deriving a decision or a lesson.",
+    description: "Search the brain (notes, hubs, work docs, sessions) and get ranked ids with one-line summaries. Use it before re-deriving a decision or a lesson.",
     properties: { query: { type: 'string' }, limit: { type: 'number', description: 'default 8' } },
     required: ['query'],
     argv: input => ['search', input.query, '--json', '--limit', String(input.limit ?? 8)],
