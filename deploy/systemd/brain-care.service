@@ -1,0 +1,11 @@
+# brain-care: the daily brain maintenance agent (scripts/brain-care). Started by brain-care.timer.
+# Install: cp deploy/systemd/brain-care.* ~/.config/systemd/user/ && install -m 755 scripts/brain-care ~/.local/bin/ &&
+#          systemctl --user daemon-reload && systemctl --user enable --now brain-care.timer
+[Unit]
+Description=brain: start the daily brain-care agent (Orca session on saahil-brain)
+
+[Service]
+Type=oneshot
+Environment=PATH=/home/test-user/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/test-user/.local/bin/brain-care
+TimeoutStartSec=15min

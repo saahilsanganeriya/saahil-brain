@@ -18,7 +18,7 @@ import (
 func init() {
 	register("agents screen", "an agent's screen, and how many background agents it waits on: <name> [--lines N]", cmdAgentsScreen)
 	register("agents attach", "a Happier agent: open this terminal onto it (Ctrl-b d detaches): [name]", cmdAgentsAttach)
-	register("agents new", "start a fresh agent in its own Orca worktree: <name> [--base REF] [--dir D]", cmdAgentsNew)
+	register("agents new", "start a fresh agent in its own Orca worktree: <name> [--base REF] [--dir D] [--repo PATH]", cmdAgentsNew)
 	register("agents goal", "set an agent's /goal to a file's FULL text (≤ 4,000 chars), verified: <name> <file> [done]", cmdAgentsGoal)
 	register("agents resume", "resume a saved devbox conversation in Orca: <name> <session> [--force]", cmdAgentsResume)
 	register("agents move", "move a laptop session to the devbox (exit it first): <session> <name> [--force]", cmdAgentsMove)
@@ -149,12 +149,13 @@ func cmdAgentsNew(args []string) int {
 	fs := flag.NewFlagSet("agents new", flag.ContinueOnError)
 	base := fs.String("base", "origin/main", "commit to branch from")
 	dir := fs.String("dir", "", "start in this existing devbox worktree instead of a new one")
+	repo := fs.String("repo", "", "make the worktree in this repo checkout (default: work-repo)")
 	pos, err := parseInterleaved(fs, args)
 	if err != nil || len(pos) != 1 {
-		return fail("agents new <name> [--base REF] [--dir D]")
+		return fail("agents new <name> [--base REF] [--dir D] [--repo PATH]")
 	}
 	target, name := squadTarget(pos[0])
-	return runSquad("new", target, func(ctx context.Context, f *squad.Squad) error { return f.NewAgent(ctx, name, *base, *dir) })
+	return runSquad("new", target, func(ctx context.Context, f *squad.Squad) error { return f.NewAgent(ctx, name, *base, *dir, *repo) })
 }
 
 func cmdAgentsGoal(args []string) int {

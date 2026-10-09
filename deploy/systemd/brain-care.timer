@@ -1,0 +1,10 @@
+# Daily at 15:00 Pacific (systemd follows the zone's daylight saving); a run missed while the devbox was off starts at boot.
+[Unit]
+Description=brain: daily brain-care agent at 15:00 America/Los_Angeles
+
+[Timer]
+OnCalendar=*-*-* 15:00:00 America/Los_Angeles
+Persistent=true
+
+[Install]
+WantedBy=timers.target

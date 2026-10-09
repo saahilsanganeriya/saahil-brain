@@ -400,7 +400,9 @@ func (f *Squad) Attach(ctx context.Context, name string) error {
 }
 
 // NewAgent starts a fresh agent in its own Orca worktree at base, or in an existing folder.
-func (f *Squad) NewAgent(ctx context.Context, name, base, dir string) error {
+// NewAgent starts an agent in a fresh Orca worktree of repo (a checkout path; empty: the work-repo repo), or in
+// dir when given.
+func (f *Squad) NewAgent(ctx context.Context, name, base, dir, repo string) error {
 	if err := f.onlyDevbox("new"); err != nil {
 		return err
 	}
@@ -421,12 +423,16 @@ func (f *Squad) NewAgent(ctx context.Context, name, base, dir string) error {
 		}
 		// a fresh checkout of origin/main: a session loads the repo's rules from where it starts
 		fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		_, err := f.Host.Shell(fetchCtx, "git -C "+Quote(f.Repo)+" fetch -q origin main")
+		checkout, selector := f.Repo, OrcaRepo
+		if repo != "" {
+			checkout, selector = repo, "path:"+repo
+		}
+		_, err := f.Host.Shell(fetchCtx, "git -C "+Quote(checkout)+" fetch -q origin main")
 		cancel()
 		if err != nil {
 			return err
 		}
-		raw, err := f.Host.Orca(ctx, "worktree", "create", "--repo", OrcaRepo, "--name", name, "--no-parent", "--agent", "claude",
+		raw, err := f.Host.Orca(ctx, "worktree", "create", "--repo", selector, "--name", name, "--no-parent", "--agent", "claude",
 			"--base-branch", base)
 		if err != nil {
 			return err

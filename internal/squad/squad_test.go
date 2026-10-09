@@ -59,6 +59,11 @@ func (f *fakeOrca) run(ctx context.Context, name string, args ...string) ([]byte
 		t := Terminal{Handle: "term_new", TabID: "tab-new", WorktreePath: strings.TrimPrefix(flagValue(args, "--worktree"), "path:")}
 		f.terminals = append(f.terminals, t)
 		return reply(map[string]any{"terminal": t})
+	case "worktree create":
+		f.created = append(f.created, args)
+		t := Terminal{Handle: "term_wt", TabID: "tab-wt", WorktreePath: "/wt/" + flagValue(args, "--name")}
+		f.terminals = append(f.terminals, t)
+		return reply(map[string]any{"agentTerminalHandle": "term_wt", "worktree": map[string]any{"path": t.WorktreePath, "branch": "refs/heads/" + flagValue(args, "--name")}})
 	case "terminal wait":
 		return reply(map[string]any{"wait": map[string]any{"satisfied": false}})
 	case "terminal close":
@@ -291,6 +296,27 @@ func TestResumeTrustsTheFolderBeforeLaunch(t *testing.T) {
 	}
 	if !trusted(d, "/other") || d["numStartups"] != float64(5) {
 		t.Errorf("other settings lost: %v", d)
+	}
+}
+
+// Catches the daily brain-care agent landing in the wrong repo: `agents new --repo <path>` must fetch that repo and
+// ask Orca for a worktree of it, while a plain `agents new` keeps the work-repo repo.
+func TestNewAgentInTheNamedRepo(t *testing.T) {
+	origin, repo := filepath.Join(t.TempDir(), "origin.git"), filepath.Join(t.TempDir(), "saahil-brain")
+	git(t, "init", "-q", "--bare", "-b", "main", origin)
+	git(t, "clone", "-q", origin, repo)
+	git(t, "-C", repo, "commit", "-q", "--allow-empty", "-m", "first")
+	git(t, "-C", repo, "push", "-q", "origin", "HEAD:main")
+	for _, tc := range []struct{ repo, want string }{{repo, "path:" + repo}, {"", OrcaRepo}} {
+		orca := &fakeOrca{}
+		f, _ := testSquad(t, orca)
+		f.Repo = repo // the default repo must fetch too
+		if err := f.NewAgent(context.Background(), "brain-care", "origin/main", "", tc.repo); err != nil {
+			t.Fatal(err)
+		}
+		if len(orca.created) != 1 || flagValue(orca.created[0], "--repo") != tc.want {
+			t.Errorf("repo %q: orca calls %v, want --repo %s", tc.repo, orca.created, tc.want)
+		}
 	}
 }
 

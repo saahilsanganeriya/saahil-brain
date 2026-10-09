@@ -1,0 +1,20 @@
+#!/bin/bash
+# brain-care — start the daily brain maintenance agent on the devbox (systemd: brain-care.timer, 15:00 Pacific).
+# It is an Orca session in a fresh worktree of saahil-brain off main, driven by a /goal rendered from
+# templates/brain-care-goal.md; it checks both machines, fixes the brain's code, reports and stops itself.
+# A backstop stops it 2 h after the start whatever happens.
+set -euo pipefail
+repo=/Users/test-user/Documents/saahil-brain
+brain=/Users/test-user/.local/bin/brain
+run=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+name=brain-care-${run//-/}
+out=/Users/test-user/brain/work/brain-care/runs/$run
+mkdir -p "$out"
+
+git -C "$repo" pull --ff-only -q
+sed -e "s|{{NAME}}|$name|g" -e "s|{{DATE}}|$run|g" -e "s|{{RUN}}|$run|g" "$repo/templates/brain-care-goal.md" >"$out/GOAL.md"
+
+"$brain" agents new "$name" --repo "$repo" --base origin/main
+"$brain" agents goal "$name" "$out/GOAL.md"
+systemd-run --user --quiet --unit "brain-care-stop-$name" --on-active=2h "$brain" agents stop "$name" || true
+echo "started $name; goal $out/GOAL.md; backstop stop in 2 h"
