@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ type fakeOrca struct {
 	created   [][]string
 	closed    []string
 	onEnter   func()
+	roots     []string // when set, terminal create accepts only these folders, as Orca accepts only project roots
 }
 
 func (f *fakeOrca) run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -46,6 +48,9 @@ func (f *fakeOrca) run(ctx context.Context, name string, args ...string) ([]byte
 		}
 		return reply(map[string]any{"send": map[string]any{}})
 	case "terminal create":
+		if at := strings.TrimPrefix(flagValue(args, "--worktree"), "path:"); f.roots != nil && !slices.Contains(f.roots, at) {
+			return []byte(`{"ok":false,"error":{"message":"selector_not_found"}}`), nil
+		}
 		f.created = append(f.created, args)
 		t := Terminal{Handle: "term_new", TabID: "tab-new", WorktreePath: strings.TrimPrefix(flagValue(args, "--worktree"), "path:")}
 		f.terminals = append(f.terminals, t)
@@ -202,6 +207,42 @@ func TestResumeRefusesFreshTranscript(t *testing.T) {
 		}
 		if tc.started && (err != nil || !strings.Contains(flagValue(orca.created[0], "--command"), "--resume "+sid)) {
 			t.Fatalf("age %s force %v: err %v, create %v", tc.age, tc.force, err, orca.created)
+		}
+	}
+}
+
+// Catches the 2026-10-09 move failure: a session recorded in a subfolder of an Orca project (not its root) was refused
+// with "selector_not_found"; it must start at the nearest root above and cd back, so `claude --resume` finds its
+// transcript under the recorded folder. A folder with no root above it still fails, with Orca's reason.
+func TestResumeStartsInASubfolderOfAnOrcaRoot(t *testing.T) {
+	const sid = "0f0e0d0c-0000-4000-8000-000000000002"
+	root := filepath.Join(config.Home(), "brain")
+	for _, roots := range [][]string{{root}, {filepath.Join(config.Home(), "elsewhere")}} {
+		orca := &fakeOrca{roots: roots}
+		f, _ := testSquad(t, orca)
+		cwd := filepath.Join(root, "work", "box", "scratch")
+		path := filepath.Join(f.Projects, projectSlug(cwd), sid+".jsonl")
+		_ = os.MkdirAll(filepath.Dir(path), 0o700)
+		appendLine(t, path, `{"type":"user","cwd":"`+cwd+`"}`)
+		now := time.Now()
+		_ = os.Chtimes(path, now.Add(-time.Hour), now.Add(-time.Hour))
+		f.Now = func() time.Time { return now }
+
+		err := f.Resume(context.Background(), "moved", sid[:8], false)
+		if roots[0] != root {
+			if err == nil || !strings.Contains(err.Error(), "selector_not_found") {
+				t.Fatalf("no root above: err = %v, want Orca's selector_not_found", err)
+			}
+			continue
+		}
+		if err != nil || len(orca.created) != 1 {
+			t.Fatalf("err %v, created %v", err, orca.created)
+		}
+		if at := flagValue(orca.created[0], "--worktree"); at != "path:"+root {
+			t.Errorf("terminal at %s, want the root %s", at, root)
+		}
+		if cmd := flagValue(orca.created[0], "--command"); !strings.HasPrefix(cmd, "cd "+Quote(cwd)+" && ") || !strings.HasSuffix(cmd, "--resume "+sid) {
+			t.Errorf("command %q must cd into %s, then resume", cmd, cwd)
 		}
 	}
 }

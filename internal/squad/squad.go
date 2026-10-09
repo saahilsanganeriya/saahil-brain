@@ -216,6 +216,13 @@ func (f *Squad) start(ctx context.Context, name, folder, command string) (string
 		return "", fmt.Errorf("an agent named %s already runs in Orca (see: brain agents list)", name)
 	}
 	raw, err := f.Host.Orca(ctx, "terminal", "create", "--worktree", "path:"+folder, "--title", name, "--command", command)
+	// Orca opens terminals only at a project or worktree root: a folder below one starts at the nearest root and cds
+	// back, so `claude --resume` still finds its transcript under the recorded folder
+	for dir := folder; err != nil && strings.Contains(err.Error(), "selector_not_found") && filepath.Dir(dir) != dir; {
+		dir = filepath.Dir(dir)
+		raw, err = f.Host.Orca(ctx, "terminal", "create", "--worktree", "path:"+dir, "--title", name,
+			"--command", "cd "+Quote(folder)+" && "+command)
+	}
 	if err != nil {
 		return "", err
 	}

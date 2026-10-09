@@ -29,7 +29,6 @@ func init() {
 		"up":     "start the EC2 (~1–2 min) and sync laptop → devbox",
 		"down":   "sync devbox → laptop and stop the EC2 (refuses while agents run; --force)",
 		"status": "instance state, GitHub cert expiry, AWS SSO",
-		"resize": "change the EC2 instance size (the devbox script's resize)",
 		"sync":   "sync notes and memory both ways (text only, newer wins)",
 	} {
 		register("machine "+verb, summary, cmdMachineVerb(verb))

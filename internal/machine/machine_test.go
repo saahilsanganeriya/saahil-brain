@@ -15,7 +15,7 @@ import (
 // laptop each verb must exec ~/.local/bin/devbox with the arguments as typed (`down --force` must stay `--force`), and
 // on the devbox the verbs that drive the EC2 must refuse instead of acting on the machine they run on.
 func TestLaptopVerbsReachTheDevboxScriptUnchanged(t *testing.T) {
-	for _, argv := range [][]string{{"up"}, {"down"}, {"down", "--force"}, {"resize", "m7i.4xlarge"}, {"sync"}, {"status"}} {
+	for _, argv := range [][]string{{"up"}, {"down"}, {"down", "--force"}, {"sync"}, {"status"}} {
 		var gotPath string
 		var gotArgv []string
 		m := &Machine{Here: config.Laptop, Out: &bytes.Buffer{}, Exec: func(path string, args []string) error {
@@ -33,7 +33,7 @@ func TestLaptopVerbsReachTheDevboxScriptUnchanged(t *testing.T) {
 		}
 	}
 
-	for _, verb := range []string{"down", "resize", "sync"} {
+	for _, verb := range []string{"down", "sync"} {
 		m := &Machine{Here: config.Devbox, Out: &bytes.Buffer{}, Exec: func(string, []string) error {
 			t.Fatalf("%s on the devbox must not exec anything", verb)
 			return nil

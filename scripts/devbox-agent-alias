@@ -4,7 +4,7 @@ b="$(dirname "$0")/brain"; cmd=${1:-help}; shift $(( $# > 0 ))
 case $cmd in
   note) n=${1:-}; shift $(( $# > 0 )); [[ $n == *:* ]] || n=devbox:$n; exec "$b" agents note "$n" "$@" ;;
   list|screen|attach|new|goal|resume|move|stop|box) exec "$b" agents "$cmd" "$@" ;;
-  login|up|down|status|sync|resize) exec "$b" machine "$cmd" "$@" ;;
+  login|up|down|status|sync) exec "$b" machine "$cmd" "$@" ;;
   legacy) exec "$(dirname "$0")/devbox-agent.legacy" "$@" ;;
   *) exec "$b" agents ;;
 esac

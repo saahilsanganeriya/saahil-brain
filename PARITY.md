@@ -50,6 +50,5 @@ then a Happier (tmux) agent in `names.json`.
 | `down` | `brain machine down [--force]` — laptop: `exec devbox down …`; devbox: refused (it must sync to the laptop first) | refusal recorded on the devbox |
 | `status` | `brain machine status` — laptop: `exec devbox status`; devbox: host, uptime, load, GitHub cert expiry, AWS SSO expiry | recorded run on the devbox (cert valid 15 h, SSO valid 26 min) |
 | `sync` | `brain machine sync` — laptop: `exec devbox sync` (to be replaced by `brain sync`, Unison, in its own task); devbox: refused | build only |
-| — | `brain machine resize …` — laptop: `exec devbox resize …`; devbox: refused | build only |
 
 Every command was also checked by `make build` (linux/amd64 and darwin/arm64) and `go vet` for both targets.
