@@ -56,7 +56,8 @@ type Env struct {
 	WorkRoot string // where work/<box> lives before a cut-over fills <brain>/work (shadow_docs); "" = none
 	StateDir string // per-machine hook state: each session's work, hubs and what it was shown
 	Now      func() time.Time
-	Rebuild  func() // starts RebuildNames in the background; nil rebuilds nothing
+	Rebuild  func()             // starts RebuildNames in the background; nil rebuilds nothing
+	Mark     func(phase string) // when set (hook bench --cold), called as each part of a turn ends
 }
 
 func DefaultEnv() Env {

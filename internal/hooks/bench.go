@@ -23,7 +23,8 @@ func Bench(env Env, prompts []string, cwd string) (took []time.Duration, abstain
 
 // Phases splits one prompt's span the way Prompt runs it.
 type Phases struct {
-	Open, Names, Turn time.Duration
+	Open, Names, Turn      time.Duration
+	Read, Digest, Pointers time.Duration // the turn's parts
 }
 
 func (p Phases) Total() time.Duration { return p.Open + p.Names + p.Turn }
@@ -40,13 +41,28 @@ func BenchPhases(env Env, prompts []string, cwd string) (phases []Phases, abstai
 		nm, _ := env.loadNames(ix.DB())
 		t2 := time.Now()
 		st := state{DigestOwed: true, CwdWork: folderWork(env, cwd)}
+		var ph Phases
+		last := t2
+		env.Mark = func(phase string) {
+			now := time.Now()
+			switch phase {
+			case "read":
+				ph.Read = now.Sub(last)
+			case "digest":
+				ph.Digest = now.Sub(last)
+			case "pointers":
+				ph.Pointers = now.Sub(last)
+			}
+			last = now
+		}
 		_, lk, err := env.turn(ix.DB(), nm, p, folderName(cwd), &st, false)
 		if err != nil {
 			ix.Close()
 			return phases, abstained, err
 		}
 		ix.Close()
-		phases = append(phases, Phases{Open: t1.Sub(t0), Names: t2.Sub(t1), Turn: time.Since(t2)})
+		ph.Open, ph.Names, ph.Turn = t1.Sub(t0), t2.Sub(t1), time.Since(t2)
+		phases = append(phases, ph)
 		if lk.Abstained {
 			abstained++
 		}

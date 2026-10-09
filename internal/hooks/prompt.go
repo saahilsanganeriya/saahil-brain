@@ -955,6 +955,12 @@ func Prompt(env Env, in Input) ([]byte, error) {
 
 // turn is one prompt's work. A first prompt picks the session's work (the boxes it names, else the cwd's) and builds
 // the digest's work part in what start left of the L0 budget; every prompt then gets its pointers.
+func (e Env) mark(phase string) {
+	if e.Mark != nil {
+		e.Mark(phase)
+	}
+}
+
 func (e Env) turn(db *sql.DB, nm *Names, prompt, folder string, st *state, withHot bool) (Digest, Lookup, error) {
 	boxes := st.Work
 	if st.DigestOwed {
@@ -964,6 +970,7 @@ func (e Env) turn(db *sql.DB, nm *Names, prompt, folder string, st *state, withH
 	if err != nil {
 		return Digest{}, Lookup{}, err
 	}
+	e.mark("read")
 	var d Digest
 	var asOf time.Time
 	if st.DigestOwed {
@@ -975,10 +982,12 @@ func (e Env) turn(db *sql.DB, nm *Names, prompt, folder string, st *state, withH
 		d = composeDigest(e, header, withHot, pickWork(e, q.namedBoxes(), st.CwdWork, nil), config.DigestMaxChars-st.DigestChars, nil, e.oftenCache())
 		st.Work, st.Hubs, st.DigestOwed, st.CwdWork, st.DigestChars = d.Work, d.Hubs, false, nil, 0
 	}
+	e.mark("digest")
 	lk := Lookup{Abstained: true}
 	if nm != nil {
 		lk, err = pointers(db, q, Seeds{Work: st.Work, Hubs: st.Hubs, Folder: folder, AsOf: asOf}, nm)
 	}
+	e.mark("pointers")
 	return d, lk, err
 }
 

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"saahil.local/brain/internal/store"
+	"sort"
 	"syscall"
 	"time"
 
@@ -136,7 +137,12 @@ func benchCold(env hooks.Env, prompts []string) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	var open, names, turn, total, wall []time.Duration
+	var open, names, turn, read, digest, ptrs, total, wall []time.Duration
+	type slow struct {
+		prompt string
+		ph     hooks.Phases
+	}
+	var slowest []slow
 	for _, p := range prompts {
 		started := time.Now()
 		out, err := exec.Command(exe, "hook", "bench", "--one", p).Output()
@@ -149,7 +155,10 @@ func benchCold(env hooks.Env, prompts []string) int {
 			return fail("child output: %v", err)
 		}
 		open, names, turn, total = append(open, ph.Open), append(names, ph.Names), append(turn, ph.Turn), append(total, ph.Total())
+		read, digest, ptrs = append(read, ph.Read), append(digest, ph.Digest), append(ptrs, ph.Pointers)
+		slowest = append(slowest, slow{p, ph})
 	}
+	sort.Slice(slowest, func(i, j int) bool { return slowest[i].ph.Turn > slowest[j].ph.Turn })
 	row := func(name string, d []time.Duration) {
 		fmt.Printf("  %-34s p50 %6s  p95 %6s\n", name, hooks.Quantile(d, 0.5).Round(time.Millisecond), hooks.Quantile(d, 0.95).Round(time.Millisecond))
 	}
@@ -157,6 +166,9 @@ func benchCold(env hooks.Env, prompts []string) int {
 	row("open the index", open)
 	row("load the names cache", names)
 	row("turn (read prompt, digest, pointers)", turn)
+	row("  read the prompt", read)
+	row("  digest (first prompt)", digest)
+	row("  pointers", ptrs)
 	row("in-process total (what lookups.ms holds)", total)
 	row("whole process (exec to exit)", wall)
 	size := func(p string) string {
@@ -165,6 +177,10 @@ func benchCold(env hooks.Env, prompts []string) int {
 			return "missing"
 		}
 		return fmt.Sprintf("%.1f MB", float64(fi.Size())/1e6)
+	}
+	for _, s := range slowest[:min(3, len(slowest))] {
+		fmt.Printf("  slow: turn %s (read %s · digest %s · pointers %s): %.60q\n", s.ph.Turn.Round(time.Millisecond),
+			s.ph.Read.Round(time.Millisecond), s.ph.Digest.Round(time.Millisecond), s.ph.Pointers.Round(time.Millisecond), s.prompt)
 	}
 	db := store.Path(config.BrainRoot())
 	fmt.Printf("  files: index %s · wal %s · names cache %s · often cache %s\n", size(db), size(db+"-wal"),
