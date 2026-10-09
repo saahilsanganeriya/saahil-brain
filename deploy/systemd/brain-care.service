@@ -6,6 +6,6 @@ Description=brain: start the daily brain-care agent (Orca session on saahil-brai
 
 [Service]
 Type=oneshot
-Environment=PATH=/home/test-user/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/test-user/.local/bin/brain-care
+Environment=PATH=@DEVBOX_HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@DEVBOX_HOME@/.local/bin/brain-care
 TimeoutStartSec=15min

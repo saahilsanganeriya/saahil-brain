@@ -1,0 +1,17 @@
+{
+  "user": "<laptop login>",
+  "laptop_home": "/Users/<user>",
+  "devbox_home": "/home/<devbox user>",
+  "devbox_host": "<ssh alias of the devbox, e.g. <user>-devbox>",
+  "orca_env": "<Orca environment id of the devbox's orca serve, as the laptop app sees it>",
+  "work_repo": "/Users/<user>/Documents/work-repo",
+  "work_repo_orca": "path:/Users/<user>/Documents/work-repo",
+  "brain_repo": "/Users/<user>/Documents/saahil-brain",
+  "aws_sso_session": "Example-Session",
+  "github_cert": "/Users/<user>/.ssh/work_github-cert.pub",
+  "default_pr_repo": "example-org/work-repo",
+  "shadow_docs": [],
+  "devbox_instance_id": "<EC2 instance id of the devbox, i-...; setup-devbox.sh fills it from the instance metadata>",
+  "devbox_region": "<AWS region of the devbox, e.g. us-west-2; setup-devbox.sh fills it; optional>",
+  "devbox_aws_profile": "<AWS CLI profile on the laptop that may start and stop the devbox; optional>"
+}

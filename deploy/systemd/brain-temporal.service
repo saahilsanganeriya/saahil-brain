@@ -6,8 +6,8 @@
 Description=brain: local Temporal dev server (127.0.0.1:7233, UI :8233, namespace brain)
 
 [Service]
-ExecStartPre=/usr/bin/mkdir -p /home/test-user/.local/state/brain
-ExecStart=/home/test-user/.local/bin/temporal server start-dev --ip 127.0.0.1 --port 7233 --ui-port 8233 --db-filename /home/test-user/.local/state/brain/temporal.db --namespace brain --log-level warn
+ExecStartPre=/usr/bin/mkdir -p @DEVBOX_HOME@/.local/state/brain
+ExecStart=@DEVBOX_HOME@/.local/bin/temporal server start-dev --ip 127.0.0.1 --port 7233 --ui-port 8233 --db-filename @DEVBOX_HOME@/.local/state/brain/temporal.db --namespace brain --log-level warn
 Restart=on-failure
 RestartSec=5
 MemoryMax=2G
