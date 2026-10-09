@@ -10,11 +10,11 @@ import (
 func TestCanonicalPath(t *testing.T) {
 	identitytest.Owner(t)
 	cases := map[string]string{
-		"/home/test-user/brain/notes/x.md":             "/Users/test-user/brain/notes/x.md",
+		"/home/test-user/brain/notes/x.md":  "/Users/test-user/brain/notes/x.md",
 		"/Users/test-user/brain/notes/x.md": "/Users/test-user/brain/notes/x.md",
-		"/home/test-user":         "/Users/test-user",
-		"/home/test-userx/y":      "/home/test-userx/y",
-		"/home/test-user/a/../b/": "/Users/test-user/b",
+		"/home/test-user":                   "/Users/test-user",
+		"/home/test-userx/y":                "/home/test-userx/y",
+		"/home/test-user/a/../b/":           "/Users/test-user/b",
 	}
 	for in, want := range cases {
 		if got := Canonical(in); got != want {
@@ -41,7 +41,7 @@ func TestSyncCarries(t *testing.T) {
 func TestLegacyDocsPath(t *testing.T) {
 	for abs, want := range map[string]string{
 		"/Users/test-user/Documents/work-repo/saahil-docs/box/plans/SPEC.md":                                "work/box/plans/SPEC.md",
-		"/home/test-user/Documents/worktrees/work-repo/image-unified/saahil-docs/box/recon/x.md":                   "work/box/recon/x.md",
+		"/home/test-user/Documents/worktrees/work-repo/image-unified/saahil-docs/box/recon/x.md":        "work/box/recon/x.md",
 		"/Users/test-user/Documents/team-monorepo/apps/server/work-repo/saahil-docs/appliance/a.md":                "work/team-monorepo-saahil-docs-2026-08/appliance/a.md",
 		"/Users/test-user/Documents/anonymization/saahil-docs/ir/x.md":                                             "",
 		"/Users/test-user/Documents/worktrees/work-repo/astral-knoll/work-repo/saahil-docs/engine/p.md": "work/engine/p.md",
