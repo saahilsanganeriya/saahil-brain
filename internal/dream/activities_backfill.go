@@ -22,6 +22,7 @@ type paid struct {
 	workflow, step, model, skill, input, schema string
 	spentUSD, capUSD                            float64
 	budgetUSD                                   float64 // per call; 0 → the model's step budget
+	runCap                                      bool    // askTwice: spentUSD is the dream run's spend, not the ledger total
 }
 
 // paidCall answers a key from the ledger for $0, or pays for one call when the cap and the daily guard allow it.
@@ -133,6 +134,10 @@ type BoxInput struct {
 	Box       backfill.Box
 	Live      bool
 	BudgetUSD float64
+	// Dream is the dream's curate.cards: the call is keyed to the dream and paid under its run cap (RunSpentUSD is the
+	// run's spend so far, BudgetUSD the cap), and the CARD comes back as an edit for ApplyEdits instead of being written.
+	Dream       bool
+	RunSpentUSD float64
 }
 
 type BoxStepResult struct {
@@ -157,16 +162,40 @@ func (a *Activities) BackfillCard(ctx context.Context, in BoxInput) (BoxStepResu
 	var out BoxStepResult
 	p := paid{workflow: "backfill", step: "card/" + in.Box.Name, model: config.ModelBulk, skill: string(skill),
 		schema: backfill.AnswerSchema, capUSD: in.BudgetUSD}
+	if in.Dream {
+		p.workflow, p.step, p.spentUSD, p.runCap = "dream", cardsStepName+"/"+in.Box.Name, in.RunSpentUSD, true
+	}
+	var edits []Edit
 	out.LLMStepResult, err = a.askTwice(ctx, payload, p, func(raw []byte) (string, error) {
 		content, status, verr := backfill.RenderCard(raw, in.Box, hubIDs)
 		if verr != nil {
 			return verr.Error(), nil
 		}
 		out.CardStatus = status
+		if in.Dream {
+			out.Card = filepath.Join("work", in.Box.Name, "CARD.md")
+			edits, err = a.cardEdit(out.Card, content)
+			return "", err
+		}
 		out.Card, err = a.writeCard(in, content)
 		return "", err
 	})
+	out.Edits = edits
 	return out, err
+}
+
+// cardEdit returns a refreshed CARD as an edit; an answer equal to the CARD on disk only touches it, so the box is not
+// stale again until its work changes (else every dream would pick it and get the same answer).
+func (a *Activities) cardEdit(rel, content string) ([]Edit, error) {
+	abs, err := a.writablePath(rel)
+	if err != nil {
+		return nil, err
+	}
+	if old, err := os.ReadFile(abs); err == nil && string(old) == content {
+		now := time.Now()
+		return nil, os.Chtimes(abs, now, now)
+	}
+	return []Edit{{Path: rel, Action: "write", Content: content, Why: cardsStepName}}, nil
 }
 
 // writeCard stages the CARD in shadow or writes it into the box once live; a CARD it replaces is kept in .archive/.
@@ -283,15 +312,19 @@ func (a *Activities) BackfillCampaign(ctx context.Context, in BoxInput) (BoxStep
 	return out, err
 }
 
-// askTwice pays for an answer (under the backfill's ledger total) and lets accept judge it; a refused answer is asked
-// again once with the reason in the input, which makes it a new key.
+// askTwice pays for an answer (under the backfill's ledger total, or the dream run's spend with runCap) and lets
+// accept judge it; a refused answer is asked again once with the reason in the input, which makes it a new key.
 func (a *Activities) askTwice(ctx context.Context, payload map[string]any, p paid, accept func([]byte) (string, error)) (LLMStepResult, error) {
 	var out LLMStepResult
+	runSpent := p.spentUSD
 	for attempt := 0; attempt < 2; attempt++ {
 		input, _ := json.Marshal(payload)
-		spent, err := a.workflowSpent(p.workflow)
-		if err != nil {
-			return out, err
+		spent := runSpent + out.CostUSD
+		if !p.runCap {
+			var err error
+			if spent, err = a.workflowSpent(p.workflow); err != nil {
+				return out, err
+			}
 		}
 		p.input, p.spentUSD = string(input), spent
 		res, step, err := a.paidCall(ctx, p)

@@ -175,6 +175,10 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 	if workflow.GetVersion(ctx, "curate-merge", workflow.DefaultVersion, 1) == 1 {
 		r.merge(start)
 	}
+	// histories recorded before curate.cards replay without it
+	if workflow.GetVersion(ctx, "curate-cards", workflow.DefaultVersion, 1) == 1 {
+		r.cards()
+	}
 	r.llm(summariseStep, r.gate.BigDocs)
 	r.brain("render", []string{"render"})
 	r.check()

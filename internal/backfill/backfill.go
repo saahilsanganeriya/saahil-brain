@@ -38,6 +38,9 @@ type Box struct {
 	Abs    string    `json:"abs"`
 	Newest time.Time `json:"newest"`
 	Files  int       `json:"files"`
+	// the newest regular file outside bulk folders: the work a CARD must be newer than
+	NewestFile     string    `json:"newest_file,omitempty"`
+	NewestFileTime time.Time `json:"newest_file_time,omitzero"`
 }
 
 // Live is true once the cut-over has moved saahil-docs into <brain>/work.
@@ -77,10 +80,13 @@ func Enumerate(workRoot string, only []string) ([]Box, error) {
 			continue
 		}
 		b := Box{Name: de.Name(), Abs: filepath.Join(workRoot, de.Name())}
-		walkBox(b.Abs, func(_ string, fi fs.FileInfo) {
+		walkBox(b.Abs, func(rel string, fi fs.FileInfo) {
 			b.Files++
 			if fi.ModTime().After(b.Newest) {
 				b.Newest = fi.ModTime().UTC()
+			}
+			if !strings.HasSuffix(rel, "/") && fi.ModTime().After(b.NewestFileTime) {
+				b.NewestFile, b.NewestFileTime = rel, fi.ModTime().UTC()
 			}
 		})
 		out = append(out, b)
@@ -435,6 +441,32 @@ func Plan(root, shadow string, only []string, now time.Time, includePaused bool)
 			}
 		}
 		out = append(out, p)
+	}
+	return live, out, nil
+}
+
+// CardAge is a box with its CARD's mtime (zero: no CARD) and status, for the dream's curate.cards.
+type CardAge struct {
+	Box    Box       `json:"box"`
+	Card   time.Time `json:"card,omitzero"`
+	Status string    `json:"status,omitempty"`
+}
+
+// CardAges lists every box with its CARD as Plan sees it (staged in shadow, in the box once live).
+func CardAges(root, shadow string) (bool, []CardAge, error) {
+	live := Live(root)
+	boxes, err := Enumerate(WorkRoot(root, shadow, live), nil)
+	if err != nil {
+		return live, nil, err
+	}
+	out := make([]CardAge, len(boxes))
+	for i, b := range boxes {
+		out[i].Box = b
+		path := CardPath(root, b.Name, live)
+		if fi, err := os.Stat(path); err == nil {
+			card, _ := readCapped(path, config.CardMaxBytes)
+			out[i].Card, out[i].Status = fi.ModTime().UTC(), parse.Markdown(card).Status
+		}
 	}
 	return live, out, nil
 }
