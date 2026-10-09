@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -500,7 +501,8 @@ type BrainCommandInput struct {
 }
 
 // BrainCommand runs a brain CLI step if this build has it; a missing command is a recorded skip, not a failure,
-// because the index, lint and capture commands land from other areas. Output is not kept (it may quote content).
+// because the index, lint and capture commands land from other areas. Output stays out of the step record, which
+// reaches dream status and notifications (it may quote content); a failure's last line goes to the worker log.
 func (a *Activities) BrainCommand(ctx context.Context, in BrainCommandInput) (StepOutcome, error) {
 	name := "brain " + strings.Join(in.Command, " ")
 	if _, err := os.Stat(a.Cfg.BrainBin); err != nil {
@@ -524,6 +526,12 @@ func (a *Activities) BrainCommand(ctx context.Context, in BrainCommandInput) (St
 	case err == nil:
 		return StepOutcome{Status: "ok", Reason: name + ": exit 0"}, nil
 	case errors.As(err, &exitErr):
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		last := lines[len(lines)-1]
+		if len(last) > 300 {
+			last = last[:300]
+		}
+		slog.Warn("brain step failed", "step", name, "exit", exitErr.ExitCode(), "last_line", last)
 		return StepOutcome{Status: "failed", ExitCode: exitErr.ExitCode(),
 			Reason: fmt.Sprintf("%s: exit %d (%d lines of output)", name, exitErr.ExitCode(), bytes.Count(out.Bytes(), []byte("\n")))}, nil
 	default:

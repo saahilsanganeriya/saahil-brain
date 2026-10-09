@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -96,5 +97,42 @@ func TestNodeStatsGainsFeedbackColumnsKeepingRows(t *testing.T) {
 		Scan(&shown, &opened, &ignored, &demoted)
 	if err != nil || shown != 12 || opened != 3 || ignored != 0 || demoted != "" {
 		t.Fatalf("after migration: shown %d opened %d ignored %d demoted %q (err %v)", shown, opened, ignored, demoted, err)
+	}
+}
+
+// TestWriteSurvivesAWriterBetweenReadAndWrite catches the 2026-10-09 00:00 dream's failed reindex: a deferred
+// transaction that reads, then meets a hook's commit, cannot upgrade its stale snapshot and fails at once
+// ("database is locked") without the busy timeout ever applying.
+func TestWriteSurvivesAWriterBetweenReadAndWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".index", "brain.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.DB.Exec(`CREATE TABLE probe(x INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	hook, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hook.Close()
+
+	tx, err := st.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM probe`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = hook.Exec(`INSERT INTO probe VALUES (1)`) // waits its turn (here: fails fast) while the update holds the lock
+	if _, err := tx.Exec(`INSERT INTO probe VALUES (2)`); err != nil {
+		t.Fatalf("the update's write after another writer: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -57,12 +57,13 @@ type Store struct{ DB *sql.DB }
 // Path is where a brain keeps its index.
 func Path(brainRoot string) string { return filepath.Join(brainRoot, ".index", "brain.db") }
 
-// Open creates or migrates the index at dbPath. WAL lets hooks read while an update writes.
+// Open creates or migrates the index at dbPath. WAL lets hooks read while an update writes. Transactions begin
+// IMMEDIATE: a deferred one that reads first cannot upgrade once another writer commits, and fails at once.
 func Open(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, err
 	}
-	dsn := "file:" + dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)" +
+	dsn := "file:" + dbPath + "?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)" +
 		"&_pragma=cache_size(-65536)&_pragma=temp_store(MEMORY)&_pragma=journal_size_limit(67108864)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
