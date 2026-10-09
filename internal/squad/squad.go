@@ -215,6 +215,9 @@ func (f *Squad) start(ctx context.Context, name, folder, command string) (string
 	} else if existing != nil {
 		return "", fmt.Errorf("an agent named %s already runs in Orca (see: brain agents list)", name)
 	}
+	if err := f.trust(ctx, folder); err != nil {
+		return "", err
+	}
 	raw, err := f.Host.Orca(ctx, "terminal", "create", "--worktree", "path:"+folder, "--title", name, "--command", command)
 	// Orca opens terminals only at a project or worktree root: a folder below one starts at the nearest root and cds
 	// back, so `claude --resume` still finds its transcript under the recorded folder
@@ -235,6 +238,23 @@ func (f *Squad) start(ctx context.Context, name, folder, command string) (string
 	_ = json.Unmarshal(raw, &created)
 	handle := cmp.Or(created.Terminal.Handle, created.Handle)
 	return handle, f.register(ctx, name, handle)
+}
+
+// trustScript marks a folder trusted in ~/.claude.json (atomic replace, every other entry kept), as agent-resume did:
+// a folder new on the host otherwise stops the session at Claude Code's workspace-trust question.
+const trustScript = `import json, os, sys
+p, d = sys.argv[1], {}
+if os.path.exists(p):
+    d = json.load(open(p))
+d.setdefault("projects", {}).setdefault(sys.argv[2], {})["hasTrustDialogAccepted"] = True
+tmp = p + ".next"
+json.dump(d, open(tmp, "w"), indent=2)
+os.chmod(tmp, 0o600)
+os.replace(tmp, p)`
+
+func (f *Squad) trust(ctx context.Context, folder string) error {
+	_, err := f.Host.Shell(ctx, "python3 -c "+Quote(trustScript)+" "+Quote(filepath.Join(config.Home(), ".claude.json"))+" "+Quote(folder))
+	return err
 }
 
 // nameSession /renames the Claude session once its TUI is up: other sessions message it by this name.
@@ -643,8 +663,9 @@ func (f *Squad) Move(ctx context.Context, session, name string, force, noBoxHint
 	}
 
 	// 3. notes and memory (text), then resume in Orca
+	// the session's own files went by rsync above; a file another agent is writing must not stop the move
 	if _, err := f.Host.Run(ctx, filepath.Join(config.BinDir(), "devbox"), "sync"); err != nil {
-		return fmt.Errorf("devbox sync failed (%s)%s", exitText(err), stderrSuffix(err))
+		f.printf("  devbox sync did not finish cleanly (%s)%s; resuming anyway\n", exitText(err), stderrSuffix(err))
 	}
 	handle, err := f.start(ctx, name, cwd, claudeCommand+" --resume "+sid)
 	if err != nil {

@@ -30,6 +30,7 @@ type fakeOrca struct {
 	closed    []string
 	onEnter   func()
 	roots     []string // when set, terminal create accepts only these folders, as Orca accepts only project roots
+	onCreate  func()
 }
 
 func (f *fakeOrca) run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -52,6 +53,9 @@ func (f *fakeOrca) run(ctx context.Context, name string, args ...string) ([]byte
 			return []byte(`{"ok":false,"error":{"message":"selector_not_found"}}`), nil
 		}
 		f.created = append(f.created, args)
+		if f.onCreate != nil {
+			f.onCreate()
+		}
 		t := Terminal{Handle: "term_new", TabID: "tab-new", WorktreePath: strings.TrimPrefix(flagValue(args, "--worktree"), "path:")}
 		f.terminals = append(f.terminals, t)
 		return reply(map[string]any{"terminal": t})
@@ -244,6 +248,49 @@ func TestResumeStartsInASubfolderOfAnOrcaRoot(t *testing.T) {
 		if cmd := flagValue(orca.created[0], "--command"); !strings.HasPrefix(cmd, "cd "+Quote(cwd)+" && ") || !strings.HasSuffix(cmd, "--resume "+sid) {
 			t.Errorf("command %q must cd into %s, then resume", cmd, cwd)
 		}
+	}
+}
+
+// Catches a moved or resumed session stuck at Claude Code's workspace-trust question (2026-10-09: the probe's
+// folder was new on the devbox, so the session never started); the old agent-resume trusted the folder in
+// ~/.claude.json before launch. The trust must be written before the terminal opens and keep every other entry.
+func TestResumeTrustsTheFolderBeforeLaunch(t *testing.T) {
+	const sid = "0f0e0d0c-0000-4000-8000-000000000003"
+	orca := &fakeOrca{}
+	f, _ := testSquad(t, orca)
+	settings := filepath.Join(config.Home(), ".claude.json")
+	if err := os.WriteFile(settings, []byte(`{"numStartups": 5, "projects": {"/other": {"hasTrustDialogAccepted": true, "x": 1}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(config.Home(), "wt", "new-on-this-machine")
+	path := filepath.Join(f.Projects, projectSlug(cwd), sid+".jsonl")
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	appendLine(t, path, `{"type":"user","cwd":"`+cwd+`"}`)
+	now := time.Now()
+	_ = os.Chtimes(path, now.Add(-time.Hour), now.Add(-time.Hour))
+	f.Now = func() time.Time { return now }
+	trustedAtLaunch := false
+	read := func() map[string]any {
+		var d map[string]any
+		raw, _ := os.ReadFile(settings)
+		_ = json.Unmarshal(raw, &d)
+		return d
+	}
+	trusted := func(d map[string]any, dir string) bool {
+		p, _ := d["projects"].(map[string]any)[dir].(map[string]any)
+		return p != nil && p["hasTrustDialogAccepted"] == true
+	}
+	orca.onCreate = func() { trustedAtLaunch = trusted(read(), cwd) }
+
+	if err := f.Resume(context.Background(), "trusted", sid[:8], false); err != nil {
+		t.Fatal(err)
+	}
+	d := read()
+	if !trustedAtLaunch {
+		t.Error("the folder was not trusted when the terminal opened")
+	}
+	if !trusted(d, "/other") || d["numStartups"] != float64(5) {
+		t.Errorf("other settings lost: %v", d)
 	}
 }
 
