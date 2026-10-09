@@ -51,7 +51,7 @@ before=$problems
 if (cd "$kit" && if command -v sha256sum >/dev/null; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi) >"$tmp/sums" 2>&1; then
   :
 else
-  while IFS= read -r line; do bad "checksum: $line"; done < <(grep -v ': OK$' "$tmp/sums" | head -20)
+  while IFS= read -r line; do bad "checksum: $line"; done < <(grep -E ': FAILED( open or read)?$' "$tmp/sums" | head -20)
 fi
 (cd "$kit" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | sort) >"$tmp/files"
 awk '{sub(/^\*/, "", $2); print $2}' "$kit/SHA256SUMS" | sort >"$tmp/listed"
