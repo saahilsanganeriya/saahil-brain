@@ -71,7 +71,7 @@ func printIdentity(st config.IdentityStatus) int {
 		if st.FromFile[kv[0]] {
 			source = "file"
 		}
-		fmt.Printf("%-16s %-60s %s\n", kv[0], cmp.Or(kv[1], "-"), source)
+		fmt.Printf("%-18s %-60s %s\n", kv[0], cmp.Or(kv[1], "-"), source)
 	}
 	extra := make([]string, 0, len(st.Extra))
 	for key := range st.Extra {
@@ -79,7 +79,7 @@ func printIdentity(st config.IdentityStatus) int {
 	}
 	slices.Sort(extra)
 	for _, key := range extra {
-		fmt.Printf("%-16s %-60s file (scripts)\n", key, strings.Trim(string(st.Extra[key]), `"`))
+		fmt.Printf("%-18s %-60s file (scripts)\n", key, strings.Trim(string(st.Extra[key]), `"`))
 	}
 	if st.Err != nil {
 		return 1
