@@ -15,6 +15,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 
+	"saahil.local/brain/internal/backfill"
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/dream"
 	"saahil.local/brain/internal/llm"
@@ -121,7 +122,7 @@ func cmdDreamStatus([]string) int {
 
 func cmdDreamSchedule(args []string) int {
 	fs := flag.NewFlagSet("dream schedule", flag.ContinueOnError)
-	shadow := fs.Bool("shadow", true, "scheduled dreams read the shadow doc roots (true until the cut-over)")
+	shadow := fs.Bool("shadow", !backfill.Live(config.BrainRoot()), "scheduled dreams also read the shadow doc roots (default: until the cut-over)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
