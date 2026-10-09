@@ -6,10 +6,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
@@ -66,7 +69,7 @@ func specs() []agentSpec {
 		{Label: TunnelLabel, Args: []string{"/usr/bin/ssh", "-N", "-o", "ExitOnForwardFailure=yes",
 			"-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", "-o", "BatchMode=yes",
 			"-o", "ControlMaster=no", "-o", "ControlPath=none",
-			"-R", "127.0.0.1:" + port + ":127.0.0.1:" + port, config.DevboxHost}, Throttle: 30,
+			"-R", "127.0.0.1:" + port + ":127.0.0.1:" + port, config.DevboxHost()}, Throttle: 30,
 			Log: filepath.Join(logs, "brain-tunnel.log"), Home: home},
 	}
 }
@@ -118,19 +121,31 @@ func Install() error {
 }
 
 // SelfUpdate pulls the newest darwin binary the devbox published, checks its sha256, swaps it in place and restarts
-// the bridge. The laptop fetches over its own ssh; the devbox never pushes code.
+// the bridge; a laptop with no identity.json first gets the devbox's. The laptop fetches over its own ssh; the devbox
+// never pushes code. Remote paths are relative, so scp resolves them in the devbox login's home.
 func SelfUpdate() error {
 	if config.ThisMachine() != config.Laptop {
 		return fmt.Errorf("self-update runs on the laptop; the devbox builds in place")
 	}
-	dist := filepath.Join(config.DevboxHome, ".local", "share", "brain", "dist")
+	scp := func(src, dst string) error {
+		if out, err := exec.Command("scp", "-q", "-o", "BatchMode=yes", "-o", "ControlPath=none",
+			updateHost()+":"+src, dst).CombinedOutput(); err != nil {
+			return fmt.Errorf("scp %s: %v %s", src, err, out)
+		}
+		return nil
+	}
+	if copied, err := copyDevboxIdentity(scp); err != nil {
+		fmt.Printf("identity: %v; the binary updates anyway\n", err)
+	} else if copied {
+		fmt.Println("identity: the devbox's settings are now", config.IdentityPath())
+	}
+	dist := ".local/share/brain/dist"
 	target := filepath.Join(config.BinDir(), "brain")
 	tmp := filepath.Join(config.BinDir(), ".brain.new")
 	sumFile := tmp + ".sha256"
 	for src, dst := range map[string]string{dist + "/brain-darwin-arm64": tmp, dist + "/brain-darwin-arm64.sha256": sumFile} {
-		if out, err := exec.Command("scp", "-q", "-o", "BatchMode=yes", "-o", "ControlPath=none",
-			config.DevboxHost+":"+src, dst).CombinedOutput(); err != nil {
-			return fmt.Errorf("scp %s: %v %s", src, err, out)
+		if err := scp(src, dst); err != nil {
+			return err
 		}
 	}
 	defer os.Remove(sumFile)
@@ -156,6 +171,59 @@ func SelfUpdate() error {
 	out, _ := exec.Command(target, "version").Output()
 	fmt.Printf("installed %s", out)
 	return exec.Command("launchctl", "kickstart", "-k", "gui/"+strconv.Itoa(os.Getuid())+"/"+BridgeLabel).Run()
+}
+
+// updateHost is the devbox to pull from: devbox_host, or, while the laptop has no identity.json, the host the bridge's
+// tunnel LaunchAgent already reaches (the derived <user>-devbox need not be the person's ssh alias).
+func updateHost() string {
+	if _, err := os.Stat(config.IdentityPath()); err != nil {
+		if host := tunnelHost(filepath.Join(config.Home(), "Library", "LaunchAgents", TunnelLabel+".plist")); host != "" {
+			return host
+		}
+	}
+	return config.DevboxHost()
+}
+
+var plistStringRE = regexp.MustCompile(`<string>([^<]*)</string>`)
+
+// tunnelHost is the last argument of the tunnel's ssh command: the devbox host.
+func tunnelHost(plist string) string {
+	raw, err := os.ReadFile(plist)
+	if err != nil {
+		return ""
+	}
+	_, args, _ := strings.Cut(string(raw), "<key>ProgramArguments</key>")
+	args, _, _ = strings.Cut(args, "</array>")
+	found := plistStringRE.FindAllStringSubmatch(args, -1)
+	if len(found) == 0 {
+		return ""
+	}
+	return html.UnescapeString(found[len(found)-1][1])
+}
+
+// copyDevboxIdentity brings the devbox's ~/.config/brain/identity.json to a laptop that has none, through fetch
+// (remote path, local path). An existing file is never replaced: the hard link refuses one that appeared meanwhile.
+func copyDevboxIdentity(fetch func(src, dst string) error) (bool, error) {
+	path := config.IdentityPath()
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	tmp := path + ".from-devbox"
+	defer os.Remove(tmp)
+	if err := fetch(".config/brain/identity.json", tmp); err != nil {
+		return false, err
+	}
+	if raw, err := os.ReadFile(tmp); err != nil || !json.Valid(raw) {
+		return false, fmt.Errorf("the devbox's identity.json is not valid JSON (%v)", err)
+	}
+	if err := os.Link(tmp, path); err != nil {
+		return false, err
+	}
+	config.ReloadIdentity()
+	return true, nil
 }
 
 const SyncLabel = "com.saahil.brain-sync"

@@ -2,6 +2,7 @@ package install
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,26 +44,31 @@ func Hosts(repo string) []Host {
 	home := config.Home()
 	claude := filepath.Join(home, ".claude")
 	rules := "<!-- " + fileMarker + ": brain install writes this file; brain install --off claude removes it -->\n" +
-		"@" + filepath.Join(config.LaptopHome, "brain", "BRAIN.md") + "\n"
+		"@" + filepath.Join(config.LaptopHome(), "brain", "BRAIN.md") + "\n"
 	claudeSteps := []Step{
 		{Kind: "file", Path: filepath.Join(claude, "rules", "brain.md"), Label: "rules", Content: []byte(rules), Owned: []byte("<!-- " + fileMarker)},
 	}
 	// after the cut-over (the brain is live) every repo's Claude Code memory is the brain's one global folder
 	if _, err := os.Stat(filepath.Join(config.BrainRoot(), ".brain", "live")); err == nil {
 		claudeSteps = append(claudeSteps, Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "memory",
-			Key: []string{"autoMemoryDirectory"}, Value: filepath.Join(config.LaptopHome, "brain", "memory")})
+			Key: []string{"autoMemoryDirectory"}, Value: filepath.Join(config.LaptopHome(), "brain", "memory")})
 	}
 	// The mod carries every brain hook. Claude Code refuses plugin files that resolve outside its marketplace folder,
-	// so the embedded files are written into the marketplace as ordinary managed files (no symlink).
-	if _, err := os.Stat(filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json")); err == nil {
-		claudeSteps = append(claudeSteps, modFileSteps()...)
+	// so the embedded files are written into the marketplace as ordinary managed files (no symlink). A machine without
+	// the marketplace gets a minimal one; an existing one keeps its own name and owner.
+	market := filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json")
+	if _, err := os.Stat(market); errors.Is(err, os.ErrNotExist) {
 		claudeSteps = append(claudeSteps,
-			Step{Kind: "json-item", Path: filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json"), Label: "mod",
-				Key: []string{"plugins"}, Value: map[string]any{"name": ModName, "source": "./" + ModName,
-					"description": "The brain in Claude Code: brain_* tools, a pane, a band, the write guard and the brain hooks"}},
-			Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "mod",
-				Key: []string{"enabledPlugins", ModName + "@" + ModMarketplace}, Value: true})
+			Step{Kind: "json-key", Path: market, Label: "mod", Key: []string{"name"}, Value: ModMarketplace},
+			Step{Kind: "json-key", Path: market, Label: "mod", Key: []string{"owner"}, Value: map[string]any{"name": config.CurrentIdentity().User}})
 	}
+	claudeSteps = append(claudeSteps, modFileSteps()...)
+	claudeSteps = append(claudeSteps,
+		Step{Kind: "json-item", Path: market, Label: "mod",
+			Key: []string{"plugins"}, Value: map[string]any{"name": ModName, "source": "./" + ModName,
+				"description": "The brain in Claude Code: brain_* tools, a pane, a band, the write guard and the brain hooks"}},
+		Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "mod",
+			Key: []string{"enabledPlugins", ModName + "@" + ModMarketplace}, Value: true})
 
 	codex := filepath.Join(home, ".codex")
 	cursor := filepath.Join(home, ".cursor")
@@ -100,7 +106,7 @@ func embedded(name string) []byte {
 	if err != nil {
 		panic(err) // the embed list and these names are one change
 	}
-	return b
+	return render(b)
 }
 
 func hookList(name string) []HookSpec {

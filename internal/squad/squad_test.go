@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"saahil.local/brain/internal/agents"
 	"saahil.local/brain/internal/config"
+	"saahil.local/brain/internal/config/identitytest"
 )
 
 type sent struct {
@@ -93,7 +95,14 @@ func hasFlag(args []string, name string) bool {
 
 func testSquad(t *testing.T, orca *fakeOrca) (*Squad, *bytes.Buffer) {
 	t.Helper()
-	t.Setenv("BRAIN_HOME", t.TempDir())
+	return testSquadWith(t, orca, `{}`)
+}
+
+// testSquadWith runs the squad in a fresh home whose identity.json holds identityJSON, <home> naming that home.
+func testSquadWith(t *testing.T, orca *fakeOrca, identityJSON string) (*Squad, *bytes.Buffer) {
+	t.Helper()
+	home := t.TempDir()
+	identitytest.WriteIn(t, home, strings.ReplaceAll(identityJSON, "<home>", home))
 	out := &bytes.Buffer{}
 	f := New(config.Devbox, Host{Machine: config.Devbox, OrcaCLI: []string{"orca"}, Run: orca.run})
 	f.Out, f.Sleep = out, func(time.Duration) {}
@@ -300,16 +309,16 @@ func TestResumeTrustsTheFolderBeforeLaunch(t *testing.T) {
 }
 
 // Catches the daily brain-care agent landing in the wrong repo: `agents new --repo <path>` must fetch that repo and
-// ask Orca for a worktree of it, while a plain `agents new` keeps the work-repo repo.
+// ask Orca for a worktree of it, a plain `agents new` uses work_repo, and with neither it says which key to set.
 func TestNewAgentInTheNamedRepo(t *testing.T) {
 	origin, repo := filepath.Join(t.TempDir(), "origin.git"), filepath.Join(t.TempDir(), "saahil-brain")
 	git(t, "init", "-q", "--bare", "-b", "main", origin)
 	git(t, "clone", "-q", origin, repo)
 	git(t, "-C", repo, "commit", "-q", "--allow-empty", "-m", "first")
 	git(t, "-C", repo, "push", "-q", "origin", "HEAD:main")
-	for _, tc := range []struct{ repo, want string }{{repo, "path:" + repo}, {"", OrcaRepo}} {
+	for _, tc := range []struct{ repo, want string }{{repo, "path:" + repo}, {"", "id:repo-test"}} {
 		orca := &fakeOrca{}
-		f, _ := testSquad(t, orca)
+		f, _ := testSquadWith(t, orca, `{"work_repo_orca": "id:repo-test"}`)
 		f.Repo = repo // the default repo must fetch too
 		if err := f.NewAgent(context.Background(), "brain-care", "origin/main", "", tc.repo); err != nil {
 			t.Fatal(err)
@@ -317,6 +326,31 @@ func TestNewAgentInTheNamedRepo(t *testing.T) {
 		if len(orca.created) != 1 || flagValue(orca.created[0], "--repo") != tc.want {
 			t.Errorf("repo %q: orca calls %v, want --repo %s", tc.repo, orca.created, tc.want)
 		}
+	}
+	orca := &fakeOrca{}
+	f, _ := testSquad(t, orca)
+	if err := f.NewAgent(context.Background(), "brain-care", "origin/main", "", ""); !errors.Is(err, ErrNoWorkRepo) || len(orca.created) > 0 {
+		t.Errorf("no work_repo, no --repo: err %v, orca calls %v", err, orca.created)
+	}
+}
+
+// Catches the laptop driving an Orca environment that is not the person's own (the owner's id was a constant), or
+// calling orca with an empty --environment: the devbox's runtime comes from orca_env, and without it no orca runs.
+func TestLaptopDrivesTheIdentitysOrcaEnv(t *testing.T) {
+	ran := 0
+	run := func(context.Context, string, ...string) ([]byte, error) {
+		ran++
+		return []byte(`{"ok":true,"result":{}}`), nil
+	}
+	identitytest.Write(t, `{"orca_env": "env-test"}`)
+	host, err := HostFor(config.Laptop, config.Devbox, run)
+	if err != nil || !slices.Equal(host.OrcaCLI, []string{"orca", "--environment", "env-test"}) {
+		t.Fatalf("HostFor = %v, %v", host.OrcaCLI, err)
+	}
+	identitytest.Write(t, `{}`)
+	host, _ = HostFor(config.Laptop, config.Devbox, run)
+	if _, err := host.Orca(context.Background(), "terminal", "list"); !errors.Is(err, ErrNoOrcaEnv) || ran != 0 {
+		t.Fatalf("no orca_env: err %v, orca ran %d times", err, ran)
 	}
 }
 
@@ -332,7 +366,7 @@ func git(t *testing.T, args ...string) {
 // spelled "<root>/../…" that passes a plain prefix check; and a dirty worktree being force-removed.
 func TestStopRemovesOnlyWorktreesUnderRoot(t *testing.T) {
 	orca := &fakeOrca{}
-	f, _ := testSquad(t, orca)
+	f, _ := testSquadWith(t, orca, `{"work_repo": "<home>/Documents/work-repo"}`)
 	git(t, "init", "-q", "-b", "main", f.Repo)
 	git(t, "-C", f.Repo, "commit", "-q", "--allow-empty", "-m", "init")
 	inside := filepath.Join(f.Worktrees, "clean")

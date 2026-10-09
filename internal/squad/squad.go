@@ -74,20 +74,24 @@ type Squad struct {
 	Projects        string // Claude transcripts
 	Worktrees       string // the only root --rm-worktree removes under
 	Repo            string // the main checkout; relative boxes live under it
+	OrcaRepo        string // Repo as Orca selects it
 	DevboxBin       string
 }
 
 func New(here config.Machine, host Host) *Squad {
-	home := config.Home()
+	home, id := config.Home(), config.CurrentIdentity()
 	f := &Squad{
 		Here: here, Host: host, Stream: StreamCommand, Exec: ExecProcess, Sleep: time.Sleep, Now: time.Now, Out: os.Stdout,
 		Registry:        filepath.Join(config.AgentsDir(), "orca.json"),
 		NamesFile:       filepath.Join(config.AgentsDir(), "names.json"),
 		HappierSessions: filepath.Join(home, ".happier", "terminal", "sessions"),
 		Projects:        filepath.Join(config.ClaudeDir(), "projects"),
-		Worktrees:       filepath.Join(home, "Documents", "worktrees", "work-repo"),
-		Repo:            filepath.Join(home, "Documents", "work-repo"),
-		DevboxBin:       filepath.Join(config.DevboxHome, ".local", "bin"),
+		Repo:            id.WorkRepo,
+		OrcaRepo:        id.WorkRepoOrca,
+		DevboxBin:       filepath.Join(id.DevboxHome, ".local", "bin"),
+	}
+	if id.WorkRepo != "" {
+		f.Worktrees = filepath.Join(filepath.Dir(id.WorkRepo), "worktrees", filepath.Base(id.WorkRepo))
 	}
 	if !host.Remote {
 		f.Sessions = func(ctx context.Context) ([]agents.Session, error) {
@@ -105,7 +109,7 @@ func (f *Squad) needDevbox(ctx context.Context) error {
 	if !f.Host.Remote {
 		return nil
 	}
-	args := append(append([]string{}, SSH[1:]...), "-o", "BatchMode=yes", config.DevboxHost, "true")
+	args := append(append([]string{}, SSH[1:]...), "-o", "BatchMode=yes", config.DevboxHost(), "true")
 	if _, err := f.Host.Run(ctx, SSH[0], args...); err != nil {
 		return errors.New("devbox unreachable: run  brain machine up")
 	}
@@ -380,7 +384,7 @@ func (f *Squad) Attach(ctx context.Context, name string) error {
 		if agent, err := f.agent(ctx, name); err != nil {
 			return err
 		} else if agent != nil {
-			return fmt.Errorf("%s runs in Orca: open it in the Orca app (host devbox-host-server), or  brain agents screen %s", name, name)
+			return fmt.Errorf("%s runs in Orca: open it in the Orca app (its environment on %s), or  brain agents screen %s", name, config.DevboxHost(), name)
 		}
 	}
 	argv := []string{filepath.Join(f.DevboxBin, "agent-attach")}
@@ -396,12 +400,11 @@ func (f *Squad) Attach(ctx context.Context, name string) error {
 	}
 	// its own TCP connection, so one dropped link never closes every attached pane
 	return f.Exec("ssh", []string{"ssh", "-t", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ServerAliveInterval=15",
-		config.DevboxHost, strings.Join(quoted, " ")})
+		config.DevboxHost(), strings.Join(quoted, " ")})
 }
 
-// NewAgent starts a fresh agent in its own Orca worktree at base, or in an existing folder.
-// NewAgent starts an agent in a fresh Orca worktree of repo (a checkout path; empty: the work-repo repo), or in
-// dir when given.
+// NewAgent starts an agent in a fresh Orca worktree of repo at base (a checkout path; empty: work_repo), or in dir
+// when given.
 func (f *Squad) NewAgent(ctx context.Context, name, base, dir, repo string) error {
 	if err := f.onlyDevbox("new"); err != nil {
 		return err
@@ -423,9 +426,13 @@ func (f *Squad) NewAgent(ctx context.Context, name, base, dir, repo string) erro
 		}
 		// a fresh checkout of origin/main: a session loads the repo's rules from where it starts
 		fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		checkout, selector := f.Repo, OrcaRepo
+		checkout, selector := f.Repo, f.OrcaRepo
 		if repo != "" {
 			checkout, selector = repo, "path:"+repo
+		}
+		if checkout == "" {
+			cancel()
+			return ErrNoWorkRepo
 		}
 		_, err := f.Host.Shell(fetchCtx, "git -C "+Quote(checkout)+" fetch -q origin main")
 		cancel()
@@ -637,7 +644,7 @@ func (f *Squad) Move(ctx context.Context, session, name string, force, noBoxHint
 
 	// 1. the worktree, at the same path (devbox-handoff never overwrites an existing checkout)
 	_, gitErr := f.Host.Run(ctx, "git", "-C", cwd, "rev-parse", "--is-inside-work-tree")
-	_, missing := f.Host.Run(ctx, SSH[0], append(append([]string{}, SSH[1:]...), config.DevboxHost, "test -e "+Quote(cwd))...)
+	_, missing := f.Host.Run(ctx, SSH[0], append(append([]string{}, SSH[1:]...), config.DevboxHost(), "test -e "+Quote(cwd))...)
 	switch {
 	case gitErr == nil && missing != nil:
 		if err := f.Stream(ctx, filepath.Join(config.BinDir(), "devbox-handoff"), cwd); err != nil {
@@ -662,7 +669,7 @@ func (f *Squad) Move(ctx context.Context, session, name string, force, noBoxHint
 	for _, pair := range [][2]string{{transcript, project}, {filepath.Join(project, sid), project},
 		{filepath.Join(fileHistory, sid), fileHistory}, {filepath.Join(sessionEnv, sid), sessionEnv}} {
 		if _, err := os.Stat(pair[0]); err == nil {
-			if err := f.rsync(ctx, pair[0], config.DevboxHost+":"+pair[1]+"/"); err != nil {
+			if err := f.rsync(ctx, pair[0], config.DevboxHost()+":"+pair[1]+"/"); err != nil {
 				return err
 			}
 		}
@@ -680,7 +687,7 @@ func (f *Squad) Move(ctx context.Context, session, name string, force, noBoxHint
 	if err := f.nameSession(ctx, handle, name); err != nil {
 		return err
 	}
-	f.printf("\n%s runs in Orca (host devbox-host-server); its screen:  brain agents screen %s\n", name, name)
+	f.printf("\n%s runs in Orca (its environment on %s); its screen:  brain agents screen %s\n", name, config.DevboxHost(), name)
 	if !noBoxHint {
 		f.printf("if its box has artifacts/ to bring along:  brain agents box <box>\n")
 	}
@@ -784,7 +791,7 @@ func (f *Squad) Box(ctx context.Context, box string, excludes []string, withVenv
 		venvNote = ""
 	}
 	f.printf("copy %s  (adds files and replaces OLDER ones; a newer devbox file is kept; never deletes on the devbox%s)\n", local, venvNote)
-	return f.rsync(ctx, local+"/", config.DevboxHost+":"+local+"/", append([]string{"--compress", "--update"}, flags...)...)
+	return f.rsync(ctx, local+"/", config.DevboxHost()+":"+local+"/", append([]string{"--compress", "--update"}, flags...)...)
 }
 
 func (f *Squad) rsync(ctx context.Context, source, dest string, extra ...string) error {

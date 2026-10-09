@@ -82,7 +82,7 @@ type Linter struct {
 }
 
 func New(root string) *Linter {
-	return &Linter{Root: root, WorkRoot: filepath.Join(config.Home(), "Documents", "work-repo", "saahil-docs")}
+	return &Linter{Root: root, WorkRoot: config.ShadowDocRoot()}
 }
 
 func Root(root string) (Report, error) { return New(root).All() }
@@ -474,7 +474,7 @@ func (l *Linter) linkResolves(rel string, lk parse.Link) bool {
 	case lk.Wiki && !strings.Contains(t, "/"):
 		return l.idExists(strings.TrimSuffix(t, ".md")) || exists(filepath.Join(l.Root, filepath.Dir(rel), t+".md"))
 	case strings.HasPrefix(t, "/"):
-		return exists(t) || exists(config.Canonical(t)) || exists(strings.Replace(t, config.LaptopHome, config.DevboxHome, 1))
+		return exists(t) || exists(config.Canonical(t)) || exists(strings.Replace(t, config.LaptopHome(), config.DevboxHome(), 1))
 	case lk.Wiki:
 		return l.pathExists(t)
 	}

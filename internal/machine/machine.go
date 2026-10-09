@@ -38,7 +38,11 @@ func New(here config.Machine, host squad.Host) *Machine {
 
 func (m *Machine) printf(format string, args ...any) { fmt.Fprintf(m.Out, format, args...) }
 
-func devboxBin(name string) string { return filepath.Join(config.DevboxHome, ".local", "bin", name) }
+func devboxBin(name string) string { return filepath.Join(config.DevboxHome(), ".local", "bin", name) }
+
+func awsLogin() string {
+	return "aws sso login --sso-session " + squad.Quote(config.CurrentIdentity().AWSSSOSession) + " --use-device-code"
+}
 
 // Verb hands a machine command to the laptop's devbox script with its arguments unchanged (`down --force` reaches it
 // as typed). On the devbox only status means something.
@@ -77,7 +81,9 @@ func LocalStatus(ctx context.Context, host squad.Host) string {
 	}
 	fmt.Fprintf(&b, "devbox (this machine): %s, up %s, load %s\n", name, uptime, load)
 	now := time.Now()
-	if expiry, err := githubCertExpiry(ctx, host, filepath.Join(config.Home(), ".ssh", "work_github-cert.pub")); err != nil {
+	if config.CurrentIdentity().GithubCert == "" {
+		fmt.Fprintf(&b, "GitHub cert: not set (github_cert in brain identity)\n")
+	} else if expiry, err := githubCertExpiry(ctx, host, config.CurrentIdentity().GithubCert); err != nil {
 		fmt.Fprintf(&b, "GitHub cert: unreadable (%v)\n", err)
 	} else {
 		fmt.Fprintf(&b, "GitHub cert: %s\n", until(expiry, now, "brain machine login github"))
@@ -159,7 +165,7 @@ func (m *Machine) Login(ctx context.Context, services []string) error {
 		services = Services
 	}
 	if m.Host.Remote {
-		args := append(append([]string{}, squad.SSH[1:]...), "-o", "BatchMode=yes", config.DevboxHost, "true")
+		args := append(append([]string{}, squad.SSH[1:]...), "-o", "BatchMode=yes", config.DevboxHost(), "true")
 		if _, err := m.Host.Run(ctx, squad.SSH[0], args...); err != nil {
 			return errors.New("devbox unreachable: run  brain machine up")
 		}
@@ -169,13 +175,15 @@ func (m *Machine) Login(ctx context.Context, services []string) error {
 		var err error
 		switch {
 		case service == "github" && m.Host.Remote:
-			err = m.Stream(ctx, "ssh", "-t", "-L", "8250:127.0.0.1:8250", config.DevboxHost, devboxBin("devbox-github-login"), "--tunnel")
+			err = m.Stream(ctx, "ssh", "-t", "-L", "8250:127.0.0.1:8250", config.DevboxHost(), devboxBin("devbox-github-login"), "--tunnel")
 		case service == "github":
 			err = m.Stream(ctx, devboxBin("devbox-github-login"))
+		case service == "aws" && config.CurrentIdentity().AWSSSOSession == "":
+			err = errors.New("aws_sso_session is not set: brain identity --init --aws-sso-session <name> (or --profile <team>)")
 		case service == "aws" && m.Host.Remote:
-			err = m.Stream(ctx, "ssh", "-t", config.DevboxHost, `bash -lc "aws sso login --sso-session Example-Session --use-device-code"`)
+			err = m.Stream(ctx, "ssh", "-t", config.DevboxHost(), "bash -lc "+squad.Quote(awsLogin()))
 		case service == "aws":
-			err = m.Stream(ctx, "bash", "-lc", "aws sso login --sso-session Example-Session --use-device-code")
+			err = m.Stream(ctx, "bash", "-lc", awsLogin())
 		case m.Host.Remote:
 			err = m.loginGcloud(ctx)
 		default:

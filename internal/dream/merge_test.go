@@ -51,7 +51,7 @@ func newMergeBrain(t *testing.T) (*Activities, *mergeModel) {
 	brain := acts.Cfg.BrainRoot
 	write(t, filepath.Join(brain, "hubs", "ci-depot.md"),
 		"---\nid: ci-depot\ntype: hub\nstatus: current\nsummary: CI on Depot\nbroader: [index]\n---\n")
-	slug := strings.ReplaceAll(filepath.Join(config.LaptopHome, "Documents", "work-repo"), "/", "-")
+	slug := strings.ReplaceAll(filepath.Join(config.LaptopHome(), "Documents", "work-repo"), "/", "-")
 	importSource := ".import/devbox/" + slug + "/probe.md"
 	write(t, filepath.Join(brain, importSource), "a probe memory\n")
 	note := func(id, typ, scope, asOf, summary, body, source string) {

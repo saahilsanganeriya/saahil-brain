@@ -78,7 +78,7 @@ func linkedRepo() string {
 	if target, err := os.Readlink(filepath.Join(install.ModsDir(), install.ModName)); err == nil {
 		return filepath.Dir(target)
 	}
-	return filepath.Join(config.LaptopHome, "Documents", "saahil-brain")
+	return config.CurrentIdentity().BrainRepo
 }
 
 func contains(list []string, s string) bool {

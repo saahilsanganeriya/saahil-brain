@@ -14,3 +14,5 @@ sessions/
 # build outputs
 /bin/
 /dist/
+# some machines ignore docs/ globally; this repo ships its docs/ folders
+!docs/

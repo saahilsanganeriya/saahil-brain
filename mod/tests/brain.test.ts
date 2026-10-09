@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-const BRAIN = '/Users/test-user/.local/bin/brain'
+// the source carries brain install's placeholders; these tests drive it unrendered
+const BRAIN = '@BRAIN_BIN@'
 const NOW = Date.UTC(2026, 9, 8, 12, 0, 0)
 const START = { surface: 'terminal', isInteractive: true, cwd: '/w/image-lane' } as const
 
@@ -63,7 +64,7 @@ test('with BRAIN_OFF=1 the mod runs no brain process', async ($, on) => {
   const calls = stubBrain(on, () => ({ exitCode: 0, stdout: 'x' }), { BRAIN_OFF: '1' })
   await $.session.start(START)
   await $.classic.UserPromptSubmit({ prompt: 'p' } as never)
-  await $.tool.call({ tool: 'Write', file_path: '/Users/test-user/brain/notes/x.md', content: 'x' })
+  await $.tool.call({ tool: 'Write', file_path: '@LAPTOP_HOME@/brain/notes/x.md', content: 'x' })
   expect(brainRuns(calls)).toEqual([])
 })
 
@@ -74,13 +75,13 @@ test('Write under ~/brain goes through brain guard: block denies, warn writes an
   const calls = stubBrain(on, args => (args[0] === 'guard' ? { exitCode: 0, stdout: JSON.stringify(verdict) } : { exitCode: 0 }))
   await $.session.start(START)
   const write = (path: string) => $.tool.call({ tool: 'Write', file_path: path, content: '---\nid: x\n---\n' })
-  const blocked = await write('/home/test-user/brain/notes/x.md')
+  const blocked = await write('@DEVBOX_HOME@/brain/notes/x.md')
   expect(blocked).toEqual({ deny: 'brain guard: notes/x.md is over the 4 KB note cap' })
   verdict = { decision: 'warn', reason: 'summary is missing' }
-  const warned = await write('/Users/test-user/brain/notes/x.md')
+  const warned = await write('@LAPTOP_HOME@/brain/notes/x.md')
   expect(warned).toMatchObject({ result: 'done by the tool', context: ['brain guard: summary is missing'] })
   const guardInput = JSON.parse(calls.filter(call => call.argv[1] === 'guard').pop()!.stdin!)
-  expect(guardInput).toMatchObject({ tool_name: 'Write', tool_input: { file_path: '/Users/test-user/brain/notes/x.md' } })
+  expect(guardInput).toMatchObject({ tool_name: 'Write', tool_input: { file_path: '@LAPTOP_HOME@/brain/notes/x.md' } })
   await write('/w/image-lane/README.md')
   expect(brainRuns(calls).filter(run => run === 'guard').length).toBe(2)
 })
@@ -89,7 +90,7 @@ test('Write under ~/brain goes through brain guard: block denies, warn writes an
 test('Read of a mapped brain doc appends the sections hint', async ($, on) => {
   stubBrain(on, args => (args[0] === 'sections' ? { exitCode: 0, stdout: JSON.stringify([{ heading: 'a' }, { heading: 'b' }, { heading: 'c' }]) } : { exitCode: 0 }))
   await $.session.start(START)
-  const read = await $.tool.call({ tool: 'Read', file_path: '/Users/test-user/brain/work/box/plans/DESIGN.md' })
+  const read = await $.tool.call({ tool: 'Read', file_path: '@LAPTOP_HOME@/brain/work/box/plans/DESIGN.md' })
   expect(read.context?.[0]).toMatch(/^This doc has 3 sections: brain_sections/)
 })
 

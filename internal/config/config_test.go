@@ -1,9 +1,14 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"saahil.local/brain/internal/config/identitytest"
+)
 
 // Catches the two machines indexing one file under two paths (devbox /home/test-user vs the laptop spelling).
 func TestCanonicalPath(t *testing.T) {
+	identitytest.Owner(t)
 	cases := map[string]string{
 		"/home/test-user/brain/notes/x.md":             "/Users/test-user/brain/notes/x.md",
 		"/Users/test-user/brain/notes/x.md": "/Users/test-user/brain/notes/x.md",

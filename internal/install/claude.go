@@ -16,7 +16,7 @@ type HookSpec struct {
 	Timeout int    `json:"timeout,omitempty"` // seconds
 }
 
-func BrainBinary() string { return filepath.Join(config.LaptopHome, ".local", "bin", "brain") }
+func BrainBinary() string { return filepath.Join(config.LaptopHome(), ".local", "bin", "brain") }
 
 func BrainCommand(args string) string { return BrainBinary() + " " + args }
 

@@ -122,7 +122,7 @@ func sourceProject(sources []string) string {
 		if len(parts) < 3 || parts[0] != ".import" {
 			continue
 		}
-		for _, home := range []string{config.LaptopHome, config.DevboxHome} {
+		for _, home := range []string{config.LaptopHome(), config.DevboxHome()} {
 			prefix := strings.ReplaceAll(filepath.Join(home, "Documents"), "/", "-") + "-"
 			if rest, ok := strings.CutPrefix(parts[2], prefix); ok {
 				return strings.TrimPrefix(rest, "worktrees-")

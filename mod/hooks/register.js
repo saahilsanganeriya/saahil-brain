@@ -2,8 +2,8 @@
 // hooks), so each event has one owner. Each part shells out to the brain CLI, which decides; a failure adds nothing.
 // BRAIN_OFF=1 in the session's environment turns every part off.
 
-const BRAIN = '/Users/test-user/.local/bin/brain'
-const BRAIN_ROOTS = ['/Users/test-user/brain/', '/home/test-user/brain/'] // the devbox bind-mounts the second
+const BRAIN = '@BRAIN_BIN@'
+const BRAIN_ROOTS = ['@LAPTOP_HOME@/brain/', '@DEVBOX_HOME@/brain/'] // the devbox bind-mounts the second
 const PANE = 'saahil-brain'
 const TOOL_PREFIX = 'mcp__saahil-brain__' // how Claude Code names this mod's tools in tool.call; another server's brain_search stays theirs
 const TIMEOUT_MS = 5_000

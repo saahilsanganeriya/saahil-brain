@@ -26,8 +26,8 @@ func main() {
 	claudeBin := flag.String("claude-bin", filepath.Join(config.BinDir(), "claude"), "the claude CLI")
 	skills := flag.String("skills", "", "skills folder (default: the skills embedded in this binary)")
 	brainBin := flag.String("brain-bin", filepath.Join(config.BinDir(), "brain"), "the brain CLI")
-	shadowDocs := flag.String("shadow-docs", filepath.Join(config.Home(), "Documents", "work-repo", "saahil-docs"),
-		"read-only doc root presented as work/ (until the cut-over)")
+	shadowDocs := flag.String("shadow-docs", strings.Join(config.CurrentIdentity().ShadowDocs, ","),
+		"read-only doc roots presented as work/, comma-separated (default: shadow_docs; none after a cut-over)")
 	address := flag.String("address", dream.HostPort, "local Temporal frontend (loopback only)")
 	flag.Parse()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -59,9 +59,12 @@ func run(logger *slog.Logger, llmKind, claudeBin, skills, brainBin, shadowDocs, 
 		return err
 	}
 	defer ledger.Close()
-	shadow, forbidden := []string{shadowDocs}, []string{shadowDocs, config.ClaudeDir()}
-	if !separateFrom(shadowDocs, root) {
-		shadow, forbidden = nil, []string{config.ClaudeDir()}
+	var shadow []string
+	forbidden := []string{config.ClaudeDir()}
+	for _, dir := range strings.Split(shadowDocs, ",") {
+		if dir != "" && separateFrom(dir, root) {
+			shadow, forbidden = append(shadow, dir), append(forbidden, dir)
+		}
 	}
 	acts := &dream.Activities{LLM: runner, Ledger: ledger, Cfg: dream.Config{
 		BrainRoot: root, ShadowDocs: shadow, SkillsDir: skills, BrainBin: brainBin, Forbidden: forbidden,

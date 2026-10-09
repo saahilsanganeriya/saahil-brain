@@ -149,7 +149,7 @@ func cmdAgentsNew(args []string) int {
 	fs := flag.NewFlagSet("agents new", flag.ContinueOnError)
 	base := fs.String("base", "origin/main", "commit to branch from")
 	dir := fs.String("dir", "", "start in this existing devbox worktree instead of a new one")
-	repo := fs.String("repo", "", "make the worktree in this repo checkout (default: work-repo)")
+	repo := fs.String("repo", "", "make the worktree in this repo checkout (default: work_repo in brain identity)")
 	pos, err := parseInterleaved(fs, args)
 	if err != nil || len(pos) != 1 {
 		return fail("agents new <name> [--base REF] [--dir D] [--repo PATH]")

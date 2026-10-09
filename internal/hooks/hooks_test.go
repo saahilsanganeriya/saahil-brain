@@ -15,6 +15,8 @@ import (
 
 	"saahil.local/brain/internal/delta"
 	"saahil.local/brain/internal/index"
+
+	"saahil.local/brain/internal/config/identitytest"
 )
 
 type fixture struct {
@@ -536,5 +538,21 @@ func TestNoPointerToTheBriefThePromptHolds(t *testing.T) {
 	got := ids(lk)
 	if slices.Contains(got, "work/slice-x/briefs/w9.md") || !slices.Contains(got, "work/slice-x/plans/PLAN.md") {
 		t.Fatalf("pointers %v: want the plan, never the brief the prompt holds", got)
+	}
+}
+
+// TestNoShadowRootMeansNone catches an empty shadow_docs (every new person's, and the owner's since the cut-over)
+// turning into a path relative to the hook's working directory: a folder there named like a box was taken for it.
+func TestNoShadowRootMeansNone(t *testing.T) {
+	identitytest.Write(t, `{"shadow_docs": []}`)
+	env := DefaultEnv()
+	env.Root = t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, "box-a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	if env.WorkRoot != "" || env.workDir("box-a") != "" {
+		t.Errorf("WorkRoot %q, workDir(box-a) = %q; want none", env.WorkRoot, env.workDir("box-a"))
 	}
 }
