@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type Opts struct {
@@ -145,13 +146,94 @@ func Search(db *sql.DB, q string, opts Opts) ([]Hit, error) {
 	if cands, err = addMentions(db, cands, q, opts.Seeds, opts.Hide); err != nil {
 		return nil, err
 	}
+	named, err := hubsNamed(db, q, opts.Hide)
+	if err != nil {
+		return nil, err
+	}
+	lift := map[string]float64{}
+	for id := range named {
+		lift[id] = 0
+	}
+	if cands, err = addNodes(db, cands, lift); err != nil {
+		return nil, err
+	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].Relevance > cands[j].Relevance })
 	if opts.Deep {
 		if cands, err = addProximity(db, cands, opts.Seeds, opts.Hide); err != nil {
 			return nil, err
 		}
 	}
-	return score(cands, opts), nil
+	return score(cands, opts, named), nil
+}
+
+// maxHubNameWords bounds the queries checked against hub names: a hub's title, id or alias is a few words.
+const maxHubNameWords = 6
+
+// hubsNamed are the hubs whose title, id or an alias equals the query, case and punctuation aside. The index keeps
+// a node's aliases joined by spaces, so a run of whole words inside them also counts.
+func hubsNamed(db *sql.DB, q string, hide func(string) bool) (map[string]bool, error) {
+	named := map[string]bool{}
+	want := nameWords(q)
+	if want == "" || strings.Count(want, " ") >= maxHubNameWords {
+		return named, nil
+	}
+	rows, err := db.Query(`SELECT n.id, n.title, f.aliases FROM node n JOIN fts f ON f.rowid = n.rowid ` + rankable + `
+		AND n.type = 'hub'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, title, aliases string
+		if err := rows.Scan(&id, &title, &aliases); err != nil {
+			return nil, err
+		}
+		if !hidden(hide, id) && (nameWords(id) == want || nameWords(title) == want ||
+			strings.Contains(" "+nameWords(aliases)+" ", " "+want+" ")) {
+			named[id] = true
+		}
+	}
+	return named, rows.Err()
+}
+
+// nameWords lowercases s and keeps its letters and digits as space-separated words.
+func nameWords(s string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}), " ")
+}
+
+// addNodes raises each node in rel to at least that relevance, loading the rankable ones not yet candidates.
+func addNodes(db *sql.DB, cands []cand, rel map[string]float64) ([]cand, error) {
+	at := map[string]int{}
+	for i, c := range cands {
+		at[c.ID] = i
+	}
+	var missing []any
+	for id, r := range rel {
+		if i, ok := at[id]; ok {
+			cands[i].Relevance = max(cands[i].Relevance, r)
+		} else {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return cands, nil
+	}
+	rows, err := db.Query(`SELECT `+hitCols+` FROM node n `+rankable+` AND n.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(missing)), ",")+`)`, missing...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		c, err := scanCand(rows, false)
+		if err != nil {
+			return nil, err
+		}
+		c.Relevance = rel[c.ID]
+		cands = append(cands, c)
+	}
+	return cands, rows.Err()
 }
 
 // addMentions puts the documents q names by path at full relevance plus wMention, a named folder's anchor
@@ -206,35 +288,7 @@ func addMentions(db *sql.DB, cands []cand, q string, seeds []string, hide func(s
 			rel[a] = max(rel[a], 1+wOwn*strength*(1-0.15*float64(i)))
 		}
 	}
-	at := map[string]int{}
-	for i, c := range cands {
-		at[c.ID] = i
-	}
-	var missing []any
-	for id, r := range rel {
-		if i, ok := at[id]; ok {
-			cands[i].Relevance = max(cands[i].Relevance, r)
-		} else {
-			missing = append(missing, id)
-		}
-	}
-	if len(missing) == 0 {
-		return cands, nil
-	}
-	rows, err := db.Query(`SELECT `+hitCols+` FROM node n `+rankable+` AND n.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(missing)), ",")+`)`, missing...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		c, err := scanCand(rows, false)
-		if err != nil {
-			return nil, err
-		}
-		c.Relevance = rel[c.ID]
-		cands = append(cands, c)
-	}
-	return cands, rows.Err()
+	return addNodes(db, cands, rel)
 }
 
 func bm25Candidates(db *sql.DB, match string, hide func(string) bool) ([]cand, error) {
@@ -369,7 +423,9 @@ func addProximity(db *sql.DB, cands []cand, extraSeeds []string, hide func(strin
 	return cands, nil
 }
 
-func score(cands []cand, opts Opts) []Hit {
+// score orders the candidates, the hubs in first ahead of the rest (a query naming a hub wants the hub, not the
+// notes that repeat its words), and keeps one hit per document up to the limit.
+func score(cands []cand, opts Opts, first map[string]bool) []Hit {
 	keep := map[string]bool{}
 	for _, t := range opts.Types {
 		keep[t] = true
@@ -399,6 +455,9 @@ func score(cands []cand, opts Opts) []Hit {
 		hits = append(hits, c.Hit)
 	}
 	sort.Slice(hits, func(i, j int) bool {
+		if first[hits[i].ID] != first[hits[j].ID] {
+			return first[hits[i].ID]
+		}
 		return hits[i].Score > hits[j].Score || (hits[i].Score == hits[j].Score && hits[i].ID < hits[j].ID)
 	})
 	// one hit per document (the doc or its best section), and one per title+summary (snapshots of one plan)

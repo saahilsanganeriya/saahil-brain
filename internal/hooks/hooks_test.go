@@ -113,35 +113,196 @@ func (f fixture) prompt(t *testing.T, session, text string) string {
 	return contextOf(t, out)
 }
 
-// Catches a start digest over the 8,000-char cap when hot.md, STATE.md, CARD.md and the start-here list are all
-// large, and the current
-// work being missed when the folder name says nothing (it must come from the latest session note for this cwd).
-func TestDigestUnderCap(t *testing.T) {
-	long := strings.Repeat("- finding-ocr-recall "+strings.Repeat("long start-here line ", 45)+"\n", 7)
-	f := newFixture(t, true, map[string]string{
-		"hot.md":                   strings.Repeat("hot words here ", 700),
-		"work/ocr-census/STATE.md": "# State\n\n" + strings.Repeat("state line of the census run\n", 900),
-		"hubs/image-lane.md":       "---\nid: image-lane\ntype: hub\nstatus: current\nsummary: image lane\nbroader: [index]\n---\n## Start here\n\n" + long,
-	})
-	out, err := Start(f.env, Input{SessionID: "s1", Cwd: f.cwd, Event: "SessionStart"})
+func (f fixture) names(t *testing.T) *Names {
+	t.Helper()
+	nm, err := BuildNames(f.db, func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b })
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := contextOf(t, out)
-	if n := utf8.RuneCountInString(got); n == 0 || n > 8000 {
-		t.Fatalf("digest is %d chars", n)
+	return nm
+}
+
+func (f fixture) start(t *testing.T, in Input) string {
+	t.Helper()
+	if in.Cwd == "" {
+		in.Cwd = f.cwd
 	}
-	for _, want := range []string{"This week (hot.md)", "Work ocr-census: STATE.md"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("digest lacks %q", want)
+	out, err := Start(f.env, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contextOf(t, out)
+}
+
+func ids(lk Lookup) []string {
+	var out []string
+	for _, p := range lk.Chosen {
+		out = append(out, p.ID)
+	}
+	return out
+}
+
+// digestPart drops the pointer list from a prompt's context, leaving the digest the first prompt carries.
+func digestPart(context string) string {
+	if i := strings.Index(context, "Brain pointers ("); i >= 0 {
+		return strings.TrimSpace(context[:i])
+	}
+	return context
+}
+
+// TestDigestWorkArrivesWithTheFirstPrompt catches the start digest choosing work by the cwd alone (the laptop's
+// digest on 2026-10-08 carried boxes its last session there had used) and the split digest passing 8,000 chars:
+// SessionStart gives hot.md only; the first prompt names another box and gets its STATE, CARD and hub list within
+// what start left; later prompts get none; a resumed session and a subagent get the whole digest of the picked box;
+// a first prompt that names nothing falls back to the cwd's box, and a host with no prompt hook gets it at start.
+func TestDigestWorkArrivesWithTheFirstPrompt(t *testing.T) {
+	long := strings.Repeat("- finding-ocr-recall "+strings.Repeat("long start-here line ", 45)+"\n", 7)
+	f := newFixture(t, true, map[string]string{
+		"hot.md":                strings.Repeat("hot words here ", 700),
+		"work/slice-y/CARD.md":  "---\ntype: card\nstatus: live\nsummary: slice y\nhubs: [image-lane]\n---\n# Slice Y\n",
+		"work/slice-y/STATE.md": "# State\n\n" + strings.Repeat("state line of the slice run\n", 900),
+		"work/lane-a/CARD.md":   "---\ntype: card\nstatus: live\nsummary: lane a\n---\n# Lane A\n",
+		"work/lane-b/CARD.md":   "---\ntype: card\nstatus: live\nsummary: lane b\n---\n# Lane B\n",
+		"hubs/image-lane.md":    "---\nid: image-lane\ntype: hub\nstatus: current\nsummary: image lane\nbroader: [index]\n---\n## Start here\n\n" + long,
+	})
+	start := f.start(t, Input{SessionID: "s1", Event: "SessionStart"})
+	if !strings.Contains(start, "This week (hot.md)") || strings.Contains(start, "Work ") {
+		t.Fatalf("start digest must be hot.md only:\n%s", start)
+	}
+	first := digestPart(f.prompt(t, "s1", "Pick up work/slice-y/STATE.md and finish the gate."))
+	for _, want := range []string{"Work slice-y: STATE.md", "Hub image-lane: start here"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("first prompt's digest lacks %q:\n%s", want, first)
 		}
 	}
-	// with a small hot.md everything fits, the hub's start-here list included and nothing past it
-	f = newFixture(t, true, nil)
-	out, _ = Start(f.env, Input{SessionID: "s2", Cwd: f.cwd})
-	got = contextOf(t, out)
-	if !strings.Contains(got, "Work ocr-census: CARD.md") || !strings.Contains(got, "- decision-paddle-first") || strings.Contains(got, "not this") {
-		t.Fatalf("digest:\n%s", got)
+	if strings.Contains(first, "ocr-census") || strings.Contains(first, "hot.md") {
+		t.Errorf("first prompt's digest repeats hot.md or picks the cwd's box over the named one:\n%s", first)
+	}
+	if n := utf8.RuneCountInString(start) + utf8.RuneCountInString(first); n > 8000 {
+		t.Errorf("start + first prompt digest is %d chars", n)
+	}
+	if later := f.prompt(t, "s1", "Pick up work/slice-y/STATE.md again."); strings.Contains(later, "Work ") {
+		t.Errorf("a later prompt carried the digest again:\n%s", later)
+	}
+	for _, in := range []Input{{SessionID: "s1", Event: "SessionStart", Source: "resume"}, {SessionID: "s1", Event: "SubagentStart", AgentID: "a1"}} {
+		if got := f.start(t, in); !strings.Contains(got, "Work slice-y: STATE.md") || !strings.Contains(got, "This week (hot.md)") {
+			t.Errorf("%s/%s lost the picked box's digest:\n%s", in.Event, in.Source, got)
+		}
+	}
+	if st, _ := f.env.loadState("s1"); !slices.Equal(st.Work, []string{"slice-y"}) {
+		t.Errorf("state after resume and subagent: work %v, want [slice-y]", st.Work)
+	}
+	// the image-lane coordinator's first prompt on 2026-10-08 named eight boxes once each as reading, not its own
+	for session, prompt := range map[string]string{"s2": "continue", "s4": "Read slice-y, lane-a and lane-b first."} {
+		f.start(t, Input{SessionID: session, Event: "SessionStart"})
+		if got := f.prompt(t, session, prompt); !strings.Contains(got, "Work ocr-census: STATE.md") {
+			t.Errorf("%q names nothing or only a reading list: the cwd's box must be the work:\n%s", prompt, got)
+		}
+	}
+	if got := f.start(t, Input{ConversationID: "c3", Event: "sessionStart"}); !strings.Contains(got, "Work ocr-census: STATE.md") {
+		t.Errorf("a host with no prompt hook must get the work digest at start:\n%s", got)
+	}
+}
+
+// TestPointersSkipWhatTheDigestQuotes catches pointers spent on what L0 already holds (on 2026-10-08 the image-lane
+// coordinator was pointed at its own stale CARD) and the first pass's hiding of the session's whole box (it lost the
+// session's own AUDIT.md, the answer to the prompt): the box's CARD stays out, its report on the asked question
+// stays in.
+func TestPointersSkipWhatTheDigestQuotes(t *testing.T) {
+	f := newFixture(t, true, map[string]string{
+		"work/ocr-census/reports/recall.md": "---\ntype: report\nstatus: live\nsummary: OCR recall on the image census\naliases: [census recall report]\n---\n# OCR recall\n\nRecall 0.91.\n",
+	})
+	lk, err := Pointers(f.db, "Check work/ocr-census/STATE.md and work/ocr-census/CARD.md, then the census recall report.",
+		Seeds{Work: []string{"ocr-census"}, Hubs: []string{"image-lane"}}, f.names(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ids(lk)
+	if slices.Contains(got, "work/ocr-census/CARD.md") || !slices.Contains(got, "work/ocr-census/reports/recall.md") {
+		t.Fatalf("pointers %v: want the box's report and not its CARD", got)
+	}
+}
+
+// TestRawWorkDocsOfOtherBoxesYieldToFacts catches another box's work docs that match by text alone taking slots
+// from a fact, and the first pass's dropping of what the prompt points at: the lesson and the plan the prompt names
+// are in, the run reports nobody names stay out, and with no fact or named doc the single best report may answer.
+func TestRawWorkDocsOfOtherBoxesYieldToFacts(t *testing.T) {
+	report := func(run string) string {
+		return "---\ntype: report\nstatus: live\nsummary: Ledger sweep retry budget run " + run +
+			"\nhubs: [image-lane]\n---\n# Ledger sweep retry budget run " + run + "\n\nThe retry budget held.\n"
+	}
+	f := newFixture(t, true, map[string]string{
+		"work/ledger-sweep/CARD.md":          "---\ntype: card\nstatus: live\nsummary: ledger sweep\n---\n# Ledger sweep\n",
+		"work/ledger-sweep/plans/PLAN.md":    "# Ledger sweep plan\n\nThree runs.\n",
+		"work/ledger-sweep/reports/run-b.md": report("b"),
+		"work/ledger-sweep/reports/run-c.md": report("c"),
+		"notes/lesson-ledger-retry-budget.md": note("lesson-ledger-retry-budget", "lesson", "current",
+			"Cap the ledger sweep retry budget at three attempts", []string{"image-lane"}, "retry budget"),
+	})
+	nm, seeds := f.names(t), Seeds{Work: []string{"ocr-census"}, Hubs: []string{"image-lane"}}
+	lk, err := Pointers(f.db, "Compare work/ledger-sweep/plans/PLAN.md with what the ledger sweep retry budget runs showed.", seeds, nm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ids(lk)
+	if !slices.Contains(got, "lesson-ledger-retry-budget") || !slices.Contains(got, "work/ledger-sweep/plans/PLAN.md") ||
+		slices.ContainsFunc(got, func(id string) bool { return strings.Contains(id, "/reports/run-") }) {
+		t.Fatalf("pointers %v: want the lesson and the named plan, and no unnamed run report", got)
+	}
+	seeds.Hide = func(id string) bool { return id == "lesson-ledger-retry-budget" }
+	if lk, err = Pointers(f.db, "What did the ledger sweep retry budget runs show in the image lane?", seeds, nm); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(lk); len(got) != 1 || !strings.Contains(got[0], "/reports/run-") {
+		t.Fatalf("pointers %v: want only the single best report", got)
+	}
+}
+
+// TestPausedBoxIsDemotedNotHidden catches a paused box hidden outright (the first pass lost pseudo-gen's DESIGN.md,
+// the only answer to a prompt about it) and one kept where a live box answers as well (identity-resolution boxes the
+// owner left on 2026-09-28 reached the laptop's digest on 2026-10-08): the paused box's sheet answers until a live
+// box's sheet exists; the digest takes the cwd's paused box only when its session named no live one.
+func TestPausedBoxIsDemotedNotHidden(t *testing.T) {
+	sheet := func(run string) string {
+		return "---\ntype: report\nstatus: live\nsummary: Census recall sheet of the " + run + "\n---\n# Census recall sheet, " + run + "\n\nRecall 0.91.\n"
+	}
+	f := newFixture(t, true, map[string]string{
+		"work/ledger/CARD.md":              "---\ntype: card\nstatus: live\nsummary: ledger\n---\n# Ledger\n",
+		"work/ledger/plans/PLAN.md":        "# Plan\n\nSee [the first sheet](../../ocr-census/reports/sheet.md) and [the rerun sheet](../../ocr-rerun/reports/sheet.md).\n",
+		"work/ocr-census/CARD.md":          "---\ntype: card\nstatus: paused\nsummary: OCR census\nhubs: [image-lane]\n---\n# OCR census\n",
+		"work/ocr-census/reports/sheet.md": sheet("first run"),
+		"work/ocr-rerun/CARD.md":           "---\ntype: card\nstatus: live\nsummary: OCR rerun\n---\n# OCR rerun\n",
+		"work/ocr-rerun/STATE.md":          "# State\n\nOCR rerun going.\n",
+		"work/ocr-rerun/reports/sheet.md":  sheet("rerun"),
+	})
+	nm := f.names(t)
+	const ask = "Follow work/ledger/plans/PLAN.md: where is the census recall sheet?"
+	noRerun := func(id string) bool { return strings.HasPrefix(id, "work/ocr-rerun") }
+	for _, tc := range []struct {
+		hide       func(string) bool
+		want, drop string
+	}{
+		{noRerun, "work/ocr-census/reports/sheet.md", ""},
+		{nil, "work/ocr-rerun/reports/sheet.md", "work/ocr-census/reports/sheet.md"},
+	} {
+		lk, err := Pointers(f.db, ask, Seeds{Hide: tc.hide}, nm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ids(lk); !slices.Contains(got, tc.want) || slices.Contains(got, tc.drop) {
+			t.Errorf("pointers %v: want %s and not %q", got, tc.want, tc.drop)
+		}
+	}
+	const chat = "What was the ocr recall on the image census?"
+	f.start(t, Input{SessionID: "s1"})
+	if got := f.prompt(t, "s1", chat); !strings.Contains(got, "Work ocr-census: STATE.md") {
+		t.Errorf("the cwd's only box is paused: the digest must still carry it:\n%s", got)
+	}
+	put(t, f.env.Root, "sessions/devbox/2026/10/2026-10-08-bbbb2222-ocr.md", "---\nid: session-2026-10-08-bbbb2222\ntype: session\ncwd: "+
+		f.cwd+"\nworks: [ocr-census, ocr-rerun]\n---\n## Owner prompts\n")
+	f.start(t, Input{SessionID: "s2"})
+	if got := f.prompt(t, "s2", chat); strings.Contains(got, "Work ocr-census") || !strings.Contains(got, "Work ocr-rerun: STATE.md") {
+		t.Errorf("the cwd's session named a live box: the digest must carry it, not the paused one:\n%s", got)
 	}
 }
 
@@ -171,7 +332,7 @@ func TestLookupLogHasNoPromptText(t *testing.T) {
 	}
 	var rows int
 	var dump string
-	err := f.db.QueryRow(`SELECT count(*), group_concat(time || session || hook || candidates || chosen, '|') FROM lookups`).Scan(&rows, &dump)
+	err := f.db.QueryRow(`SELECT count(*) FILTER (WHERE hook = 'prompt'), group_concat(time || session || hook || candidates || chosen, '|') FROM lookups`).Scan(&rows, &dump)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,8 +358,8 @@ func TestShadowInjectsNothing(t *testing.T) {
 	}
 	var lookups, stats int
 	f.db.QueryRow(`SELECT (SELECT count(*) FROM lookups), (SELECT count(*) FROM node_stats)`).Scan(&lookups, &stats)
-	if lookups != 2 || stats != 0 {
-		t.Fatalf("lookups %d (want 2), node_stats %d (want 0)", lookups, stats)
+	if lookups != 3 || stats != 0 {
+		t.Fatalf("lookups %d (want start, digest, prompt), node_stats %d (want 0)", lookups, stats)
 	}
 }
 
@@ -255,44 +416,14 @@ func TestExploreSlotGoesToFreshNote(t *testing.T) {
 }
 
 // TestChatterInABoxWorktreeAbstains catches the session's own work box opening the gate by itself: "try now" typed
-// in the box's worktree must not get the box's STATE or CARD as pointers (the start digest already carries them).
+// in the box's worktree gets no pointers (its first prompt carries the box's digest, nothing more).
 func TestChatterInABoxWorktreeAbstains(t *testing.T) {
 	f := newFixture(t, true, nil)
 	f.cwd = filepath.Join(filepath.Dir(f.cwd), "ocr-census")
 	for _, chatter := range []string{"try now", "continue please"} {
-		if got := f.prompt(t, "s1", chatter); got != "" {
+		if got := f.prompt(t, "s1", chatter); strings.Contains(got, "Brain pointers") {
 			t.Errorf("%q in the box's worktree got pointers:\n%s", chatter, got)
 		}
-	}
-}
-
-// TestBriefPointsAtNamedAndOwnDocs catches a dispatch brief pointed at a note its boilerplate names by alias instead
-// of the brief it names by path and the worker's own report (navigation top-3 was 5.5% on 2026-10-08), and a
-// sibling folder whose name differs only in a number (cascade-4 for a cascade-5 worker).
-func TestBriefPointsAtNamedAndOwnDocs(t *testing.T) {
-	f := newFixture(t, true, map[string]string{
-		"notes/playbook-orca-orchestration.md":      note("playbook-orca-orchestration", "playbook", "current", "How workers report through orca orchestration", []string{"image-lane"}, "orca orchestration"),
-		"work/slice-x/briefs/cascade-5.md":          "# Cascade 5 brief\n\nGate the fifth cascade.\n",
-		"work/slice-x/evidence/cascade-5/REPORT.md": "# Cascade 5 report\n\nGate held.\n",
-		"work/slice-x/evidence/cascade-4/REPORT.md": "# Cascade 4 report\n\nGate held.\n",
-	})
-	nm, err := BuildNames(f.db, func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b })
-	if err != nil {
-		t.Fatal(err)
-	}
-	brief := "=== TASK === Run the gate. Brief: /Users/someone/Documents/work-repo/saahil-docs/slice-x/briefs/cascade-5.md " +
-		"Report through orca orchestration when done."
-	lk, err := Pointers(f.db, brief, Seeds{Folder: "cascade-5-slice-x"}, nm)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, p := range lk.Chosen {
-		got = append(got, p.ID)
-	}
-	if len(got) == 0 || got[0] != "work/slice-x/briefs/cascade-5.md" || !slices.Contains(got, "work/slice-x/evidence/cascade-5/REPORT.md") ||
-		slices.Contains(got, "work/slice-x/evidence/cascade-4/REPORT.md") {
-		t.Fatalf("pointers %v: want the brief first, then the cascade-5 report, never cascade-4's", got)
 	}
 }
 
@@ -309,13 +440,9 @@ func TestNamingAFolderDoesNotDoubleItsNamedFiles(t *testing.T) {
 		"work/lane-z/recon/b.md":    "# Recon b\n\nSecond probe.\n",
 		"work/lane-z/recon/c.md":    "# Recon c\n\nThird probe.\n",
 	})
-	nm, err := BuildNames(f.db, func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b })
-	if err != nil {
-		t.Fatal(err)
-	}
 	brief := "=== TASK === Attack the design in work/lane-z/plans/SPEC.md. Inputs in work/lane-z/recon/: " +
 		"work/lane-z/recon/a.md, work/lane-z/recon/b.md and work/lane-z/recon/c.md."
-	lk, err := Pointers(f.db, brief, Seeds{}, nm)
+	lk, err := Pointers(f.db, brief, Seeds{}, f.names(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,19 +459,12 @@ func TestNoPointerToTheBriefThePromptHolds(t *testing.T) {
 		"work/slice-x/briefs/w9.md":  "# W9\n\n" + text + "\n",
 		"work/slice-x/plans/PLAN.md": "# Plan\n\nThe census plan.\n",
 	})
-	nm, err := BuildNames(f.db, func(p string) []byte { b, _ := os.ReadFile(filepath.Join(f.env.Root, p)); return b })
-	if err != nil {
-		t.Fatal(err)
-	}
 	brief := "=== TASK === W9 " + text + " Brief: work/slice-x/briefs/w9.md; plan: work/slice-x/plans/PLAN.md."
-	lk, err := Pointers(f.db, brief, Seeds{}, nm)
+	lk, err := Pointers(f.db, brief, Seeds{}, f.names(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, p := range lk.Chosen {
-		got = append(got, p.ID)
-	}
+	got := ids(lk)
 	if slices.Contains(got, "work/slice-x/briefs/w9.md") || !slices.Contains(got, "work/slice-x/plans/PLAN.md") {
 		t.Fatalf("pointers %v: want the plan, never the brief the prompt holds", got)
 	}

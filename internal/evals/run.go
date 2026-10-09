@@ -547,7 +547,7 @@ func (e *Env) Navigation() (Report, error) {
 		r.Top3 = t.any(r.Pointers)
 		r.BoxTop3 = sharesBox(it.Targets, r.Pointers)
 		r.Calls = e.brainCalls(q, t, g)
-		l0, err := e.levelZero(it.CWD, g)
+		l0, err := e.levelZero(it.CWD, q, g)
 		if err != nil {
 			return Report{}, fmt.Errorf("%s: L0: %w", it.ID, err)
 		}
