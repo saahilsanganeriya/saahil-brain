@@ -3,10 +3,16 @@
 # It is an Orca session in a fresh worktree of saahil-brain off main, driven by a /goal rendered from
 # templates/brain-care-goal.md; it checks both machines, fixes the brain's code, reports and stops itself.
 # A backstop stops it 2.5 h after the start whatever happens.
+# Paths come from ~/.config/brain/identity.json (brain_repo, laptop_home), spelled as on the laptop.
 set -euo pipefail
-repo=/Users/test-user/Documents/saahil-brain
-brain=/Users/test-user/.local/bin/brain
-runs=/Users/test-user/brain/work/brain-care/runs
+identity=$HOME/.config/brain/identity.json
+ident() { [ -f "$identity" ] && python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v,str) else "")' "$identity" "$1"; }
+laptop_home=$(ident laptop_home || true)
+laptop_home=${laptop_home:-/Users/$(id -un)}
+repo=$(ident brain_repo || true)
+repo=${repo:-$laptop_home/Documents/saahil-brain}
+brain=$laptop_home/.local/bin/brain
+runs=$laptop_home/brain/work/brain-care/runs
 day=$(TZ=America/Los_Angeles date +%Y-%m-%d)
 run=$day
 for n in 2 3 4 5 6 7 8 9; do [ -e "$runs/$run" ] || break; run=$day-$n; done
@@ -15,7 +21,8 @@ out=$runs/$run
 mkdir -p "$out"
 
 git -C "$repo" pull --ff-only -q
-sed -e "s|{{NAME}}|$name|g" -e "s|{{DATE}}|$run|g" -e "s|{{RUN}}|$run|g" "$repo/templates/brain-care-goal.md" >"$out/GOAL.md"
+sed -e "s|{{NAME}}|$name|g" -e "s|{{DATE}}|$run|g" -e "s|{{RUN}}|$run|g" -e "s|{{BRAIN_REPO}}|$repo|g" \
+  "$repo/templates/brain-care-goal.md" >"$out/GOAL.md"
 
 "$brain" agents new "$name" --repo "$repo" --base origin/main
 "$brain" agents goal "$name" "$out/GOAL.md"

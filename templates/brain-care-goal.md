@@ -1,4 +1,4 @@
-GOAL: Daily brain care {{DATE}}: keep Saahil's brain healthy on both machines and make it measurably better by one step a day, from its own records. You are {{NAME}}, an Orca session on the devbox in a fresh worktree of saahil-brain off main (this folder). Read ~/brain/BRAIN.md, this repo's FORMAT.md and templates/brain-care-playbook.md (the method) first.
+GOAL: Daily brain care {{DATE}}: keep the brain healthy on both machines and make it measurably better by one step a day, from its own records. You are {{NAME}}, an Orca session on the devbox in a fresh worktree of saahil-brain off main (this folder). Read ~/brain/BRAIN.md, this repo's FORMAT.md and templates/brain-care-playbook.md (the method) first.
 
 1. HEALTH (paste each command and result into the report): brain doctor; brain peer step doctor --wait 10m (laptop); brain dream status and failed steps of the last 24 h in ~/brain/.brain/dream-runs/; systemctl --user is-active brain-temporal brain-worker; brain peer step sync --wait 20m. Fix anything broken at its root first (code: failing test, fix, put the defect back to see the test fail, go test -p 4 ./... green; state: brain index, brain sync --archive-conflicts, brain apply-delta).
 
@@ -10,6 +10,6 @@ LIMITS: about 90 minutes; at most $5 of model calls. Never delete brain data (mo
 
 REPORT: ~/brain/work/brain-care/runs/{{RUN}}/REPORT.md: health (command, result); the metrics table with changes since yesterday; yesterday's change checked; today's experiment (hypothesis, numbers, verdict, commit); what stays open. Then one line: happier notify -t brain-care -p "<health> | <experiment and verdict> | <needs you: ...>".
 
-WIND DOWN: once main has your commits (or you made none): b=$(git branch --show-current); git -C /Users/test-user/Documents/saahil-brain pull --ff-only -q; orca-ide worktree rm --worktree path:<this folder> --force; git -C /Users/test-user/Documents/saahil-brain branch -D "$b"; then, as your very last command, brain agents stop {{NAME}}.
+WIND DOWN: once main has your commits (or you made none): b=$(git branch --show-current); git -C {{BRAIN_REPO}} pull --ff-only -q; orca-ide worktree rm --worktree path:<this folder> --force; git -C {{BRAIN_REPO}} branch -D "$b"; then, as your very last command, brain agents stop {{NAME}}.
 
 DONE when: the report holds the health output, the metrics table and the experiment record; brain doctor is green on both machines or the report says why not; EXPERIMENTS.md has today's entry; every kept change is on main and installed on both machines; the owner is notified; this worktree is removed and {{NAME}} is stopped.
