@@ -5,9 +5,9 @@
 named `dream/<UTC hour>`; `brain dream run --now [--shadow]` starts one directly under the same id.
 
 ```
-gate ─► snapshot ─► reconcile ─► capture ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs ─► curate.merge ─► summarise ─► render ─► check ─► verify ─► reindex ─► commit
-det      git+tar     det          brain CLI   distil   det        file    link           hubs        merge             summarise    brain CLI  lint      verify    brain CLI   state+report+git
-                                              Opus     (index)    Haiku   Opus           Opus        Opus ×≤2          Haiku                   (revert)  Opus
+gate ─► snapshot ─► reconcile ─► capture ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs ─► curate.merge ─► curate.cards ─► summarise ─► render ─► check ─► verify ─► reindex ─► commit
+det      git+tar     det          brain CLI   distil   det        file    link           hubs        merge             card            summarise    brain CLI  lint      verify    brain CLI   state+report+git
+                                              Opus     (index)    Haiku   Opus           Opus        Opus ×≤2          Haiku ×≤4       Haiku                   (revert)  Opus
 ```
 
 `demote` sets `node_stats.demoted_at` on a node shown 10 times as a pointer and never opened or followed, and clears
@@ -25,8 +25,8 @@ Material = `.md` files changed after the area's watermark in `.brain/dream-state
 
 Oldest first; what is over the cap waits. A watermark advances only when its step ran (an `ok` answer, cached or
 not, or no input) — a missing skill, a cost stop or a failure leaves the material for the next dream. Before the first
-dream the docs area starts 24 h back; older docs are the backfill's job. `notes/`, `hubs/`, `journal/` are never
-scanned, so the dream's own writes do not wake the next dream.
+dream the docs area starts 24 h back; older docs are the backfill's job. `notes/`, `hubs/`, `journal/` and
+`work/<box>/CARD.md` are never scanned, so the dream's own writes do not wake the next dream.
 
 Skip when nothing is new; otherwise run only if ≥ 12 h since the last dream or ≥ 30 new sessions (`--now` lifts this
 rule only). Lock: `.brain/dream.lock` (pid, start, run id), stale after 3 h.
@@ -87,6 +87,23 @@ the brain (`--ledger <dir>`, else a temp folder). `--budget` (per call, default 
 it; `--out <file>` writes the delta for `brain apply-delta`. `--find-answer` uses a recorded find answer instead of a
 model call; the bodies calls then go to the model, unless `--bodies-answer` gives a recorded answer for them too.
 
+## curate.cards — a CARD follows its box
+
+The start digest gives the CARD of a box to each session in that box. The backfill wrote the CARDs once; this step
+keeps them current. On 2026-10-09 the image-lane CARD (22:28Z) said "nothing merged", while its STATE (00:25Z) had 10
+merged PRs.
+
+| Part | What it does |
+|---|---|
+| plan (`CardsPlan`) | Live brain only (in shadow the step is skipped). For each box in `work/`: the newest regular file outside bulk folders (`artifacts/`, `cache*`, `venv/`, dot-folders; `CARD.md` is not work) and the mtime of `CARD.md`. A box is stale when that file is ≥ 1 h newer than its CARD, or when it has files and no CARD. A `done` or `paused` CARD is no exception: new work after it (a resumed campaign) makes it stale, and with no new work it stays. Stalest first: no CARD, then the longest lag. At most 4 boxes for each dream; the others wait. Nothing stale: skipped, `no stale cards`. |
+| refresh (`BackfillCard`, Haiku) | The `card` skill on the box inventory, as in the backfill, one box at a time. The call is keyed to the dream (`curate.cards/<box>`) and paid under the $8 cap of the run, with the spend of the run before it. A refused answer is asked again once. |
+| apply | The CARD comes back as an edit for `ApplyEdits`: backup, lint, revert, the 50-edit cap. CARDs do not go to `verify`, which checks notes. An answer equal to the CARD on disk only touches its mtime, so the box is not picked again until its work changes. |
+| record | `refreshed`, `unchanged (touched)`, `skipped` (with the reason, for example the cost cap), `failed` and `wait for the next dream`, with box names only (≤ 10 for each list). |
+
+When the cap stops a call, the step skips the boxes that are left, with the reason, and the later LLM steps of the
+run stop too. `brain dream cards --dry-run` shows what the plan would pick now: each stale box with the age and status
+of its CARD and its newest file. It reads only; it calls no model and writes nothing.
+
 ## Cost and idempotency
 
 Key = sha256(workflow, step, model, sha(skill), sha(input)) in `llm_calls` (`.index/brain.db`); a `done` key is
@@ -114,11 +131,13 @@ brain dream schedule [--shadow=false]                       # create/update brai
 temporal schedule toggle --schedule-id brain-dream-hourly --unpause --reason go -n brain --address 127.0.0.1:7233
 brain-worker --llm fake                                     # no model: empty edits (shadow checks)
 brain dream merge [--ledger <dir>] [--out delta.json]          # what curate.merge would change; applies nothing
+brain dream cards --dry-run                                 # the stale CARDs curate.cards would refresh now
 ```
 
 Reports: `.brain/dream-runs/<run-id>.json` per run; the latest skip in `.brain/dream-last-skip.json`. The replay
 fixture `testdata/dream-history.json` comes from a run against a synthetic brain; re-record it (run, then
 `temporal workflow show -w dream/<hour> -n brain --output json`) when the workflow's step order changes on purpose. It
 is from before curate.merge and must replay without the step. `testdata/dream-merge-history.json` goes through a merge
-that edits notes; `go test -tags record -run TestRecordMergeHistory ./internal/dream` records it again on a throwaway
-dev server.
+that edits notes (from before curate.cards); `testdata/dream-cards-history.json` goes through a CARD refresh.
+`go test -tags record -run 'TestRecord(Merge|Cards)History' ./internal/dream` records them again on a throwaway dev
+server.

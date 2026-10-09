@@ -15,6 +15,8 @@ plan (det) ──► batch child × ⌈boxes/8⌉, one at a time ──► repor
 - **Where a CARD goes**: no `.brain/live` (shadow) → `.brain/staging/work/<box>/CARD.md`; live → `work/<box>/CARD.md`,
   an older CARD first copied to `.archive/backfill/<run>/`. The index presents staged CARDs at `work/<box>/CARD.md`.
   After the cut-over, `brain backfill promote-cards` moves them in (an existing CARD goes to `.archive/` first).
+- **After the backfill** the dream's `curate.cards` refreshes a CARD that is ≥ 1 h behind the work of its box, 4 boxes
+  for each dream, under the dream's $8 cap (`dream.md`).
 - **A CARD is refused** when it is over 3 KB, its status is not `live|paused|done`, a hub is not seeded, or a key file
   does not exist in the box or is a superseded / `.archive/` / `log/` copy.
 - **Finished campaign** = the CARD says `done`, or the newest file is > 14 days old and STATE says

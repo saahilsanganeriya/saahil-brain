@@ -183,7 +183,7 @@ func scan(since time.Time, roots ...root) ([]Material, error) {
 			}
 			rel, _ := filepath.Rel(r.abs, p)
 			rel = filepath.Join(r.relPrefix, rel)
-			if rel == filepath.Join("memory", "MEMORY.md") { // rendered by the dream itself
+			if rel == filepath.Join("memory", "MEMORY.md") || isCard(rel) { // written by the dream itself
 				return nil
 			}
 			fi, err := d.Info()
@@ -206,6 +206,11 @@ func scan(since time.Time, roots ...root) ([]Material, error) {
 		return out[i].Rel < out[j].Rel
 	})
 	return out, nil
+}
+
+func isCard(rel string) bool {
+	parts := strings.Split(rel, string(filepath.Separator))
+	return len(parts) == 3 && parts[0] == "work" && parts[2] == "CARD.md"
 }
 
 // capped takes the oldest n (n == 0: all) and moves the area's watermark to the newest one taken, so the rest waits.

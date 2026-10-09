@@ -9,10 +9,11 @@ import (
 // TestDreamReplaysRecordedHistory catches a non-deterministic change to DreamWorkflow — reordered, added or removed
 // activities, or a branch on wall-clock state — that would wedge every in-flight dream on the next worker deploy.
 // Both histories were recorded on a local dev server against a synthetic brain (testdata/): dream-history.json from
-// before curate.merge (it must replay without the step), dream-merge-history.json through a merge that edited notes
-// (record_test.go re-records it).
+// before curate.merge (it must replay without the step), dream-merge-history.json through a merge that edited notes,
+// dream-cards-history.json through a CARD refresh (record_test.go re-records the last two).
 func TestDreamReplaysRecordedHistory(t *testing.T) {
-	for _, file := range []string{"testdata/dream-history.json", "testdata/dream-merge-history.json"} {
+	for _, file := range []string{"testdata/dream-history.json", "testdata/dream-merge-history.json",
+		"testdata/dream-cards-history.json"} {
 		replayer := worker.NewWorkflowReplayer()
 		replayer.RegisterWorkflow(DreamWorkflow)
 		replayer.RegisterWorkflow(LearnSessionWorkflow)
