@@ -64,6 +64,7 @@ func Open(dbPath string) (*Store, error) {
 		return nil, err
 	}
 	dsn := "file:" + dbPath + "?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)" +
+		mmapPragma() +
 		"&_pragma=cache_size(-65536)&_pragma=temp_store(MEMORY)&_pragma=journal_size_limit(67108864)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -78,6 +79,14 @@ func Open(dbPath string) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.DB.Close() }
+
+// mmapPragma maps the index into memory when BRAIN_SQLITE_MMAP holds a byte count (hook bench --cold compares it).
+func mmapPragma() string {
+	if n, err := strconv.ParseInt(os.Getenv("BRAIN_SQLITE_MMAP"), 10, 64); err == nil && n > 0 {
+		return fmt.Sprintf("&_pragma=mmap_size(%d)", n)
+	}
+	return ""
+}
 
 // meta predates every migration because it records which ones ran.
 func (s *Store) migrate() error {

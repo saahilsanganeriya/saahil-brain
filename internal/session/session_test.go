@@ -291,7 +291,7 @@ func TestRedactsBareHighEntropyToken(t *testing.T) {
 		"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // sha256 hex
 		"483fc905-54af-44d2-81f8-2a642b9f5cac",                             // uuid
 		"anti-pattern-relayed-instruction-is-a-post-for-the-owner",         // kebab id
-		"/Users/test-user/brain/work/box/plans/SPEC-UNIFY.md",      // path
+		"/Users/test-user/brain/work/box/plans/SPEC-UNIFY.md",              // path
 	}
 	for _, k := range keep {
 		if out := Redact("x " + k + " y"); !strings.Contains(out, k) {

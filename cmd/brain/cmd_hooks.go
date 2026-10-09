@@ -118,7 +118,11 @@ func cmdHookBench(args []string) int {
 		return fail("qa set: %v (brain eval build makes it)", err)
 	}
 	if *cold {
-		return benchCold(env, prompts)
+		if code := benchCold(env, prompts, ""); code != 0 {
+			return code
+		}
+		fmt.Println("the same prompts with the index memory-mapped (BRAIN_SQLITE_MMAP=2147483648):")
+		return benchCold(env, prompts, "2147483648")
 	}
 	took, abstained, err := hooks.Bench(env, prompts, config.BrainRoot())
 	if err != nil || len(took) == 0 {
@@ -132,7 +136,7 @@ func cmdHookBench(args []string) int {
 
 // benchCold runs each prompt in a fresh process of this binary, as a hook runs, and reports each phase's p50 and
 // p95, the whole process's wall time, and the sizes of the files a hook opens: what a warm in-process bench hides.
-func benchCold(env hooks.Env, prompts []string) int {
+func benchCold(env hooks.Env, prompts []string, mmap string) int {
 	exe, err := os.Executable()
 	if err != nil {
 		return fail("%v", err)
@@ -145,7 +149,9 @@ func benchCold(env hooks.Env, prompts []string) int {
 	var slowest []slow
 	for _, p := range prompts {
 		started := time.Now()
-		out, err := exec.Command(exe, "hook", "bench", "--one", p).Output()
+		cmd := exec.Command(exe, "hook", "bench", "--one", p)
+		cmd.Env = append(os.Environ(), "BRAIN_SQLITE_MMAP="+mmap)
+		out, err := cmd.Output()
 		if err != nil {
 			return fail("child: %v", err)
 		}
