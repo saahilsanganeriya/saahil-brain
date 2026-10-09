@@ -426,6 +426,37 @@ func TestPostCountsOncePerSession(t *testing.T) {
 	}
 }
 
+// TestPostLogsEveryBrainPullWithItsChannel catches MCP use being invisible (2026-10-09): only a session's first pull
+// was logged, so how much the brain's tools are used could not be measured, nor MCP told from the CLI.
+func TestPostLogsEveryBrainPullWithItsChannel(t *testing.T) {
+	f := newFixture(t, true, nil)
+	f.prompt(t, "s1", "what was the ocr recall on the image census?")
+	for _, c := range []struct{ tool, input string }{
+		{"mcp__saahil-brain__brain_search", `{"query":"ocr recall"}`},
+		{"mcp__saahil-brain__brain_search", `{"query":"census"}`},
+		{"Bash", `{"command":"brain show finding-ocr-recall"}`},
+	} {
+		if err := Post(f.env, Input{SessionID: "s1", ToolName: c.tool, ToolInput: json.RawMessage(c.input)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := f.db.Query(`SELECT candidates FROM lookups WHERE hook = 'pull' AND session = 's1' ORDER BY time, rowid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var c string
+		_ = rows.Scan(&c)
+		got = append(got, c)
+	}
+	want := []string{`["brain_search","mcp"]`, `["brain_search","mcp"]`, `["brain_show","cli"]`}
+	if !slices.Equal(got, want) {
+		t.Fatalf("pull rows %v, want %v", got, want)
+	}
+}
+
 // Catches the explore slot never opening: with three strong, well-shown matches, a fresh note that also matches
 // takes the third slot.
 func TestExploreSlotGoesToFreshNote(t *testing.T) {

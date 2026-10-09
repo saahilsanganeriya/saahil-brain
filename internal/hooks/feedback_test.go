@@ -38,7 +38,7 @@ func (f fixture) post(t *testing.T, session, tool string, input any) {
 // read with cat, sed -n, head or rg (by absolute path, ~, a shell variable or after a cd) or opened with brain_show /
 // `brain show` must count opened once per session, and log the post row the dream's learn step reads; an in-place
 // sed, a redirect into the file, a heredoc body, a search of its folder or a read of an unshown note must not. Brain
-// search, show, sections and neighbors mark the session as pulling from the brain, once.
+// search, show, sections and neighbors log a pull for each call (the pull rate counts the session once).
 func TestReadsByBashAndBrainToolsCountAsOpened(t *testing.T) {
 	f := newFixture(t, true, nil)
 	p := filepath.Join(f.env.Root, "notes", "finding-ocr-recall.md")
@@ -73,7 +73,7 @@ func TestReadsByBashAndBrainToolsCountAsOpened(t *testing.T) {
 		if want := map[bool]int{true: 1}[c.opened]; opened != want {
 			t.Errorf("%s %v: %d opened rows, want %d", c.tool, c.input, opened, want)
 		}
-		if want := map[bool]int{true: 1}[c.pull]; pulled != want {
+		if want := map[bool]int{true: 2}[c.pull]; pulled != want {
 			t.Errorf("%s %v: %d pull rows, want %d", c.tool, c.input, pulled, want)
 		}
 	}

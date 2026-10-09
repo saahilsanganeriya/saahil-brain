@@ -27,8 +27,8 @@ func Post(env Env, in Input) error {
 	if ok {
 		hits = use.hits(env, st)
 	}
-	// without a state file (no start hook ran) a pull cannot be deduplicated: log each one
-	pull := use.pull != "" && !st.Counted["pull"]
+	// every pull is logged, with its channel: the pull rate counts sessions, the volume counts calls
+	pull := use.pull != ""
 	if len(hits) == 0 && !pull {
 		return nil
 	}
@@ -55,14 +55,18 @@ func Post(env Env, in Input) error {
 		}
 	}
 	if pull {
-		if err := logLookup(tx, env.Now(), session, "pull", []string{use.pull}, []string{}, false, 0); err != nil {
+		channel := "cli"
+		if strings.HasPrefix(in.ToolName, "mcp__") {
+			channel = "mcp"
+		}
+		if err := logLookup(tx, env.Now(), session, "pull", []string{use.pull, channel}, []string{}, false, 0); err != nil {
 			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if !ok {
+	if !ok || len(hits) == 0 {
 		return nil
 	}
 	if st.Counted == nil {
@@ -70,9 +74,6 @@ func Post(env Env, in Input) error {
 	}
 	for _, id := range hits {
 		st.Counted[use.field+":"+id] = true
-	}
-	if pull {
-		st.Counted["pull"] = true
 	}
 	return env.saveState(session, st)
 }
