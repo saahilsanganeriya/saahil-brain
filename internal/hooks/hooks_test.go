@@ -204,6 +204,44 @@ func TestDigestWorkArrivesWithTheFirstPrompt(t *testing.T) {
 	}
 }
 
+// TestDigestListsWhatTheWorksSessionsReadMost catches a digest silent on the files earlier sessions on its work kept
+// reading (on 2026-10-04 slice-a gate workers each spent calls finding the driver campaign's STATE.md and ledger,
+// read by most slice-a sessions before them): most-read first, a file one session read, a folder summary (sessions
+// list a folder they ls) and what the digest quotes stay out, and a replay counts only the sessions that had ended
+// by its start.
+func TestDigestListsWhatTheWorksSessionsReadMost(t *testing.T) {
+	session := func(id string, works, touched []string) string {
+		return "---\nid: session-" + id + "\ntype: session\nended: 2026-10-07T10:00:00Z\nworks: [" + strings.Join(works, ", ") +
+			"]\ntouched: [" + strings.Join(touched, ", ") + "]\n---\n## Owner prompts\n"
+	}
+	slice, lane := []string{"slice-y"}, []string{"lane-a"}
+	read := []string{"work/driver/STATE.md", "work/driver/LEDGER.md", "work/slice-y/STATE.md", "work/driver/artifacts"}
+	f := newFixture(t, true, map[string]string{
+		"work/slice-y/CARD.md":                          "---\ntype: card\nstatus: live\nsummary: slice y\n---\n# Slice Y\n",
+		"work/slice-y/STATE.md":                         "# State\n\nGate two is next.\n",
+		"work/lane-a/CARD.md":                           "---\ntype: card\nstatus: live\nsummary: lane a\n---\n# Lane A\n",
+		"work/driver/STATE.md":                          "# Driver state\n\nThe stack and its gates.\n",
+		"work/driver/LEDGER.md":                         "# Failure ledger\n\nRows still open.\n",
+		"work/driver/plans/old-plan.md":                 "# Old plan\n\nSuperseded thinking.\n",
+		"work/driver/artifacts/run.json":                "{}",
+		"sessions/devbox/2026/10/2026-10-05-a1-gate.md": session("a1", slice, read),
+		"sessions/devbox/2026/10/2026-10-05-a2-gate.md": session("a2", slice, read),
+		"sessions/devbox/2026/10/2026-10-06-a3-gate.md": session("a3", slice, []string{"work/driver/STATE.md", "work/driver/plans/old-plan.md", "work/driver/artifacts"}),
+		"sessions/devbox/2026/10/2026-10-06-b1-lane.md": session("b1", lane, []string{"work/driver/plans/old-plan.md"}),
+	})
+	digest := digestPart(f.prompt(t, "s1", "Pick up work/slice-y/STATE.md and run gate two."))
+	state, ledger := strings.Index(digest, "[[work/driver/STATE.md]] (3)"), strings.Index(digest, "[[work/driver/LEDGER.md]] (2)")
+	if state < 0 || ledger < state || strings.Contains(digest, "old-plan") || strings.Contains(digest, "artifacts") ||
+		strings.Contains(digest, "[[work/slice-y/STATE.md]]") {
+		t.Fatalf("first prompt's digest must list the driver's STATE, then its ledger, and no file read once, folder or quoted file:\n%s", digest)
+	}
+	visible := func(p string) bool { return p != "sessions/devbox/2026/10/2026-10-05-a2-gate.md" }
+	replay := DigestAsOf(f.env, f.db, f.cwd, "Pick up work/slice-y/STATE.md and run gate two.", visible).Text
+	if !strings.Contains(replay, "[[work/driver/STATE.md]] (2)") || strings.Contains(replay, "LEDGER") {
+		t.Fatalf("a replay must not count a session that had not ended by its start:\n%s", replay)
+	}
+}
+
 // TestPointersSkipWhatTheDigestQuotes catches pointers spent on what L0 already holds (on 2026-10-08 the image-lane
 // coordinator was pointed at its own stale CARD) and the first pass's hiding of the session's whole box (it lost the
 // session's own AUDIT.md, the answer to the prompt): the box's CARD stays out, its report on the asked question

@@ -25,7 +25,7 @@ fields: `hubs about evidence supersedes sources related broader`. A claim (findi
 
 | Level | What reaches you | Budget |
 |---|---|---|
-| L0 loaded | this file, `memory/MEMORY.md`, `hot.md` at start; with your first prompt, the STATE + CARD of the work it names (else the cwd's) and its hubs' start-here | ≤ 8,000 chars |
+| L0 loaded | this file, `memory/MEMORY.md`, `hot.md` at start; with your first prompt, the STATE + CARD of the work it names (else the cwd's), the files its earlier sessions read most, and its hubs' start-here | ≤ 8,000 chars |
 | L1 nudged | each prompt: up to 3 pointers (id, one line, why), never to your work's CARD — or nothing when nothing fits | ≤ 300 tokens |
 | L2 pulled | the five tools below, when you need more | you decide |
 | L3 read | the file itself, one section by line range, or the artifact | you decide |

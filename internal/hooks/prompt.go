@@ -932,7 +932,7 @@ func (e Env) turn(db *sql.DB, nm *Names, prompt, folder string, st *state, withH
 		if withHot {
 			header = startHeader
 		}
-		d = composeDigest(e, header, withHot, pickWork(e, q.namedBoxes(), st.CwdWork, nil), config.DigestMaxChars-st.DigestChars, nil)
+		d = composeDigest(e, header, withHot, pickWork(e, q.namedBoxes(), st.CwdWork, nil), config.DigestMaxChars-st.DigestChars, nil, e.oftenCache())
 		st.Work, st.Hubs, st.DigestOwed, st.CwdWork, st.DigestChars = d.Work, d.Hubs, false, nil, 0
 	}
 	lk := Lookup{Abstained: true}
