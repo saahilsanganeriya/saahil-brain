@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 
 const HOST = "omp";
-const BRAIN = process.env.BRAIN_BIN || "/Users/test-user/.local/bin/brain";
+const BRAIN = process.env.BRAIN_BIN || "@BRAIN_BIN@";
 const TIMEOUT_MS = 5_000;
 const TEXT_MAX = 8_000;
 

@@ -11,14 +11,6 @@ import (
 	"time"
 )
 
-// Both machines see the owner's home at LaptopHome: the devbox bind-mounts DevboxHome there, so every stored path
-// uses the laptop spelling and stays valid on either machine.
-const (
-	LaptopHome = "/Users/test-user"
-	DevboxHome = "/home/test-user"
-	DevboxHost = "devbox-host"
-)
-
 type Machine string
 
 const (
@@ -44,24 +36,26 @@ func (m Machine) Other() Machine {
 	return Laptop
 }
 
-// Canonical maps either spelling of a home path to the laptop spelling and cleans it.
+// Canonical maps either spelling of a home path to the laptop spelling and cleans it. Both machines see the person's
+// home at laptop_home (the devbox bind-mounts devbox_home there), so a stored path stays valid on either machine.
 func Canonical(path string) string {
 	if path == "" {
 		return ""
 	}
 	clean := filepath.Clean(path)
-	if clean == DevboxHome || strings.HasPrefix(clean, DevboxHome+"/") {
-		return LaptopHome + strings.TrimPrefix(clean, DevboxHome)
+	id := CurrentIdentity()
+	if id.DevboxHome != id.LaptopHome && (clean == id.DevboxHome || strings.HasPrefix(clean, id.DevboxHome+"/")) {
+		return id.LaptopHome + strings.TrimPrefix(clean, id.DevboxHome)
 	}
 	return clean
 }
 
-// Home is the canonical home; fixed rather than $HOME so tests and hooks under odd environments agree.
+// Home is the canonical home (laptop_home), not $HOME, so tests and hooks under odd environments agree.
 func Home() string {
 	if h := os.Getenv("BRAIN_HOME"); h != "" {
 		return h
 	}
-	return LaptopHome
+	return LaptopHome()
 }
 
 // BrainRoot is ~/brain unless BRAIN_ROOT points elsewhere (tests, shadow experiments).

@@ -19,6 +19,12 @@ import (
 // ShareDir holds what the binary lays out for hosts; its mod/ is what the Claude Code marketplace links to.
 func ShareDir() string { return filepath.Join(config.Home(), ".local", "share", "brain") }
 
+// render fills the placeholders the embedded mod and adapters carry with this person's binary and homes.
+func render(data []byte) []byte {
+	return []byte(strings.NewReplacer("@BRAIN_BIN@", BrainBinary(), "@LAPTOP_HOME@", config.LaptopHome(),
+		"@DEVBOX_HOME@", config.DevboxHome()).Replace(string(data)))
+}
+
 // ExtractMod writes the embedded plugin into <dir>/mod, replacing files whose content changed (atomic per file).
 func ExtractMod(dir string) (changed int, err error) {
 	root := filepath.Join(dir, "mod")
@@ -30,6 +36,7 @@ func ExtractMod(dir string) (changed int, err error) {
 		if err != nil {
 			return err
 		}
+		data = render(data)
 		dst := filepath.Join(root, path)
 		if old, err := os.ReadFile(dst); err == nil && string(old) == string(data) {
 			return nil
@@ -76,6 +83,7 @@ func modFileSteps() []Step {
 		if err != nil {
 			return err
 		}
+		data = render(data)
 		steps = append(steps, Step{Kind: "file", Path: filepath.Join(ModsDir(), ModName, path), Label: "mod",
 			Content: data, Owned: data[:min(len(data), 32)]})
 		return nil

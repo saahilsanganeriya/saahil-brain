@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"saahil.local/brain/internal/config/identitytest"
 )
 
 // TestParseSectionsLineRanges catches off-by-one section ranges, a "## " inside a fenced code block read as a
@@ -98,5 +100,19 @@ func TestFrontmatterWrappedFlowList(t *testing.T) {
 	}
 	if len(d.Hubs) != 2 || d.AsOf != "2026-10-04" {
 		t.Fatalf("hubs %v as_of %q", d.Hubs, d.AsOf)
+	}
+}
+
+// TestLinksAndPRsFollowTheIdentity catches a person's own absolute paths not counting as links (only the owner's two
+// homes did) and a bare "PR #123" in their docs pointing at the owner's repo instead of default_pr_repo.
+func TestLinksAndPRsFollowTheIdentity(t *testing.T) {
+	identitytest.Write(t, `{"laptop_home": "/Users/test-user", "devbox_home": "/home/test-user", "default_pr_repo": "example-org/widgets"}`)
+	d := Markdown([]byte("# Notes\n\nSee /Users/test-user/brain/notes/x.md and /home/test-user/runs/out.txt.\nMerged PR #123 today.\n"))
+	want := []Link{{Target: "/Users/test-user/brain/notes/x.md"}, {Target: "/home/test-user/runs/out.txt"}}
+	if !reflect.DeepEqual(d.Links, want) {
+		t.Errorf("links = %+v, want %+v", d.Links, want)
+	}
+	if !reflect.DeepEqual(d.Mentions, []string{"pr:example-org/widgets#123"}) {
+		t.Errorf("mentions = %v", d.Mentions)
 	}
 }

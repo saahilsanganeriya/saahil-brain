@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { Type } from "typebox";
 
 const HOST = "prime";
-const BRAIN = process.env.BRAIN_BIN || "/Users/test-user/.local/bin/brain";
+const BRAIN = process.env.BRAIN_BIN || "@BRAIN_BIN@";
 const TIMEOUT_MS = 5_000;
 const TEXT_MAX = 8_000;
 

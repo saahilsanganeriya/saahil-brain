@@ -21,19 +21,14 @@ import (
 	"saahil.local/brain/internal/config"
 )
 
-const (
-	// OrcaEnv is the devbox's Orca server as the laptop's orca CLI knows it, paired over the ssh -L 16768→6768
-	// LaunchAgent.
-	OrcaEnv = "00000000-0000-4000-8000-0000000000e1"
-	// OrcaRepo is work-repo on that server.
-	OrcaRepo = "id:00000000-0000-4000-8000-0000000000a1"
-)
-
 // SSH reaches the devbox with its own connection, so a stale ControlMaster never hangs a command.
 var SSH = []string{"ssh", "-o", "ConnectTimeout=8", "-o", "ControlPath=none"}
 
 // ErrViaBridge: from the devbox the laptop is reached only through the bridge's allow-listed operations.
 var ErrViaBridge = errors.New("the laptop is reached from the devbox only through the bridge's read-only operations")
+
+// ErrNoOrcaEnv: the laptop reaches the devbox's Orca server through the environment its Orca app paired, orca_env.
+var ErrNoOrcaEnv = errors.New("orca_env is not set: brain identity --init --orca-env <id> (the devbox's environment in the laptop's Orca app)")
 
 // Host runs commands on one machine: here, or on the devbox over ssh from the laptop. Run always starts a process on
 // THIS machine; Shell and Orca act on the host's machine.
@@ -53,7 +48,7 @@ func HostFor(here, target config.Machine, run agents.Runner) (Host, error) {
 	case here == target:
 		return Host{Machine: target, OrcaCLI: []string{"orca"}, Run: run}, nil
 	case here == config.Laptop:
-		return Host{Machine: config.Devbox, Remote: true, OrcaCLI: []string{"orca", "--environment", OrcaEnv}, Run: run}, nil
+		return Host{Machine: config.Devbox, Remote: true, OrcaCLI: []string{"orca", "--environment", config.CurrentIdentity().OrcaEnv}, Run: run}, nil
 	}
 	return Host{}, ErrViaBridge
 }
@@ -64,7 +59,7 @@ func (h Host) Shell(ctx context.Context, command string) (string, error) {
 	defer cancel()
 	name, args := "bash", []string{"-lc", command}
 	if h.Remote {
-		name, args = SSH[0], append(append([]string{}, SSH[1:]...), "-o", "BatchMode=yes", config.DevboxHost, "bash -lc "+Quote(command))
+		name, args = SSH[0], append(append([]string{}, SSH[1:]...), "-o", "BatchMode=yes", config.DevboxHost(), "bash -lc "+Quote(command))
 	}
 	out, err := h.Run(ctx, name, args...)
 	if err != nil {
@@ -75,6 +70,9 @@ func (h Host) Shell(ctx context.Context, command string) (string, error) {
 
 // Orca is one orca CLI call on the host's Orca runtime: its result, or Orca's own error.
 func (h Host) Orca(ctx context.Context, args ...string) (json.RawMessage, error) {
+	if h.Remote && h.OrcaCLI[len(h.OrcaCLI)-1] == "" {
+		return nil, ErrNoOrcaEnv
+	}
 	ctx, cancel := withDefaultTimeout(ctx, time.Minute)
 	defer cancel()
 	argv := append(append(append([]string{}, h.OrcaCLI[1:]...), args...), "--json")
@@ -92,7 +90,8 @@ func (h Host) Orca(ctx context.Context, args ...string) (json.RawMessage, error)
 	if !reply.OK {
 		msg := fmt.Sprintf("orca %s: %s", strings.Join(args[:min(2, len(args))], " "), reply.Error.Message)
 		if h.Remote {
-			msg += "\nif the server is unreachable: launchctl kickstart -k gui/$(id -u)/com.saahil.orca-devbox-tunnel"
+			msg += "\nif the server is unreachable: check the laptop's Orca app reaches its environment on " + config.DevboxHost() +
+				" (orca_env " + h.OrcaCLI[len(h.OrcaCLI)-1] + ")"
 		}
 		return nil, errors.New(msg)
 	}

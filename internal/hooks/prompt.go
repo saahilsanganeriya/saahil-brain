@@ -79,8 +79,11 @@ func init() {
 		do did doing our ours ourselves him his her hers she he me my mine myself we us it is be am an as at by if in
 		of on or so to up no go via per etc one two new way thing things something anything everything give take keep
 		run try tell said says say show showing check again full status update right wait yeah sorry able else
-		going gonna lot much many even ever every whatever users saahilsanganeriya saahil documents home https http
+		going gonna lot much many even ever every whatever users documents home https http
 		www com github`) {
+		stopwords[w] = true
+	}
+	for _, w := range config.PersonalWords() {
 		stopwords[w] = true
 	}
 }

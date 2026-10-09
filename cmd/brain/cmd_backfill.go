@@ -25,10 +25,6 @@ func init() {
 	register("backfill promote-cards", "after the cut-over: move staged CARDs into work/<box>/ (a CARD there goes to .archive/)", cmdBackfillPromote)
 }
 
-func shadowDocs() string {
-	return filepath.Join(config.Home(), "Documents", "work-repo", "saahil-docs")
-}
-
 func cmdBackfillRun(args []string) int {
 	fs := flag.NewFlagSet("backfill run", flag.ContinueOnError)
 	boxes := fs.String("boxes", "", "comma-separated box names (default: every box)")
@@ -68,7 +64,7 @@ func cmdBackfillRun(args []string) int {
 // backfillDryRun plans in-process: the plan is read-only code, so it needs neither the worker nor Temporal.
 func backfillDryRun(only []string, budget float64, includePaused bool) int {
 	root, now := config.BrainRoot(), time.Now().UTC()
-	live, plan, err := backfill.Plan(root, shadowDocs(), only, now, includePaused)
+	live, plan, err := backfill.Plan(root, config.ShadowDocRoot(), only, now, includePaused)
 	if err != nil {
 		return fail("plan: %v", err)
 	}

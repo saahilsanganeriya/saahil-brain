@@ -53,7 +53,7 @@ func syncRecordPath() string { return filepath.Join(config.StateDir(), "sync-las
 var workText = `Regex work/.*\.(` + strings.Join(config.SyncWorkTextExts, "|") + `)`
 
 func unisonArgs(root string) []string {
-	args := []string{root, "ssh://" + config.DevboxHost + "/" + root,
+	args := []string{root, "ssh://" + config.DevboxHost() + "/" + root,
 		"-batch", "-auto", "-times", "-perms", "0", "-copyonconflict", "-prefer", "newer",
 		"-servercmd", "/usr/bin/unison", "-sshargs", "-o BatchMode=yes -o ControlPath=none -o ConnectTimeout=10",
 		"-logfile", filepath.Join(config.StateDir(), "unison.log")}

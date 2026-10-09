@@ -8,10 +8,13 @@ import (
 	"html"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"saahil.local/brain/internal/config"
 )
 
 const SummaryMax = 160
@@ -405,12 +408,11 @@ func (d *Doc) applyFrontmatter(fm map[string]any) {
 // ---- links and mentions ----
 
 var (
-	mdLinkRE   = regexp.MustCompile(`\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
-	wikiRE     = regexp.MustCompile(`\[\[([^\]|#\n]+)(?:[#|][^\]\n]*)?\]\]`)
-	hrefRE     = regexp.MustCompile(`(?i)href="([^"#]+)`)
-	pullURLRE  = regexp.MustCompile(`github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)`)
-	ticketRE   = regexp.MustCompile(`\b(?:ABC|XYZ)-\d{1,5}\b`)
-	defaultPRs = "example-org/work-repo"
+	mdLinkRE  = regexp.MustCompile(`\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
+	wikiRE    = regexp.MustCompile(`\[\[([^\]|#\n]+)(?:[#|][^\]\n]*)?\]\]`)
+	hrefRE    = regexp.MustCompile(`(?i)href="([^"#]+)`)
+	pullURLRE = regexp.MustCompile(`github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)`)
+	ticketRE  = regexp.MustCompile(`\b(?:ABC|XYZ)-\d{1,5}\b`)
 )
 
 func links(body string) []Link {
@@ -428,7 +430,8 @@ func links(body string) []Link {
 	for _, m := range wikiRE.FindAllStringSubmatch(body, -1) {
 		add(Link{Target: strings.TrimSpace(m[1]), Wiki: true})
 	}
-	for _, home := range []string{"/Users/test-user/", "/home/test-user/"} {
+	id := config.CurrentIdentity()
+	for _, home := range slices.Compact([]string{id.LaptopHome + "/", id.DevboxHome + "/"}) {
 		for at := 0; ; {
 			i := strings.Index(body[at:], home)
 			if i < 0 {
@@ -512,7 +515,7 @@ func hashRefs(body string, set map[string]bool) {
 					set["pr:"+owner+"/"+repo+"#"+num] = true
 				}
 			} else if n >= 3 && saysPR(body[:i]) {
-				set["pr:"+defaultPRs+"#"+num] = true
+				set["pr:"+config.CurrentIdentity().DefaultPRRepo+"#"+num] = true
 			}
 		}
 		next := strings.IndexByte(body[i+1:], '#')

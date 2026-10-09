@@ -172,12 +172,12 @@ func (x *existence) nodeBefore(id string, t time.Time) bool {
 	return p == "" || x.before(p, t)
 }
 
-// abs is a node path on this machine's disk: work/… lives in the shadow saahil-docs until the cut-over fills
+// abs is a node path on this machine's disk: work/… lives in the shadow doc root (shadow_docs) until a cut-over fills
 // <brain>/work, and memory-import/<project>/… in that project's Claude Code memory folder.
 func (x *existence) abs(p string) string {
 	if rest, ok := strings.CutPrefix(p, "work/"); ok {
-		if _, err := os.Stat(filepath.Join(x.root, ".brain", "live")); err != nil {
-			return filepath.Join(config.Home(), "Documents", "work-repo", "saahil-docs", rest)
+		if _, err := os.Stat(filepath.Join(x.root, ".brain", "live")); err != nil && config.ShadowDocRoot() != "" {
+			return filepath.Join(config.ShadowDocRoot(), rest)
 		}
 	}
 	if rest, ok := strings.CutPrefix(p, "memory-import/"); ok {

@@ -1,1 +1,1 @@
-{ "command": "/Users/test-user/.local/bin/brain", "args": ["mcp"] }
+{ "command": "@BRAIN_BIN@", "args": ["mcp"] }

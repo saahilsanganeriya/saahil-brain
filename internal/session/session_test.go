@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"saahil.local/brain/internal/config"
+
+	"saahil.local/brain/internal/config/identitytest"
 )
 
 const fixtureID = "11111111-2222-4333-8444-555555555555"
@@ -127,6 +129,7 @@ func TestOwnerPromptsOnly(t *testing.T) {
 // Catches traces lost from Bash commands, subagents or the saahil-docs → work/<box> mapping, and messages/PRs
 // counted twice when Claude Code records them in two places.
 func TestTracesFromEveryToolInput(t *testing.T) {
+	identitytest.Owner(t) // the fixture's devbox paths are the owner's
 	res, note := writeNote(t, projectsFixture(t), t.TempDir())
 	wantLines := []string{
 		"touched: [work/demo-box/STATE.md, ",

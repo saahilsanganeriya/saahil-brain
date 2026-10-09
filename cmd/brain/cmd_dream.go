@@ -34,7 +34,7 @@ func dialDream() (client.Client, error) {
 func cmdDreamRun(args []string) int {
 	fs := flag.NewFlagSet("dream run", flag.ContinueOnError)
 	now := fs.Bool("now", false, "skip the 12 h / 30-session wait (the nothing-new skip and the lock still apply)")
-	shadow := fs.Bool("shadow", false, "also read the shadow doc roots (saahil-docs), read-only")
+	shadow := fs.Bool("shadow", false, "also read the shadow doc roots (shadow_docs in brain identity), read-only")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

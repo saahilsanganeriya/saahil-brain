@@ -66,7 +66,7 @@ func specs() []agentSpec {
 		{Label: TunnelLabel, Args: []string{"/usr/bin/ssh", "-N", "-o", "ExitOnForwardFailure=yes",
 			"-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", "-o", "BatchMode=yes",
 			"-o", "ControlMaster=no", "-o", "ControlPath=none",
-			"-R", "127.0.0.1:" + port + ":127.0.0.1:" + port, config.DevboxHost}, Throttle: 30,
+			"-R", "127.0.0.1:" + port + ":127.0.0.1:" + port, config.DevboxHost()}, Throttle: 30,
 			Log: filepath.Join(logs, "brain-tunnel.log"), Home: home},
 	}
 }
@@ -123,13 +123,13 @@ func SelfUpdate() error {
 	if config.ThisMachine() != config.Laptop {
 		return fmt.Errorf("self-update runs on the laptop; the devbox builds in place")
 	}
-	dist := filepath.Join(config.DevboxHome, ".local", "share", "brain", "dist")
+	dist := filepath.Join(config.DevboxHome(), ".local", "share", "brain", "dist")
 	target := filepath.Join(config.BinDir(), "brain")
 	tmp := filepath.Join(config.BinDir(), ".brain.new")
 	sumFile := tmp + ".sha256"
 	for src, dst := range map[string]string{dist + "/brain-darwin-arm64": tmp, dist + "/brain-darwin-arm64.sha256": sumFile} {
 		if out, err := exec.Command("scp", "-q", "-o", "BatchMode=yes", "-o", "ControlPath=none",
-			config.DevboxHost+":"+src, dst).CombinedOutput(); err != nil {
+			config.DevboxHost()+":"+src, dst).CombinedOutput(); err != nil {
 			return fmt.Errorf("scp %s: %v %s", src, err, out)
 		}
 	}

@@ -174,7 +174,7 @@ func PeerFor(m config.Machine) (Peer, error) {
 		}
 		return HTTPPeer{URL: fmt.Sprintf("http://127.0.0.1:%d", config.BridgePort), Token: strings.TrimSpace(string(token))}, nil
 	case config.Devbox:
-		return SSHPeer{Host: config.DevboxHost, Binary: filepath.Join(config.DevboxHome, ".local", "bin", "brain")}, nil
+		return SSHPeer{Host: config.DevboxHost(), Binary: filepath.Join(config.DevboxHome(), ".local", "bin", "brain")}, nil
 	}
 	return nil, fmt.Errorf("unknown machine %q", m)
 }

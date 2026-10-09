@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"saahil.local/brain/internal/index"
+
+	"saahil.local/brain/internal/config/identitytest"
 )
 
 // promptMarker appears only in owner prompts, so finding it in an eval file means prompt text was stored.
@@ -78,10 +80,10 @@ func fixture(t *testing.T) *index.Index {
 	t.Helper()
 	stubFileTimes(t, nil)
 	home := t.TempDir()
-	t.Setenv("BRAIN_HOME", home)
+	docs := filepath.Join(home, "Documents", "work-repo", "saahil-docs")
+	identitytest.WriteIn(t, home, `{"shadow_docs": ["`+docs+`"]}`)
 	root := filepath.Join(home, "brain")
 	t.Setenv("BRAIN_ROOT", root)
-	docs := filepath.Join(home, "Documents", "work-repo", "saahil-docs")
 	write(t, filepath.Join(docs, "box-a", "STATE.md"), "# Box A state\n\nThe glacier tokenizer rollout status. Plan: [plan](plans/rollout.md)\n")
 	write(t, filepath.Join(docs, "box-a", "plans", "rollout.md"), "# Rollout plan\n\nShard widths for the next run.\n")
 	write(t, filepath.Join(docs, "box-a", "README.md"), "# Box A\n\nglacier tokenizer readme\n")

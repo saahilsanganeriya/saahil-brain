@@ -53,7 +53,7 @@ func (in Input) cwd() string {
 
 type Env struct {
 	Root     string // the brain
-	WorkRoot string // where work/<box> lives before the cut-over fills <brain>/work (the saahil-docs shadow)
+	WorkRoot string // where work/<box> lives before a cut-over fills <brain>/work (shadow_docs); "" = none
 	StateDir string // per-machine hook state: each session's work, hubs and what it was shown
 	Now      func() time.Time
 	Rebuild  func() // starts RebuildNames in the background; nil rebuilds nothing
@@ -62,7 +62,7 @@ type Env struct {
 func DefaultEnv() Env {
 	return Env{
 		Root:     config.BrainRoot(),
-		WorkRoot: filepath.Join(config.Home(), "Documents", "work-repo", "saahil-docs"),
+		WorkRoot: config.ShadowDocRoot(),
 		StateDir: filepath.Join(config.StateDir(), "hooks"),
 		Now:      time.Now,
 	}
@@ -97,7 +97,11 @@ func (e Env) workDir(box string) string {
 	if box == "" || strings.ContainsAny(box, `/\`) || box == "." || box == ".." {
 		return ""
 	}
-	for _, dir := range []string{filepath.Join(e.Root, "work", box), filepath.Join(e.WorkRoot, box)} {
+	dirs := []string{filepath.Join(e.Root, "work", box)}
+	if e.WorkRoot != "" {
+		dirs = append(dirs, filepath.Join(e.WorkRoot, box))
+	}
+	for _, dir := range dirs {
 		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 			return dir
 		}

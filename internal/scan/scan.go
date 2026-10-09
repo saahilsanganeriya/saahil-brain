@@ -34,11 +34,12 @@ const (
 // Root is a folder presented under Prefix in node paths ("" for the brain itself, "work" for saahil-docs).
 type Root struct{ Abs, Prefix string }
 
-// DefaultRoots: the brain; saahil-docs as work/ until the cut-over fills <brain>/work; every Claude memory folder.
+// DefaultRoots: the brain; the shadow doc root (shadow_docs) as work/ until a cut-over fills <brain>/work; every
+// Claude memory folder.
 func DefaultRoots(brainRoot string) []Root {
 	roots := []Root{{Abs: brainRoot}}
-	shadow := filepath.Join(config.Home(), "Documents", "work-repo", "saahil-docs")
-	if work, _ := os.ReadDir(filepath.Join(brainRoot, "work")); len(work) == 0 && isDir(shadow) {
+	shadow := config.ShadowDocRoot()
+	if work, _ := os.ReadDir(filepath.Join(brainRoot, "work")); len(work) == 0 && shadow != "" && isDir(shadow) {
 		roots = append(roots, Root{Abs: shadow, Prefix: "work"})
 	}
 	mems, _ := filepath.Glob(filepath.Join(config.ClaudeDir(), "projects", "*", "memory"))

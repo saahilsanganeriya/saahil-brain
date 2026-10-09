@@ -2,21 +2,25 @@ package install
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"saahil.local/brain/internal/config/identitytest"
 )
 
 var t0 = time.Date(2026, 10, 8, 7, 0, 0, 0, time.UTC)
 
-// fakeHome mirrors the devbox's host set with synthetic config: Claude Code (and the mods marketplace), Codex, Cursor
-// and prime-agent; no oh-my-pi. Each file already holds an entry of the owner's that the installer must keep.
+// fakeHome mirrors the devbox's host set with synthetic config and the owner's identity: Claude Code (and the mods
+// marketplace), Codex, Cursor and prime-agent; no oh-my-pi. Each file already holds an entry of the owner's that the
+// installer must keep.
 func fakeHome(t *testing.T) (home, repo string) {
 	t.Helper()
-	home, repo = t.TempDir(), t.TempDir()
-	t.Setenv("BRAIN_HOME", home)
+	home, repo = identitytest.Owner(t), t.TempDir()
 	files := map[string]string{
 		".claude/settings.json": `{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/notify.sh"}]}],` +
 			`"UserPromptSubmit":[{"hooks":[{"type":"command","command":"/Users/test-user/.local/bin/brain hook inbox","timeout":5}]}]}}`,
@@ -192,3 +196,42 @@ func TestInstallRefusesToWriteInsideARepo(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// Catches a placeholder reaching a host unrendered (every hook would run "@BRAIN_BIN@" and fail open, silently) or
+// the owner's paths reaching someone else's machine: each file, hook, MCP entry and the mod carry this person's paths.
+func TestInstallRendersThePersonsPaths(t *testing.T) {
+	home := identitytest.Write(t, `{"laptop_home": "/Users/test-user", "devbox_home": "/home/test-user"}`)
+	for _, dir := range []string{"mods/saahil-mods/.claude-plugin", ".codex", ".cursor", ".prime/agent", ".omp/agent"} {
+		_ = os.MkdirAll(filepath.Join(home, dir), 0o755)
+	}
+	_ = os.WriteFile(filepath.Join(home, "mods/saahil-mods/.claude-plugin/marketplace.json"), []byte(`{"plugins":[]}`), 0o600)
+	if _, err := ExtractMod(home); err != nil {
+		t.Fatal(err)
+	}
+	laidOut, _ := os.ReadFile(filepath.Join(home, "mod", "hooks", "register.js"))
+	texts := map[string]string{"laid-out register.js": string(laidOut)}
+	for _, h := range Hosts(home) {
+		for i, s := range h.Steps {
+			value, _ := json.Marshal(s.Value)
+			text := string(s.Content) + s.Body + string(value)
+			for _, hook := range s.Hooks {
+				text += "\n" + hook.Command
+			}
+			texts[fmt.Sprintf("%s step %d %s", h.Name, i, s.Path)] = text
+		}
+	}
+	for name, text := range texts {
+		if strings.Contains(text, "@BRAIN_BIN@") || strings.Contains(text, "@LAPTOP_HOME@") || strings.Contains(text, "@DEVBOX_HOME@") {
+			t.Errorf("%s keeps a placeholder", name)
+		}
+		if strings.Contains(text, "/.local/bin/brain") && !strings.Contains(text, "/Users/test-user/.local/bin/brain") {
+			t.Errorf("%s runs another binary than this person's", name)
+		}
+	}
+	for name, text := range texts {
+		if strings.HasSuffix(name, "register.js") && !strings.Contains(text, "const BRAIN_ROOTS = ['/Users/test-user/brain/', '/home/test-user/brain/']") {
+			t.Errorf("%s guards other roots than this person's brain", name)
+		}
+	}
+}
+
