@@ -43,8 +43,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 # Same contract as setup-devbox.sh: identical bytes are left alone; a different file is replaced only with --force.
-install_file() { # $1 src, $2 dst, $3 mode, $4 = always to replace a different file without --force
+install_file() { # $1 src, $2 dst, $3 mode, $4 = always to replace a different file without --force; sets changed
   local src=$1 dst=$2 mode=$3
+  changed=0
   if [ -e "$dst" ] && cmp -s "$src" "$dst"; then say "  unchanged  $dst"; return 0; fi
   if [ -e "$dst" ] && [ "$force" != 1 ] && [ "${4:-}" != always ]; then
     say "  SKIPPED    $dst (differs from the devbox's copy; --force replaces it, keeping a .bak)"
@@ -55,6 +56,7 @@ install_file() { # $1 src, $2 dst, $3 mode, $4 = always to replace a different f
   act install -m "$mode" "$src" "$dst.new-$STAMP"
   act mv -f "$dst.new-$STAMP" "$dst"
   if [ "$dry" != 1 ]; then say "  installed  $dst"; fi
+  changed=1
 }
 
 fetch() { # $1 = path on the devbox (relative to its home), $2 = local file
@@ -78,6 +80,7 @@ got=$(sha256 "$tmp/brain")
 [ "$want" = "$got" ] || die "sha256 mismatch for brain-darwin-arm64: got $got, want $want"
 say "  sha256 ok  brain-darwin-arm64"
 install_file "$tmp/brain" "$brain" 755 always
+brain_changed=$changed
 fetch "$DIST/devbox" "$tmp/devbox"
 install_file "$tmp/devbox" "$HOME/.local/bin/devbox" 755
 
@@ -113,8 +116,9 @@ if [ "$missing" = 0 ]; then say "  present    $HOME/brain"; else act "$brain" in
 if [ "$dry" != 1 ]; then say "  live since $(cat "$HOME/brain/.brain/live")"; fi
 
 step "agent hosts on this machine (brain install)"
-if [ -x "$brain" ] && "$brain" install --verify </dev/null >/dev/null 2>&1; then
-  say "  present    brain install --verify is clean"
+# read-only check, as in setup-devbox.sh; a new binary always installs
+if [ "$brain_changed" = 0 ] && [ -x "$brain" ] && "$brain" install --dry-run --verify </dev/null >/dev/null 2>&1; then
+  say "  present    brain install --dry-run --verify is clean"
 else
   act "$brain" install </dev/null
 fi

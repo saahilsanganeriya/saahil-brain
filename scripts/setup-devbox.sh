@@ -134,6 +134,7 @@ fi
 step "binaries into ~/.local/bin (checked against SHA256SUMS)"
 check_sum bin/brain-linux-amd64
 install_file "$KIT/bin/brain-linux-amd64" "$brain" 755
+brain_changed=$changed
 check_sum bin/brain-worker-linux-amd64
 install_file "$KIT/bin/brain-worker-linux-amd64" "$HOME/.local/bin/brain-worker" 755
 worker_changed=$changed
@@ -263,7 +264,13 @@ else
 fi
 
 step "agent hosts on this machine (brain install)"
-if [ -x "$brain" ] && "$brain" install --verify >/dev/null 2>&1; then say "  present    brain install --verify is clean"; else act "$brain" install; fi
+# --dry-run keeps the check read-only (a bare install --verify writes BRAIN.md and the mod first); a new binary
+# always installs, since the read-only check cannot see its newer mod
+if [ "$brain_changed" = 0 ] && [ -x "$brain" ] && "$brain" install --dry-run --verify >/dev/null 2>&1; then
+  say "  present    brain install --dry-run --verify is clean"
+else
+  act "$brain" install
+fi
 if [ "$dry" = 1 ]; then
   say "  would check: claude plugin list | grep saahil-brain"
 elif ! command -v claude >/dev/null; then
