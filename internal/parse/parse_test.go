@@ -11,6 +11,7 @@ import (
 // TestParseSectionsLineRanges catches off-by-one section ranges, a "## " inside a fenced code block read as a
 // heading, and frontmatter lines dropped from the line count — any of which sends an agent to the wrong lines.
 func TestParseSectionsLineRanges(t *testing.T) {
+	identitytest.Owner(t) // the bare "PR #3488" belongs to the owner's default_pr_repo
 	src := strings.Join([]string{
 		"---",                     // 1
 		"type: spec",              // 2

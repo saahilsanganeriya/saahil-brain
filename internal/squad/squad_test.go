@@ -98,10 +98,11 @@ func testSquad(t *testing.T, orca *fakeOrca) (*Squad, *bytes.Buffer) {
 	return testSquadWith(t, orca, `{}`)
 }
 
-// testSquadWith runs the squad in a fresh home whose identity.json holds identityJSON.
+// testSquadWith runs the squad in a fresh home whose identity.json holds identityJSON, <home> naming that home.
 func testSquadWith(t *testing.T, orca *fakeOrca, identityJSON string) (*Squad, *bytes.Buffer) {
 	t.Helper()
-	identitytest.Write(t, identityJSON)
+	home := t.TempDir()
+	identitytest.WriteIn(t, home, strings.ReplaceAll(identityJSON, "<home>", home))
 	out := &bytes.Buffer{}
 	f := New(config.Devbox, Host{Machine: config.Devbox, OrcaCLI: []string{"orca"}, Run: orca.run})
 	f.Out, f.Sleep = out, func(time.Duration) {}
@@ -365,7 +366,7 @@ func git(t *testing.T, args ...string) {
 // spelled "<root>/../…" that passes a plain prefix check; and a dirty worktree being force-removed.
 func TestStopRemovesOnlyWorktreesUnderRoot(t *testing.T) {
 	orca := &fakeOrca{}
-	f, _ := testSquad(t, orca)
+	f, _ := testSquadWith(t, orca, `{"work_repo": "<home>/Documents/work-repo"}`)
 	git(t, "init", "-q", "-b", "main", f.Repo)
 	git(t, "-C", f.Repo, "commit", "-q", "--allow-empty", "-m", "init")
 	inside := filepath.Join(f.Worktrees, "clean")
