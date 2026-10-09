@@ -43,14 +43,14 @@ func (r *EvalRanker) Pointers(prompt, cwd string, hide func(id string) bool) []s
 func (r *EvalRanker) Lookup(prompt, cwd string, hide func(id string) bool) (Lookup, error) {
 	visible := func(id string) bool { return hide == nil || !hide(id) }
 	var cwdBoxes []string
-	if box := workByFolder(r.env, cwd, nil, nil); box != "" && visible("work/"+box) && !idleBox(r.env, box, visible) {
+	if box := workByFolder(r.env, cwd, nil, nil); box != "" && visible("work/"+box) {
 		cwdBoxes = []string{box}
 	}
 	q, err := readPrompt(r.db, prompt, cwdBoxes, r.names)
 	if err != nil {
 		return Lookup{}, err
 	}
-	seeds := Seeds{Work: pickWork(r.env, q.namedBoxes(), cwdBoxes, visible), Hide: hide}
+	seeds := Seeds{Work: pickWork(r.env, q.namedBoxes(), cwdBoxes, visible), Folder: folderName(cwd), Hide: hide}
 	for _, box := range seeds.Work {
 		seeds.Hubs = appendNew(seeds.Hubs, rank.Visible(hubsByName(r.env.Root, box), hide)...)
 	}

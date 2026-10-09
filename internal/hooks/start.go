@@ -186,7 +186,7 @@ func pickWork(env Env, named []boxName, cwdBoxes []string, visible func(string) 
 
 // folderWork is cwdWork from the folder name alone, cheap enough for a prompt with no start record.
 func folderWork(env Env, cwd string) []string {
-	if box := workByFolder(env, cwd, nil, nil); box != "" && !idleBox(env, box, nil) {
+	if box := workByFolder(env, cwd, nil, nil); box != "" {
 		return []string{box}
 	}
 	return nil
@@ -207,22 +207,30 @@ func idleBox(env Env, box string, visible func(string) bool) bool {
 }
 
 // cwdWork: the work boxes of the latest session note for this cwd, else the box whose name or CARD aliases best
-// match the worktree folder; only boxes that exist, and none whose CARD is paused or done (a prompt may still name
-// those).
+// match the worktree folder; only boxes that exist. A box whose CARD is paused or done goes only when a live box
+// matches as well.
 func cwdWork(env Env, cwd string, aliases func(string) []string, visible func(string) bool) []string {
 	if cwd == "" {
 		return nil
 	}
-	var out []string
+	var live, idle []string
 	for _, box := range worksFromSessions(env.Root, cwd, visible) {
-		if env.workDir(box) != "" && (visible == nil || visible("work/"+box)) && !idleBox(env, box, visible) && len(out) < maxWorks {
-			out = append(out, box)
+		if env.workDir(box) == "" || (visible != nil && !visible("work/"+box)) {
+			continue
+		}
+		if idleBox(env, box, visible) {
+			idle = append(idle, box)
+		} else {
+			live = append(live, box)
 		}
 	}
-	if len(out) > 0 {
-		return out
+	if len(live) == 0 {
+		live = idle
 	}
-	if box := workByFolder(env, cwd, aliases, visible); box != "" && !idleBox(env, box, visible) {
+	if len(live) > 0 {
+		return live[:min(len(live), maxWorks)]
+	}
+	if box := workByFolder(env, cwd, aliases, visible); box != "" {
 		return []string{box}
 	}
 	return nil

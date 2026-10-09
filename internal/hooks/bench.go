@@ -22,7 +22,7 @@ func Bench(env Env, prompts []string, cwd string) (took []time.Duration, abstain
 		}
 		nm, _ := env.loadNames(ix.DB())
 		st := state{DigestOwed: true, CwdWork: folderWork(env, cwd)}
-		_, lk, err := env.turn(ix.DB(), nm, p, &st, false)
+		_, lk, err := env.turn(ix.DB(), nm, p, folderName(cwd), &st, false)
 		if err != nil {
 			ix.Close()
 			return took, abstained, err
