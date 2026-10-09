@@ -5,6 +5,7 @@
 const BRAIN = '/Users/test-user/.local/bin/brain'
 const BRAIN_ROOTS = ['/Users/test-user/brain/', '/home/test-user/brain/'] // the devbox bind-mounts the second
 const PANE = 'saahil-brain'
+const TOOL_PREFIX = 'mcp__saahil-brain__' // how Claude Code names this mod's tools in tool.call; another server's brain_search stays theirs
 const TIMEOUT_MS = 5_000
 const BAND_TTL_MS = 60_000
 const MAX_SHOWN = 12
@@ -77,11 +78,12 @@ export function register(on) {
 
   on('tool.call', async ($, e, next) => {
     if (off) return next(e)
-    const tool = TOOLS[e.tool]
+    const name = String(e.tool).startsWith(TOOL_PREFIX) ? e.tool.slice(TOOL_PREFIX.length) : e.tool
+    const tool = TOOLS[name]
     if (tool) {
       const ran = await brain($, tool.argv(e))
-      if (e.tool === 'brain_show' && ran.exitCode === 0) remember([e.id])
-      return { result: ran.exitCode === 0 ? ran.stdout.trim() || 'no result' : `brain ${e.tool.slice(6)} failed: ${firstLine(ran.stderr) || 'exit ' + ran.exitCode}` }
+      if (name === 'brain_show' && ran.exitCode === 0) remember([e.id])
+      return { result: ran.exitCode === 0 ? ran.stdout.trim() || 'no result' : `brain ${name.slice(6)} failed: ${firstLine(ran.stderr) || 'exit ' + ran.exitCode}` }
     }
     const path = e.file_path ?? e.notebook_path
     if (!inBrain(path)) return next(e)

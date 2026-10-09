@@ -31,16 +31,19 @@ function stubBrain(on: On, answer: (args: string[], stdin?: string) => Ran, env:
 
 const brainRuns = (calls: Call[]) => calls.filter(call => call.argv[0] === BRAIN).map(call => call.argv.slice(1).join(' '))
 
-// Catches a tool that shells out with the wrong arguments, no timeout, or hands the model an empty answer on failure.
+// Catches a tool that shells out with the wrong arguments, no timeout, or hands the model an empty answer on failure;
+// a tool left unanswered because Claude Code names it mcp__saahil-brain__<tool> (2026-10-09: every call failed); and
+// another server's same-named tool (other-mcp has a brain_search) answered by this one.
 test('brain_search runs `brain search … --json` within 5 s and reports a failure in words', async ($, on) => {
   let isDown = false
   const calls = stubBrain(on, args => (isDown ? { exitCode: 1, stderr: 'index missing: run brain index\n' } : { exitCode: 0, stdout: '[{"ID":"hub-image-lane"}]\n' }))
   await $.session.start(START)
-  const found = await $.tool.call({ tool: 'brain_search', query: 'ocr recall' } as never)
+  const found = await $.tool.call({ tool: 'mcp__saahil-brain__brain_search', query: 'ocr recall' } as never)
   expect(found.result).toBe('[{"ID":"hub-image-lane"}]')
   expect(calls.find(call => call.argv[2] === 'ocr recall')).toMatchObject({ argv: [BRAIN, 'search', 'ocr recall', '--json', '--limit', '8'], timeoutMs: 5000 })
+  expect((await $.tool.call({ tool: 'mcp__other-mcp__brain_search', query: 'x' } as never)).result).toBe('done by the tool')
   isDown = true
-  expect((await $.tool.call({ tool: 'brain_show', id: 'x' } as never)).result).toBe('brain show failed: index missing: run brain index')
+  expect((await $.tool.call({ tool: 'mcp__saahil-brain__brain_show', id: 'x' } as never)).result).toBe('brain show failed: index missing: run brain index')
 })
 
 // Catches a brain hook run without the event on stdin, or context from SessionEnd handed on (it takes none).
