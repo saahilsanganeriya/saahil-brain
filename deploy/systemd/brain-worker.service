@@ -5,7 +5,7 @@ After=brain-temporal.service
 Requires=brain-temporal.service
 
 [Service]
-ExecStart=/home/test-user/.local/bin/brain-worker
+ExecStart=@DEVBOX_HOME@/.local/bin/brain-worker
 Restart=on-failure
 RestartSec=10
 MemoryMax=4G

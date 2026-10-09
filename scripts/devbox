@@ -1,0 +1,123 @@
+#!/bin/bash
+# devbox — the EC2 devbox, from the laptop: up | down [--force] | status | sync. `brain machine <verb>` runs this.
+# Settings: ~/.config/brain/identity.json — devbox_instance_id (required), devbox_host, and the optional devbox_region
+# and devbox_aws_profile (else the AWS CLI's own defaults). A stop keeps the root disk, so worktrees, transcripts and
+# the brain survive; only running processes end.
+set -euo pipefail
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'devbox: %s\n' "$*" >&2; exit 1; }
+
+identity=$HOME/.config/brain/identity.json
+json_get() { # $1 = key: its string value in identity.json, or nothing
+  [ -f "$identity" ] || return 0
+  if command -v jq >/dev/null; then
+    jq -r --arg k "$1" '.[$k] // empty | strings' "$identity"
+  elif command -v plutil >/dev/null; then
+    plutil -extract "$1" raw -o - "$identity" 2>/dev/null || true
+  else
+    python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v,str) else "")' "$identity" "$1"
+  fi
+}
+
+verb=${1:-}
+force=0
+for arg in "$@"; do if [ "$arg" = --force ]; then force=1; fi; done
+case $verb in up | down | status | sync) ;; *) say "usage: devbox up | down [--force] | status | sync"; exit 2 ;; esac
+
+brain=$HOME/.local/bin/brain
+if [ "$verb" = sync ]; then exec "$brain" sync; fi
+
+id=$(json_get devbox_instance_id)
+[ -n "$id" ] || die "no devbox_instance_id in $identity (see identity.example.json; setup-devbox.sh fills it on EC2)"
+host=$(json_get devbox_host)
+host=${host:-$(id -un)-devbox}
+sso=$(json_get aws_sso_session)
+aws=(aws ec2)
+profile=$(json_get devbox_aws_profile)
+if [ -n "$profile" ]; then aws+=(--profile "$profile"); fi
+region=$(json_get devbox_region)
+if [ -n "$region" ]; then aws+=(--region "$region"); fi
+ssh_q=(ssh -n -o ConnectTimeout=8 -o BatchMode=yes -o ControlPath=none "$host")
+
+# A state that cannot be read is fatal: an empty answer must never pass for "already stopped".
+state() {
+  local s
+  s=$("${aws[@]}" describe-instances --instance-ids "$id" --query 'Reservations[0].Instances[0].State.Name' --output text) ||
+    die "cannot read the state of $id (AWS sign-in expired? aws sso login${sso:+ --sso-session $sso})"
+  case $s in
+    pending | running | stopping | stopped | shutting-down | terminated) say "$s" ;;
+    *) die "unexpected state for $id: '$s'" ;;
+  esac
+}
+
+# Refuse to stop while work runs on the devbox. The [g]-style brackets keep each pgrep pattern from matching the
+# remote shell's own command line, which contains the pattern text.
+refuse_if_busy() {
+  if [ "$force" = 1 ]; then return 0; fi
+  local out busy agents load
+  # shellcheck disable=SC2016  # expanded on the devbox
+  out=$("${ssh_q[@]}" 'pgrep -c -f "[g]o test|[.]test |[k]ubectl |[d]epot " || true; pgrep -c -f "^[^ ]*/claude( |$)" || true; cut -d" " -f1 /proc/loadavg') ||
+    die "cannot reach $host to see what runs there; re-run with: devbox down --force"
+  { read -r busy; read -r agents; read -r load; } <<<"$out"
+  say "busy processes: $busy, Claude sessions: $agents, load: $load"
+  if [ "$busy" != 0 ] || [ "$agents" != 0 ]; then
+    say "stopping ends them (transcripts are kept; resume later with: brain agents resume <name> <session>)"
+    die "re-run with: devbox down --force"
+  fi
+}
+
+# Stop protection, when the instance has it, stays on except for the moment this script itself stops the instance.
+stop_instance() {
+  local protected
+  protected=$("${aws[@]}" describe-instance-attribute --instance-id "$id" --attribute disableApiStop --query 'DisableApiStop.Value' --output text)
+  if [ "$protected" = True ]; then "${aws[@]}" modify-instance-attribute --instance-id "$id" --no-disable-api-stop; fi
+  "${aws[@]}" stop-instances --instance-ids "$id" --output text >/dev/null
+  say "stopping…"
+  "${aws[@]}" wait instance-stopped --instance-ids "$id"
+  if [ "$protected" = True ]; then "${aws[@]}" modify-instance-attribute --instance-id "$id" --disable-api-stop; fi
+}
+
+wait_ssh() {
+  for _ in $(seq 1 60); do
+    if "${ssh_q[@]}" true 2>/dev/null; then say "ssh ok"; return 0; fi
+    sleep 5
+  done
+  die "$host does not answer ssh 5 min after the start"
+}
+
+status() {
+  local st itype
+  st=$(state)
+  itype=$("${aws[@]}" describe-instances --instance-ids "$id" --query 'Reservations[0].Instances[0].InstanceType' --output text)
+  say "instance: $id $st, $itype"
+  if [ "$st" = running ]; then "${ssh_q[@]}" '.local/bin/brain machine status' || say "$host: ssh or brain did not answer"; fi
+}
+
+case $verb in
+  status) status ;;
+  up)
+    st=$(state)
+    case $st in
+      running) say "already running" ;;
+      stopped | pending)
+        if [ "$st" = stopped ]; then "${aws[@]}" start-instances --instance-ids "$id" --output text >/dev/null; fi
+        say "starting…"
+        "${aws[@]}" wait instance-running --instance-ids "$id" ;;
+      *) die "the instance is $st; wait for it to settle, then re-run" ;;
+    esac
+    wait_ssh
+    "$brain" sync || say "brain sync failed (brain sync status); the devbox is up anyway"
+    status ;;
+  down)
+    st=$(state)
+    if [ "$st" = stopped ]; then say "already stopped"; exit 0; fi
+    [ "$st" = running ] || die "the instance is $st; wait for it to settle, then re-run"
+    refuse_if_busy
+    if ! "$brain" sync; then
+      [ "$force" = 1 ] || die "brain sync failed, so the devbox keeps running (brain sync status); --force stops it anyway"
+      say "brain sync failed; stopping anyway (--force)"
+    fi
+    stop_instance
+    say "stopped. The disk is kept; start again with: devbox up" ;;
+esac

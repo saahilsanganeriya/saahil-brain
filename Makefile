@@ -1,8 +1,8 @@
 VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X saahil.local/brain/internal/rpc.Version=$(VERSION)
-DIST    := /home/test-user/.local/share/brain/dist
+DIST    := $(HOME)/.local/share/brain/dist
 
-.PHONY: build build-linux build-darwin test publish
+.PHONY: build build-linux build-darwin test publish dist
 
 build: build-linux build-darwin
 
@@ -19,3 +19,7 @@ test:
 # publish: install the devbox binary and stage the laptop one (the laptop pulls it with `brain self-update`)
 publish: build
 	scripts/publish.sh $(DIST)
+
+# dist: a release of this repo with its binaries (dist/brain-setup-$(VERSION).zip); RELEASE=1 also runs check-kit.sh
+dist: build
+	RELEASE=$(RELEASE) scripts/build-kit.sh $(VERSION)
