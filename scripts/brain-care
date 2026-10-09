@@ -6,9 +6,12 @@
 set -euo pipefail
 repo=/Users/test-user/Documents/saahil-brain
 brain=/Users/test-user/.local/bin/brain
-run=$(TZ=America/Los_Angeles date +%Y-%m-%d)
-name=brain-care-${run//-/}
-out=/Users/test-user/brain/work/brain-care/runs/$run
+runs=/Users/test-user/brain/work/brain-care/runs
+day=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+run=$day
+for n in 2 3 4 5 6 7 8 9; do [ -e "$runs/$run" ] || break; run=$day-$n; done
+name=brain-care-$run
+out=$runs/$run
 mkdir -p "$out"
 
 git -C "$repo" pull --ff-only -q
