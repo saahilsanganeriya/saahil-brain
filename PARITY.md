@@ -52,3 +52,17 @@ then a Happier (tmux) agent in `names.json`.
 | `sync` | `brain machine sync` — laptop: `exec devbox sync` (to be replaced by `brain sync`, Unison, in its own task); devbox: refused | build only |
 
 Every command was also checked by `make build` (linux/amd64 and darwin/arm64) and `go vet` for both targets.
+
+## Live runs 2026-10-09 (laptop agent, logged in LAPTOP-TASKS.md L11; devbox by the coordinator)
+
+| command (through `devbox-agent` or `brain`) | machine | result |
+|---|---|---|
+| `list`, `status`, `screen <name> --lines 3`, `note` | devbox | ran: both machines' sessions listed; status printed host, cert and SSO expiry; screen printed the agent's last lines; notes delivered and answered both ways |
+| `brain machine status` | laptop | exit 0 (devbox up 8d21h, GitHub cert and SSO expiry) |
+| `brain machine sync` | laptop | exit 0 (devbox sync, which runs `brain sync`) |
+| `brain machine up` | laptop | ran; stopped at AWS (`start-instances` refused: the laptop's AWS sign-in had expired), exit 255, no change; it needs `brain machine login aws` |
+| `brain machine login github` | laptop | not run: a browser flow (owner) |
+| `brain agents box pr-review-6864-6866` | laptop | exit 0, nothing to copy; never deletes |
+| `brain agents move 5e52e35e… brain-move-probe` | laptop → devbox | first runs exposed three gaps (Orca opens terminals only at a project root; a new folder stops at Claude Code's trust question; one file being written failed the notes sync), all fixed (2e28d9d, e735a51); then exit 0: resumed in Orca with its history, renamed, listed `devbox:brain-move-probe`, stopped from the devbox |
+| `brain machine down` | laptop | not run: it stops the devbox and every agent on it. `TestLaptopVerbsReachTheDevboxScriptUnchanged` pins that it reaches the same `devbox down` script with its arguments; the script refuses while processes or Claude sessions run unless `--force` (its lines 18-27) |
+| `brain machine resize` | — | removed: the devbox script has no such verb and the old tool never offered it |
