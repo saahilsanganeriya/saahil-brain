@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"saahil.local/brain/internal/hooks"
-	"saahil.local/brain/internal/store"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -74,19 +73,12 @@ func cmdBridgeServe([]string) int {
 	return fail("%v", srv.ListenAndServe(config.BridgePort))
 }
 
-// keepIndexWarm keeps the index in the laptop's file cache for the prompt hook: on a busy laptop the OS dropped its
-// pages between prompts and the next prompt hook waited for the disk (hook bench --cold, 2026-10-09: p95 471 ms cold,
-// 45 ms warm). A few warm-up queries alone left the heavy prompts cold (268 ms), so every tick reads the whole file
-// sequentially (from the cache it is a memory copy) and then runs three prompts' queries. Read-only; nothing logged.
+// keepIndexWarm reads the index the way a prompt does, every few minutes, so the laptop's file cache keeps the pages
+// prompts touch: on a busy laptop the OS dropped them between prompts and the next prompt hook waited ~0.4 s for the
+// disk (hook bench --cold, 2026-10-09: p95 471 ms cold, 45 ms warm). Read-only; nothing is logged.
 func keepIndexWarm(every time.Duration) {
 	root, env := config.BrainRoot(), hooks.DefaultEnv()
 	for i := 0; ; i++ {
-		for _, p := range []string{store.Path(root), store.Path(root) + "-wal"} {
-			if f, err := os.Open(p); err == nil {
-				_, _ = io.Copy(io.Discard, f)
-				f.Close()
-			}
-		}
 		if qs, err := hooks.BenchQuestions(root, 12); err == nil && len(qs) >= 3 {
 			start := (i * 3) % (len(qs) - 2)
 			_, _, _ = hooks.Bench(env, qs[start:start+3], root)
