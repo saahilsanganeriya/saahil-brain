@@ -54,5 +54,8 @@ func (r *EvalRanker) Lookup(prompt, cwd string, hide func(id string) bool) (Look
 	for _, box := range seeds.Work {
 		seeds.Hubs = appendNew(seeds.Hubs, rank.Visible(hubsByName(r.env.Root, box), hide)...)
 	}
+	if hide != nil {
+		seeds.AsOf = replayAsOf(r.db, seeds.Work, hide)
+	}
 	return pointers(r.db, q, seeds, r.names)
 }

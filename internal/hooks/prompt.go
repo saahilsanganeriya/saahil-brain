@@ -21,7 +21,8 @@ import (
 // hub id, title or path gets no pointers. Then BM25 over title, aliases and summary, one graph hop from the named
 // nodes, the best matches, the active work and its hubs, scope fit and a type prior. What L0 already gave the session
 // never takes a slot (its own box's CARD, the brief it was pasted from), facts rank above other boxes' raw work docs,
-// and another box's work doc needs the prompt to name it or to be the single best match.
+// and another box's work doc needs the prompt to name it or to be the single best match. On a session's first prompt,
+// its own boxes' files written in the hours before may take the slots the rest left empty.
 const (
 	ftsTop        = 300
 	textCands     = 40
@@ -47,6 +48,7 @@ const (
 	nameHit     = 0.3  // a name hit this strong names its node: a multi-word name, or one rare word
 	boxNameHit  = 0.8  // a CARD alias hit this strong names its box: a multi-word alias with a rare word
 	idleDemote  = 0.1  // what a paused or done box costs its docs when the prompt does not name the box
+	wFresh      = 0.2  // times freshness, for a slot the rest left empty (freshSlots)
 )
 
 // Threshold is the score the best pointer must reach or the hook abstains. Calibrated on the 209 real prompts
@@ -104,6 +106,9 @@ type Seeds struct {
 	Folder     string
 	// Hide drops nodes a pre-session index would not hold (offline evals replay a past session); nil keeps all.
 	Hide func(id string) bool
+	// AsOf is the session's first prompt: its boxes' files written in the hours before it join as candidates. Zero
+	// on later prompts, when the newest files are the session's own.
+	AsOf time.Time
 }
 
 type cand struct {
@@ -112,8 +117,9 @@ type cand struct {
 	rel                                       float64 // saturated BM25, 0 for graph-only candidates
 	alias, prox, scope                        float64
 	mention, folder                           float64
-	own                                       bool // named like the session's folder
-	echo                                      bool // the prompt holds its text
+	fresh                                     float64 // 1 written just before the session, 0 freshWindow before
+	own                                       bool    // named like the session's folder
+	echo                                      bool    // the prompt holds its text
 	via, viaRel                               string
 	score                                     float64
 }
@@ -230,6 +236,14 @@ func pointers(db *sql.DB, q promptRead, seeds Seeds, nm *Names) (Lookup, error) 
 		return lk, err
 	}
 	cands := merge(textCands, named)
+	fresh, err := freshFiles(db, seeds)
+	if err != nil {
+		return lk, err
+	}
+	if err := namedRelevance(db, fresh, terms); err != nil {
+		return lk, err
+	}
+	cands = merge(cands, fresh)
 	if cands, err = hop(db, cands, seeds); err != nil {
 		return lk, err
 	}
@@ -271,7 +285,7 @@ func pointers(db *sql.DB, q promptRead, seeds Seeds, nm *Names) (Lookup, error) 
 		lk.Abstained = true
 		return lk, nil
 	}
-	chosen := explore(ownSlot(choose(answers, seeds), answers), answers)
+	chosen := freshSlots(explore(ownSlot(choose(answers, seeds), answers), answers), answers)
 	for _, c := range chosen {
 		lk.Chosen = append(lk.Chosen, Pointer{ID: c.id, Path: c.path, Line: oneLine(c), Edge: bestEdge(c, seeds), Score: round3(c.score)})
 	}
@@ -484,6 +498,7 @@ func merge(text, named []cand) []cand {
 			text[i].rel = math.Max(text[i].rel, c.rel)
 			text[i].mention = math.Max(text[i].mention, c.mention)
 			text[i].folder = math.Max(text[i].folder, c.folder)
+			text[i].fresh = math.Max(text[i].fresh, c.fresh)
 			text[i].own = text[i].own || c.own
 			continue
 		}
@@ -810,6 +825,26 @@ func explore(chosen, cands []cand) []cand {
 	return chosen
 }
 
+// freshSlots gives the slots the rest left empty to the files the session's box got just before its first prompt that
+// answer it, freshness counted: a fresh output never displaces a pointer chosen on its own merit.
+func freshSlots(chosen, answers []cand) []cand {
+	picked := map[string]bool{}
+	for _, c := range chosen {
+		picked[c.id] = true
+	}
+	var fresh []cand
+	for _, c := range answers {
+		if c.fresh > 0 && !picked[c.id] {
+			c.score += wFresh * c.fresh
+			if c.score >= Threshold {
+				fresh = append(fresh, c)
+			}
+		}
+	}
+	sort.SliceStable(fresh, func(i, j int) bool { return fresh[i].score > fresh[j].score })
+	return append(chosen, fresh[:min(len(fresh), config.MaxPointers-len(chosen))]...)
+}
+
 func oneLine(c cand) string {
 	text := c.summary
 	if text == "" || text == c.title {
@@ -927,7 +962,9 @@ func (e Env) turn(db *sql.DB, nm *Names, prompt, folder string, st *state, withH
 		return Digest{}, Lookup{}, err
 	}
 	var d Digest
+	var asOf time.Time
 	if st.DigestOwed {
+		asOf = e.Now()
 		header := taskHeader
 		if withHot {
 			header = startHeader
@@ -937,7 +974,7 @@ func (e Env) turn(db *sql.DB, nm *Names, prompt, folder string, st *state, withH
 	}
 	lk := Lookup{Abstained: true}
 	if nm != nil {
-		lk, err = pointers(db, q, Seeds{Work: st.Work, Hubs: st.Hubs, Folder: folder}, nm)
+		lk, err = pointers(db, q, Seeds{Work: st.Work, Hubs: st.Hubs, Folder: folder, AsOf: asOf}, nm)
 	}
 	return d, lk, err
 }
