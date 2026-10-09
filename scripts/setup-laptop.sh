@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup-laptop.sh <devbox-host> [--dry-run] [--force] — set up the brain on the laptop (macOS; AGENT-SETUP.md step 2),
+# setup-laptop.sh <devbox-host> [--profile NAME] [--dry-run] [--force] — set up the brain on the laptop (macOS; SETUP.md step 2),
 # after setup-devbox.sh ran on the devbox. Everything comes over ssh from the devbox's ~/.local/share/brain/dist:
 #
 #   · ~/.local/bin/brain (sha256 checked) and ~/.local/bin/devbox (the EC2 helper)
@@ -17,18 +17,22 @@ say() { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
 die() { printf 'setup-laptop: %s\n' "$*" >&2; exit 1; }
 
-dry=0 force=0 host=""
+dry=0 force=0 host="" profile=""
 while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) dry=1 ;;
     --force) force=1 ;;
+    --profile)
+      [ $# -ge 2 ] || die "--profile needs a value"
+      profile=$2
+      shift ;;
     -h | --help) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 0 ;;
     -*) die "unknown option: $1 (see --help)" ;;
     *) host=$1 ;;
   esac
   shift
 done
-[ -n "$host" ] || die "usage: setup-laptop.sh <devbox-host> [--dry-run] [--force]"
+[ -n "$host" ] || die "usage: setup-laptop.sh <devbox-host> [--profile NAME] [--dry-run] [--force]"
 
 act() { if [ "$dry" = 1 ]; then say "  would: $*"; else "$@"; fi; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'; }
@@ -69,7 +73,7 @@ if [ "$dry" != 1 ] && [ "$(uname -s)" != Darwin ]; then die "run this on the lap
 if [ "$dry" = 1 ]; then say "DRY RUN: nothing below is changed (HOME=$HOME)"; fi
 
 step "the devbox answers over ssh ($host)"
-ssh -n "${SSH_OPTS[@]}" "$host" true || die "cannot ssh to $host: AGENT-SETUP.md step 0 (ssh alias, sign-ins)"
+ssh -n "${SSH_OPTS[@]}" "$host" true || die "cannot ssh to $host: SETUP.md step 0 (ssh alias, sign-ins)"
 say "  ok"
 
 step "binaries: ~/.local/bin/brain (sha256 checked) and ~/.local/bin/devbox"
@@ -94,7 +98,9 @@ install_file "$tmp/bridge.token" "$cfg/bridge.token" 600 always
   die "no identity.json on $host (setup-devbox.sh writes it)"
 install_file "$tmp/identity.json" "$cfg/identity.json" 600
 # fills only what is missing; every value the devbox wrote stays
-act "$brain" identity --init </dev/null
+init_args=(identity --init)
+if [ -n "$profile" ]; then init_args+=(--profile "$profile"); fi
+act "$brain" "${init_args[@]}" </dev/null
 act "$brain" identity </dev/null
 
 step "the bridge and its reverse tunnel (LaunchAgents com.saahil.brain-bridge, com.saahil.brain-tunnel)"

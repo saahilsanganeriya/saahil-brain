@@ -20,6 +20,6 @@ test:
 publish: build
 	scripts/publish.sh $(DIST)
 
-# dist: the setup kit (dist/brain-setup-$(VERSION).zip); RELEASE=1 also needs kit/README.md + kit/AGENT-SETUP.md and runs check-kit.sh
+# dist: a release of this repo with its binaries (dist/brain-setup-$(VERSION).zip); RELEASE=1 also runs check-kit.sh
 dist: build
 	RELEASE=$(RELEASE) scripts/build-kit.sh $(VERSION)

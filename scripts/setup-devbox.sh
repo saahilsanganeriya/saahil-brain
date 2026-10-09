@@ -1,9 +1,10 @@
 #!/bin/bash
-# setup-devbox.sh — set up the brain on the devbox (AGENT-SETUP.md step 1). Run it ON the devbox, from the unzipped kit:
+# setup-devbox.sh — set up the brain on the devbox (SETUP.md step 1). Run it ON the devbox, from the unzipped release:
 #
-#   scripts/setup-devbox.sh --laptop-home /Users/<user> [--devbox-host H] [--orca-env E] [--work-repo P]
-#                           [--brain-repo P] [--aws-profile P] [--dry-run] [--force]
+#   scripts/setup-devbox.sh --laptop-home /Users/<user> [--profile NAME] [--devbox-host H] [--orca-env E]
+#                           [--work-repo P] [--brain-repo P] [--aws-profile P] [--dry-run] [--force]
 #
+# --profile NAME merges the team settings in profiles/NAME.json under your own (brain identity --init --profile).
 # Each step prints what it did, or that it was already done, so a re-run is safe. --dry-run prints every change and
 # makes none (on any OS). --force replaces a file that differs from the kit (a .bak is kept first) and passes --force
 # to `brain identity --init`. sudo is used only for the bind mount and for linger; each step says why first.
@@ -17,12 +18,12 @@ say() { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
 die() { printf 'setup-devbox: %s\n' "$*" >&2; exit 1; }
 
-dry=0 force=0 laptop_home="" devbox_host="" orca_env="" work_repo="" brain_repo="" aws_profile=""
+dry=0 force=0 laptop_home="" devbox_host="" orca_env="" work_repo="" brain_repo="" aws_profile="" profile=""
 while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) dry=1 ;;
     --force) force=1 ;;
-    --laptop-home | --devbox-host | --orca-env | --work-repo | --brain-repo | --aws-profile)
+    --laptop-home | --devbox-host | --orca-env | --work-repo | --brain-repo | --aws-profile | --profile)
       [ $# -ge 2 ] || die "$1 needs a value"
       name=${1#--}
       printf -v "${name//-/_}" '%s' "$2"
@@ -91,7 +92,7 @@ if [ "$dry" != 1 ] && [ "$(uname -s)" != Linux ]; then die "run this ON the devb
 if [ "$dry" = 1 ]; then say "DRY RUN: nothing below is changed (HOME=$HOME)"; fi
 for f in SHA256SUMS bin/brain-linux-amd64 bin/brain-worker-linux-amd64 bin/brain-darwin-arm64 scripts/setup-laptop.sh \
   scripts/devbox scripts/brain-care deploy/systemd/brain-temporal.service; do
-  [ -e "$KIT/$f" ] || die "$KIT/$f is missing: run this from an unzipped kit (make dist builds one)"
+  [ -e "$KIT/$f" ] || die "$KIT/$f is missing: run this from an unzipped release (make dist builds one in dist/)"
 done
 
 user=$(id -un)
@@ -142,6 +143,7 @@ worker_changed=$changed
 step "settings: $IDENTITY"
 init_args=(identity --init --laptop-home "$laptop_home" --devbox-home "$devbox_home" --brain-repo "$brain_repo"
   --devbox-host "$devbox_host")
+if [ -n "$profile" ]; then init_args+=(--profile "$profile"); fi
 if [ -n "$orca_env" ]; then init_args+=(--orca-env "$orca_env"); fi
 if [ -n "$work_repo" ]; then init_args+=(--work-repo "$work_repo"); fi
 if [ "$force" = 1 ]; then init_args+=(--force); fi
@@ -228,7 +230,7 @@ enable_unit brain-worker.service "$worker_changed" restart
 if [ -x /opt/orca/orca-linux.AppImage ]; then
   enable_unit orca-serve.service "$orca_changed" never
 else
-  say "  todo       Orca is not at /opt/orca/orca-linux.AppImage (AGENT-SETUP.md step 0); orca-serve stays off"
+  say "  todo       Orca is not at /opt/orca/orca-linux.AppImage (SETUP.md step 0); orca-serve stays off"
 fi
 
 step "dream schedule and 30-day retention (namespace brain on 127.0.0.1:7233)"
@@ -291,7 +293,7 @@ install_file "$tmp/brain-darwin-arm64.sha256" "$dist/brain-darwin-arm64.sha256" 
 install_file "$KIT/scripts/setup-laptop.sh" "$dist/setup-laptop.sh" 755
 install_file "$KIT/scripts/devbox" "$dist/devbox" 755
 
-step "daily care (AGENT-SETUP.md step 4): brain-care.timer"
+step "daily care (SETUP.md step 4): brain-care.timer"
 if [ -e "$brain_repo/.git" ]; then
   install_file "$KIT/scripts/brain-care" "$HOME/.local/bin/brain-care" 755
   # the care agent pushes to the brain repo with the devbox's gh sign-in

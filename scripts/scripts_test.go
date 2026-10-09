@@ -144,21 +144,22 @@ func TestSetupDevboxDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// buildKit writes a complete synthetic kit with its source tarball and SHA256SUMS; plant edits files first, so the
-// sums cover the edit.
-func buildKit(t *testing.T, plant func(kit, src string)) string {
+// buildKit writes a complete synthetic release (repo files, bin/, SHA256SUMS); plant edits files first, so the sums
+// cover the edit.
+func buildKit(t *testing.T, plant func(kit string)) string {
 	t.Helper()
-	for _, tool := range []string{"zip", "unzip", "tar"} {
+	for _, tool := range []string{"zip", "unzip"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Skipf("%s not installed", tool)
 		}
 	}
 	dir := t.TempDir()
 	kit := filepath.Join(dir, "brain-setup-v1")
-	files := []string{"README.md", "AGENT-SETUP.md", "identity.example.json", "docs/ARCHITECTURE.md", "docs/DEVBOX-AND-ORCA.md",
-		"docs/BACKFILL.md", "docs/OPERATIONS.md", "docs/LESSONS.md", "docs/CONFIG.md", "deploy/systemd/brain-temporal.service",
-		"deploy/systemd/brain-worker.service", "deploy/systemd/brain-care.service", "deploy/systemd/brain-care.timer",
-		"deploy/systemd/orca-serve.service", "templates/brain-care-goal.md", "templates/brain-care-playbook.md"}
+	files := []string{"README.md", "SETUP.md", "identity.example.json", "go.mod", "Makefile", "internal/config/config.go",
+		"docs/ARCHITECTURE.md", "docs/DEVBOX-AND-ORCA.md", "docs/BACKFILL.md", "docs/OPERATIONS.md", "docs/LESSONS.md",
+		"docs/CONFIG.md", "deploy/systemd/brain-temporal.service", "deploy/systemd/brain-worker.service",
+		"deploy/systemd/brain-care.service", "deploy/systemd/brain-care.timer", "deploy/systemd/orca-serve.service",
+		"templates/brain-care-goal.md", "templates/brain-care-playbook.md"}
 	for _, f := range files {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(kit, f)), 0o755); err != nil {
 			t.Fatal(err)
@@ -171,16 +172,8 @@ func buildKit(t *testing.T, plant func(kit, src string)) string {
 		"scripts/setup-devbox.sh", "scripts/setup-laptop.sh", "scripts/devbox", "scripts/brain-care"} {
 		writeExec(t, filepath.Join(kit, f), "echo "+f+"\n")
 	}
-	src := filepath.Join(dir, "saahil-brain-v1")
-	writeExec(t, filepath.Join(src, "cmd", "main.go"), "package main\n")
 	if plant != nil {
-		plant(kit, src)
-	}
-	if err := os.MkdirAll(filepath.Join(kit, "source"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command("tar", "-czf", filepath.Join(kit, "source", "saahil-brain-v1.tar.gz"), "-C", dir, "saahil-brain-v1").CombinedOutput(); err != nil {
-		t.Fatalf("tar: %v %s", err, out)
+		plant(kit)
 	}
 	sums := exec.Command("bash", "-c", `find . -type f | sed 's|^\./||' | LC_ALL=C sort | xargs shasum -a 256`)
 	sums.Dir = kit
@@ -205,20 +198,20 @@ func zipKit(t *testing.T, dir string) string {
 	return zip
 }
 
-// check-kit must see inside source/ (a gzip a plain grep of the zip cannot read) and must notice a binary swapped
-// after the checksums were written; a clean kit passes, so a failure means the planted defect, not the fixture.
-func TestCheckKitCatchesOwnerPathInSourceAndTamperedBinary(t *testing.T) {
+// The release is the whole repo: check-kit must find an owner path in any file deep in the tree, and notice a binary
+// swapped after the checksums were written; a clean release passes, so a failure means the planted defect.
+func TestCheckKitCatchesOwnerPathInTreeAndTamperedBinary(t *testing.T) {
 	env := []string{"HOME=" + t.TempDir(), "PATH=/usr/bin:/bin:/opt/homebrew/bin"}
 	owner := "/Users/saahilsangan" + "eriya/brain"
 	for _, tc := range []struct {
 		name, want string
-		before     func(kit, src string)
+		before     func(kit string)
 		after      func(kit string)
 	}{
 		{name: "clean", want: "PASS"},
-		{name: "owner path in source", want: "FAIL  owner laptop home in src/saahil-brain-v1/cmd/main.go",
-			before: func(_, src string) {
-				_ = os.WriteFile(filepath.Join(src, "cmd", "main.go"), []byte("package main\nconst root = \""+owner+"\"\n"), 0o644)
+		{name: "owner path deep in the tree", want: "FAIL  owner laptop home in internal/config/config.go",
+			before: func(kit string) {
+				_ = os.WriteFile(filepath.Join(kit, "internal", "config", "config.go"), []byte("package config\nconst root = \""+owner+"\"\n"), 0o644)
 			}},
 		{name: "binary swapped after the sums", want: "FAIL  checksum: bin/brain-linux-amd64",
 			after: func(kit string) { writeExec(t, filepath.Join(kit, "bin", "brain-linux-amd64"), "echo swapped\n") }},

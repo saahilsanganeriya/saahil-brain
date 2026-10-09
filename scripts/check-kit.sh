@@ -1,7 +1,8 @@
 #!/bin/bash
-# check-kit.sh <brain-setup-VERSION.zip> — the release gate for a setup kit: the layout, the checksums, and nothing
-# of the owner's anywhere in it, source/ unpacked too (paths, host, Orca ids, keys, AWS keys, this machine's bridge
-# token, brain data). Exit 0 when clean; exit 1 listing every problem by file, never the matched text.
+# check-kit.sh <brain-setup-VERSION.zip> — the release gate: the layout of a release (the repo tree, bin/, SHA256SUMS),
+# the checksums, and nothing of the owner's in any file, binaries included (paths, host, names, Orca ids, keys, AWS
+# keys, this machine's bridge token, brain data). Exit 0 when clean; exit 1 listing every problem by file, never the
+# matched text.
 set -euo pipefail
 zip=${1:?usage: check-kit.sh <brain-setup-VERSION.zip>}
 [ -f "$zip" ] || { echo "check-kit: no such file: $zip" >&2; exit 2; }
@@ -20,30 +21,22 @@ case ${kit##*/} in brain-setup-*) ok "one top folder ${kit##*/}/" ;; *) bad "top
 
 # ---- layout
 before=$problems
-for f in README.md AGENT-SETUP.md SHA256SUMS identity.example.json \
+for f in README.md SETUP.md SHA256SUMS identity.example.json go.mod Makefile \
   docs/ARCHITECTURE.md docs/DEVBOX-AND-ORCA.md docs/BACKFILL.md docs/OPERATIONS.md docs/LESSONS.md docs/CONFIG.md \
-  bin/brain-darwin-arm64 bin/brain-linux-amd64 bin/brain-worker-linux-amd64 \
-  scripts/setup-devbox.sh scripts/setup-laptop.sh scripts/devbox scripts/brain-care \
   deploy/systemd/brain-temporal.service deploy/systemd/brain-worker.service deploy/systemd/brain-care.service \
   deploy/systemd/brain-care.timer deploy/systemd/orca-serve.service \
   templates/brain-care-goal.md templates/brain-care-playbook.md; do
   [ -f "$kit/$f" ] || bad "missing $f"
 done
-for f in "$kit"/bin/* "$kit"/scripts/*; do
-  if [ -f "$f" ] && [ ! -x "$f" ]; then bad "not executable: ${f#"$kit"/}"; fi
+for f in bin/brain-darwin-arm64 bin/brain-linux-amd64 bin/brain-worker-linux-amd64 \
+  scripts/setup-devbox.sh scripts/setup-laptop.sh scripts/devbox scripts/brain-care; do
+  if [ ! -f "$kit/$f" ]; then bad "missing $f"; elif [ ! -x "$kit/$f" ]; then bad "not executable: $f"; fi
 done
-sources=("$kit"/source/saahil-brain-*.tar.gz)
-if [ ${#sources[@]} = 1 ] && [ -f "${sources[0]}" ]; then
-  mkdir "$tmp/src"
-  tar -xzf "${sources[0]}" -C "$tmp/src"
-else
-  bad "source/ must hold one saahil-brain-<version>.tar.gz"
-fi
 for d in notes hubs memory sessions journal inbox work .brain .index .data .archive .import; do
   if [ -e "$kit/$d" ]; then bad "brain data folder at the top: $d/"; fi
 done
-while IFS= read -r f; do bad "file that must not ship: ${f#"$tmp"/}"; done < <(find "$tmp/zip" "$tmp/src" -type f \( -name '*.db' -o \
-  -name '*.jsonl' -o -name bridge.token -o -name identity.json -o -name 'id_ed25519*' -o -name 'id_rsa*' -o -name '*.pem' -o -name .env \) 2>/dev/null)
+while IFS= read -r f; do bad "file that must not ship: ${f#"$kit"/}"; done < <(find "$kit" -type f \( -name '*.db' -o \
+  -name '*.jsonl' -o -name bridge.token -o -name identity.json -o -name 'id_ed25519*' -o -name 'id_rsa*' -o -name '*.pem' -o -name .env \))
 if [ "$problems" = "$before" ]; then ok "layout"; fi
 
 # ---- checksums: every file listed, every sum right
@@ -58,7 +51,7 @@ awk '{sub(/^\*/, "", $2); print $2}' "$kit/SHA256SUMS" | sort >"$tmp/listed"
 while IFS= read -r f; do bad "not in SHA256SUMS: $f"; done < <(comm -23 "$tmp/files" "$tmp/listed")
 if [ "$problems" = "$before" ]; then ok "checksums ($(wc -l <"$tmp/listed" | tr -d ' ') files)"; fi
 
-# ---- nothing of the owner's. Each pattern is spelled so it does not match this file, which ships in source/ too.
+# ---- nothing of the owner's. Each pattern is spelled so it does not match this file, which ships in the release.
 before=$problems
 patterns=(
   'owner laptop home|/Users/saahilsanganeriy[a]'
@@ -74,31 +67,30 @@ patterns=(
   'AWS secret key|(aws_secret_access_key|AWS_SECRET_ACCESS_KEY)["'"'"':=[:space:]]+[A-Za-z0-9/+]{40}'
 )
 # the session redaction tests need key-shaped synthetic secrets; only these files may hold them, only those patterns
-fixture() { # $1 = label, $2 = file
+fixture() { # $1 = label, $2 = file relative to the release
   case $1 in *"private key" | "AWS access key id") ;; *) return 1 ;; esac
-  case $2 in "$tmp"/src/*/internal/session/session_test.go | "$tmp"/src/*/testdata/session/main.ndjson) return 0 ;; esac
+  case $2 in internal/session/session_test.go | testdata/session/main.ndjson) return 0 ;; esac
   return 1
 }
-scan=("$kit")
-if [ -d "$tmp/src" ]; then scan+=("$tmp/src"); fi
 for entry in "${patterns[@]}"; do
   label=${entry%%|*}
   while IFS= read -r f; do
+    f=${f#"$kit"/}
     if fixture "$label" "$f"; then
-      printf 'note  synthetic %s in %s (redaction test fixture, allowed)\n' "$label" "${f#"$tmp"/}"
+      printf 'note  synthetic %s in %s (redaction test fixture, allowed)\n' "$label" "$f"
     else
-      bad "$label in ${f#"$tmp"/}"
+      bad "$label in $f"
     fi
-  done < <(grep -rlE -e "${entry#*|}" "${scan[@]}" || true)
+  done < <(grep -rlE -e "${entry#*|}" "$kit" || true)
 done
 token=$HOME/.config/brain/bridge.token
 if [ -r "$token" ]; then
   tr -d '[:space:]' <"$token" >"$tmp/token"
   if [ -s "$tmp/token" ]; then
-    while IFS= read -r f; do bad "this machine's bridge token in ${f#"$tmp"/}"; done < <(grep -rlF -f "$tmp/token" "${scan[@]}" || true)
+    while IFS= read -r f; do bad "this machine's bridge token in ${f#"$kit"/}"; done < <(grep -rlF -f "$tmp/token" "$kit" || true)
   fi
 fi
-if [ "$problems" = "$before" ]; then ok "no owner paths, hosts, names, Orca ids, keys or tokens (source/ included)"; fi
+if [ "$problems" = "$before" ]; then ok "no owner paths, hosts, names, Orca ids, keys or tokens in any file"; fi
 
 if [ "$problems" = 0 ]; then
   echo "PASS  $zip"

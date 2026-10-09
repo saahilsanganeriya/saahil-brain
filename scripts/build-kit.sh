@@ -1,37 +1,33 @@
 #!/bin/bash
-# build-kit.sh <version> — `make dist`: assemble dist/brain-setup-<version>.zip from bin/ (make build), the setup
-# scripts, deploy/systemd templates, kit/*.md and a git archive of HEAD (code only). RELEASE=1 fails when README.md or
-# AGENT-SETUP.md is missing under kit/ and then runs check-kit.sh; otherwise a missing doc is a warning.
+# build-kit.sh <version> — `make dist`: dist/brain-setup-<version>.zip, a release of this repository: the committed
+# tree (git archive HEAD, so the root README.md, SETUP.md and docs/ come with it), plus bin/ from `make build` and a
+# SHA256SUMS over every file. RELEASE=1 refuses a dirty tree or a missing README.md / SETUP.md, then runs check-kit.sh.
 set -euo pipefail
 version=${1:?usage: build-kit.sh <version>}
 release=${RELEASE:-0}
 cd "$(dirname "$0")/.."
 
+if [ "$release" = 1 ] && [ "${version%-dirty}" != "$version" ]; then
+  echo "build-kit: a release needs a clean tree: bin/ is built from the working tree, the rest from HEAD" >&2
+  exit 1
+fi
 name=brain-setup-$version
 out=dist/$name
 rm -rf "$out" "$out.zip"
-mkdir -p "$out/bin" "$out/scripts" "$out/deploy/systemd" "$out/templates" "$out/source" "$out/docs"
-
-install -m 755 bin/brain-darwin-arm64 bin/brain-linux-amd64 bin/brain-worker-linux-amd64 "$out/bin/"
-install -m 755 scripts/setup-devbox.sh scripts/setup-laptop.sh scripts/devbox scripts/brain-care "$out/scripts/"
-install -m 644 deploy/systemd/*.service deploy/systemd/*.timer "$out/deploy/systemd/"
-install -m 644 templates/brain-care-goal.md templates/brain-care-playbook.md "$out/templates/"
-install -m 644 identity.example.json "$out/"
-git archive --format=tar.gz --prefix="saahil-brain-$version/" -o "$out/source/saahil-brain-$version.tar.gz" HEAD
-
-for doc in README.md AGENT-SETUP.md; do
-  if [ -f "kit/$doc" ]; then
-    install -m 644 "kit/$doc" "$out/"
+mkdir -p dist
+git archive --format=tar --prefix="$name/" HEAD | tar -x -C dist
+for doc in README.md SETUP.md; do
+  if [ -f "$out/$doc" ]; then
+    :
   elif [ "$release" = 1 ]; then
-    echo "build-kit: kit/$doc is missing; a release needs it" >&2
+    echo "build-kit: $doc is not committed at the repo root; a release needs it" >&2
     exit 1
   else
-    echo "build-kit: WARNING kit/$doc is missing (fine for a draft; RELEASE=1 refuses)" >&2
+    echo "build-kit: WARNING $doc is not committed at the repo root (fine for a draft; RELEASE=1 refuses)" >&2
   fi
 done
-for doc in kit/docs/*.md; do
-  if [ -f "$doc" ]; then install -m 644 "$doc" "$out/docs/"; fi
-done
+mkdir -p "$out/bin"
+install -m 755 bin/brain-darwin-arm64 bin/brain-linux-amd64 bin/brain-worker-linux-amd64 "$out/bin/"
 
 (cd "$out" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | xargs sha256sum) >"$out.sums"
 mv "$out.sums" "$out/SHA256SUMS"
