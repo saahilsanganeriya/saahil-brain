@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"saahil.local/brain/internal/hooks"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -67,8 +68,23 @@ func cmdBridgeServe([]string) int {
 	srv := &rpc.Server{Handler: rpc.NewHandler(), Token: strings.TrimSpace(string(token)),
 		LogPath: config.StateDir() + "/bridge.log"}
 	_ = os.MkdirAll(config.StateDir(), 0o700)
-	fmt.Fprintf(os.Stderr, "brain bridge %s listening on 127.0.0.1:%d\n", rpc.Version, config.BridgePort)
+	go keepIndexWarm(2 * time.Minute)
+	fmt.Fprintf(os.Stderr, "brain bridge %s listening on 127.0.0.1:%d; keeping the index warm every 2m\n", rpc.Version, config.BridgePort)
 	return fail("%v", srv.ListenAndServe(config.BridgePort))
+}
+
+// keepIndexWarm reads the index the way a prompt does, every few minutes, so the laptop's file cache keeps the pages
+// prompts touch: on a busy laptop the OS dropped them between prompts and the next prompt hook waited ~0.4 s for the
+// disk (hook bench --cold, 2026-10-09: p95 471 ms cold, 45 ms warm). Read-only; nothing is logged.
+func keepIndexWarm(every time.Duration) {
+	root, env := config.BrainRoot(), hooks.DefaultEnv()
+	for i := 0; ; i++ {
+		if qs, err := hooks.BenchQuestions(root, 12); err == nil && len(qs) >= 3 {
+			start := (i * 3) % (len(qs) - 2)
+			_, _, _ = hooks.Bench(env, qs[start:start+3], root)
+		}
+		time.Sleep(every)
+	}
 }
 
 func cmdBridgeInstall([]string) int {
