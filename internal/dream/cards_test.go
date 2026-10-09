@@ -1,6 +1,7 @@
 package dream
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -120,6 +121,23 @@ func TestDreamCardsStopAtRunCap(t *testing.T) {
 	if fake.Calls() != 3 || rep.CostUSD > RunCapUSD || s.Status != "ok" ||
 		!strings.Contains(s.Reason, "refreshed 3: a, b, c") || !strings.Contains(s.Reason, "skipped 1: d (cost cap") {
 		t.Fatalf("calls=%d cost=$%.2f step=%+v", fake.Calls(), rep.CostUSD, s)
+	}
+}
+
+type modelErrorRunner struct{}
+
+func (modelErrorRunner) Run(context.Context, llm.Call) (llm.Result, error) {
+	return llm.Result{CostUSD: 0.01}, &llm.ModelError{Subtype: "error_during_execution", Message: "## Where it stands\nquoted"}
+}
+
+// TestCardsRecordNamesNoContent catches a failed refresh putting the model's own words (a model error quotes up to
+// 300 chars of its answer) into the step record, which reaches dream status and notifications.
+func TestCardsRecordNamesNoContent(t *testing.T) {
+	acts, _ := newCardsBrain(t, 0, map[string]time.Duration{"busy": 2 * time.Hour})
+	acts.LLM = modelErrorRunner{}
+	s := step(runDream(t, acts, Input{}, time.Now().UTC()), cardsStepName)
+	if s.Status != "failed" || s.Reason != "failed 1: busy (model error error_during_execution)" {
+		t.Fatalf("%+v", s)
 	}
 }
 

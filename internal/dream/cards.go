@@ -124,7 +124,7 @@ func (r *run) cards() {
 		case out.Status == "skipped":
 			skipped = append(skipped, name+" ("+out.Reason+")")
 		case out.Status != "ok":
-			failed = append(failed, name+" ("+out.Reason+")")
+			failed = append(failed, name+" ("+failureKind(out.Reason)+")")
 		case len(out.Edits) == 0:
 			unchanged = append(unchanged, name)
 		default:
@@ -165,6 +165,14 @@ func cardsSummary(refreshed, unchanged, skipped, failed []string, waiting []back
 		parts = append(parts, s)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// failureKind keeps a model error's kind, not its message, which quotes the model's answer.
+func failureKind(reason string) string {
+	if kind, _, ok := strings.Cut(reason, ": "); ok && strings.HasPrefix(kind, "model error ") {
+		return kind
+	}
+	return reason
 }
 
 func boxNames(ages []backfill.CardAge) []string {
