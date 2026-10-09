@@ -169,8 +169,8 @@ func indexStamp(db *sql.DB) string {
 
 const namesLockTTL = 2 * time.Minute
 
-// RebuildNames builds the dictionary for the current index and caches it; a second rebuild while one runs is a
-// no-op.
+// RebuildNames builds the dictionary for the current index and caches it, with the work boxes' often-read files; a
+// second rebuild while one runs is a no-op.
 func RebuildNames(env Env) error {
 	if err := os.MkdirAll(env.StateDir, 0o700); err != nil {
 		return err
@@ -196,7 +196,10 @@ func RebuildNames(env Env) error {
 	if err != nil {
 		return err
 	}
-	return nm.save(filepath.Join(env.StateDir, namesCacheFile), stamp)
+	if err := nm.save(filepath.Join(env.StateDir, namesCacheFile), stamp); err != nil {
+		return err
+	}
+	return writeOften(ix.DB(), env.Root, filepath.Join(env.StateDir, oftenCacheFile), stamp)
 }
 
 func readNames(path string) (*Names, string, bool) {

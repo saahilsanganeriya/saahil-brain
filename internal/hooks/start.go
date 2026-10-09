@@ -36,7 +36,7 @@ const (
 
 type Digest struct {
 	Text    string
-	Sources []string // what made it in, by brain path (hot.md, work/<box>/STATE.md, hub:<id>)
+	Sources []string // what made it in, by brain path (hot.md, work/<box>/STATE.md, often:<box>, hub:<id>)
 	Blocks  []string // each source's block as it went in, parallel to Sources
 	Work    []string
 	Hubs    []string
@@ -69,14 +69,14 @@ func Start(env Env, in Input) ([]byte, error) {
 	var d Digest
 	switch {
 	case had && !st.DigestOwed:
-		d = composeDigest(env, startHeader, true, st.Work, config.DigestMaxChars, nil)
+		d = composeDigest(env, startHeader, true, st.Work, config.DigestMaxChars, nil, env.oftenCache())
 	case in.Event == "SubagentStart" || in.Event == "sessionStart":
-		d = composeDigest(env, startHeader, true, cwdWork(env, in.cwd(), aliases, nil), config.DigestMaxChars, nil)
+		d = composeDigest(env, startHeader, true, cwdWork(env, in.cwd(), aliases, nil), config.DigestMaxChars, nil, env.oftenCache())
 		if in.Event == "sessionStart" && session != "" {
 			_ = env.saveState(session, state{Work: d.Work, Hubs: d.Hubs})
 		}
 	default:
-		d = composeDigest(env, startHeader, true, nil, config.DigestMaxChars, nil)
+		d = composeDigest(env, startHeader, true, nil, config.DigestMaxChars, nil, nil)
 		if session != "" {
 			_ = env.saveState(session, state{CwdWork: cwdWork(env, in.cwd(), aliases, nil), DigestOwed: true,
 				DigestChars: utf8.RuneCountInString(d.Text)})
@@ -97,10 +97,10 @@ func Start(env Env, in Input) ([]byte, error) {
 	return Output(event, d.Text), nil
 }
 
-// composeDigest: hot.md when withHot, then each work box's STATE.md head and CARD.md, then its hubs' start-here
-// lists, under header, cut to limit chars. visible (nil accepts all) says which brain paths a replay may read:
-// session notes, work box folders and the files it quotes.
-func composeDigest(env Env, header string, withHot bool, work []string, limit int, visible func(string) bool) Digest {
+// composeDigest: hot.md when withHot, then each work box's STATE.md head and CARD.md, then the files earlier
+// sessions on each box read most, then its hubs' start-here lists, under header, cut to limit chars. visible (nil
+// accepts all) says which brain paths a replay may read: session notes, work box folders and the files it quotes.
+func composeDigest(env Env, header string, withHot bool, work []string, limit int, visible func(string) bool, often oftenSource) Digest {
 	d := Digest{Work: work}
 	seen := func(p string) bool { return visible == nil || visible(p) }
 	var b strings.Builder
@@ -149,6 +149,11 @@ func composeDigest(env Env, header string, withHot bool, work []string, limit in
 		hubs = appendNew(hubs, state.Hubs...)
 		if len(hubs) == 0 {
 			hubs = appendNew(hubs, hubsByName(env.Root, box)...)
+		}
+	}
+	if often != nil {
+		for _, box := range work {
+			add("often:"+box, "Work "+box+": often read", oftenText(often(box), d.Sources), oftenChars)
 		}
 	}
 	hubs = slices.DeleteFunc(hubs, func(h string) bool { return !seen("hubs/" + h + ".md") })
