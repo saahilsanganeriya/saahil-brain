@@ -44,7 +44,7 @@ ssh_q=(ssh -n -o ConnectTimeout=8 -o BatchMode=yes -o ControlPath=none "$host")
 state() {
   local s
   s=$("${aws[@]}" describe-instances --instance-ids "$id" --query 'Reservations[0].Instances[0].State.Name' --output text) ||
-    die "cannot read the state of $id (AWS sign-in expired? aws sso login --sso-session ${sso:-<session>})"
+    die "cannot read the state of $id (AWS sign-in expired? aws sso login --sso-session ${sso:-Example-Session})"
   case $s in
     pending | running | stopping | stopped | shutting-down | terminated) say "$s" ;;
     *) die "unexpected state for $id: '$s'" ;;
