@@ -86,10 +86,12 @@ func New(here config.Machine, host Host) *Squad {
 		NamesFile:       filepath.Join(config.AgentsDir(), "names.json"),
 		HappierSessions: filepath.Join(home, ".happier", "terminal", "sessions"),
 		Projects:        filepath.Join(config.ClaudeDir(), "projects"),
-		Worktrees:       filepath.Join(filepath.Dir(id.WorkRepo), "worktrees", filepath.Base(id.WorkRepo)),
 		Repo:            id.WorkRepo,
 		OrcaRepo:        id.WorkRepoOrca,
 		DevboxBin:       filepath.Join(id.DevboxHome, ".local", "bin"),
+	}
+	if id.WorkRepo != "" {
+		f.Worktrees = filepath.Join(filepath.Dir(id.WorkRepo), "worktrees", filepath.Base(id.WorkRepo))
 	}
 	if !host.Remote {
 		f.Sessions = func(ctx context.Context) ([]agents.Session, error) {
@@ -427,6 +429,10 @@ func (f *Squad) NewAgent(ctx context.Context, name, base, dir, repo string) erro
 		checkout, selector := f.Repo, f.OrcaRepo
 		if repo != "" {
 			checkout, selector = repo, "path:"+repo
+		}
+		if checkout == "" {
+			cancel()
+			return ErrNoWorkRepo
 		}
 		_, err := f.Host.Shell(fetchCtx, "git -C "+Quote(checkout)+" fetch -q origin main")
 		cancel()

@@ -308,7 +308,7 @@ func TestResumeTrustsTheFolderBeforeLaunch(t *testing.T) {
 }
 
 // Catches the daily brain-care agent landing in the wrong repo: `agents new --repo <path>` must fetch that repo and
-// ask Orca for a worktree of it, while a plain `agents new` keeps the work-repo repo.
+// ask Orca for a worktree of it, a plain `agents new` uses work_repo, and with neither it says which key to set.
 func TestNewAgentInTheNamedRepo(t *testing.T) {
 	origin, repo := filepath.Join(t.TempDir(), "origin.git"), filepath.Join(t.TempDir(), "saahil-brain")
 	git(t, "init", "-q", "--bare", "-b", "main", origin)
@@ -325,6 +325,11 @@ func TestNewAgentInTheNamedRepo(t *testing.T) {
 		if len(orca.created) != 1 || flagValue(orca.created[0], "--repo") != tc.want {
 			t.Errorf("repo %q: orca calls %v, want --repo %s", tc.repo, orca.created, tc.want)
 		}
+	}
+	orca := &fakeOrca{}
+	f, _ := testSquad(t, orca)
+	if err := f.NewAgent(context.Background(), "brain-care", "origin/main", "", ""); !errors.Is(err, ErrNoWorkRepo) || len(orca.created) > 0 {
+		t.Errorf("no work_repo, no --repo: err %v, orca calls %v", err, orca.created)
 	}
 }
 

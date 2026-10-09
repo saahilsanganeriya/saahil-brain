@@ -514,8 +514,8 @@ func hashRefs(body string, set map[string]bool) {
 				if owner != "" && repo != "" && isLetter(owner[0]) && isLetter(repo[0]) && !strings.Contains(owner, ".") {
 					set["pr:"+owner+"/"+repo+"#"+num] = true
 				}
-			} else if n >= 3 && saysPR(body[:i]) {
-				set["pr:"+config.CurrentIdentity().DefaultPRRepo+"#"+num] = true
+			} else if repo := config.CurrentIdentity().DefaultPRRepo; repo != "" && n >= 3 && saysPR(body[:i]) {
+				set["pr:"+repo+"#"+num] = true
 			}
 		}
 		next := strings.IndexByte(body[i+1:], '#')

@@ -47,8 +47,9 @@ func TestLaptopVerbsReachTheDevboxScriptUnchanged(t *testing.T) {
 	}
 }
 
-// TestAWSLoginUsesTheIdentitysSession catches every person's AWS sign-in going to the owner's SSO session name, or a
-// session name with a space reaching the shell as two words: from the laptop (over ssh) and on the devbox.
+// TestAWSLoginUsesTheIdentitysSession catches every person's AWS sign-in going to the owner's SSO session name, a
+// session name with a space reaching the shell as two words (from the laptop over ssh and on the devbox), or a login
+// with no session set running aws instead of naming the key to set.
 func TestAWSLoginUsesTheIdentitysSession(t *testing.T) {
 	identitytest.Write(t, `{"aws_sso_session": "Team Session", "devbox_host": "box-test"}`)
 	var streamed [][]string
@@ -69,5 +70,11 @@ func TestAWSLoginUsesTheIdentitysSession(t *testing.T) {
 	want := [][]string{{"bash", "-lc", login}, {"ssh", "-t", "box-test", "bash -lc " + squad.Quote(login)}}
 	if len(streamed) != 2 || !slices.Equal(streamed[0], want[0]) || !slices.Equal(streamed[1], want[1]) {
 		t.Errorf("streamed %q\nwant     %q", streamed, want)
+	}
+	identitytest.Write(t, `{}`)
+	out := &bytes.Buffer{}
+	_ = (&Machine{Here: config.Devbox, Out: out, Stream: stream}).Login(context.Background(), []string{"aws"})
+	if len(streamed) != 2 || !strings.Contains(out.String(), "aws_sso_session") {
+		t.Errorf("no session: streamed %q, said %q", streamed[2:], out)
 	}
 }

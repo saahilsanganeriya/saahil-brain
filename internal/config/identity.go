@@ -14,8 +14,8 @@ import (
 )
 
 // Identity is everything per-person: ~/.config/brain/identity.json, the same file on both machines. A missing file
-// or key falls back to a value derived from this machine, so the owner's file pins today's values and a new person
-// runs on derived ones until `brain identity --init`.
+// or key falls back to a value derived from this machine (or none, for team values), so the owner's file pins today's
+// values and a new person runs on derived ones until `brain identity --init [--profile <team>]`.
 type Identity struct {
 	User          string   `json:"user,omitempty"` // the laptop login
 	LaptopHome    string   `json:"laptop_home,omitempty"`
@@ -220,8 +220,9 @@ func resolveIdentity() IdentityStatus {
 	return st
 }
 
-// withDerived fills each empty value from this machine. Paths under the home follow BRAIN_HOME, so a test's derived
-// repos and certs stay inside its temp home.
+// withDerived fills each empty value this machine can answer; team values (work_repo, aws_sso_session, github_cert,
+// default_pr_repo) stay empty until a profile or the person sets them. Paths under the home follow BRAIN_HOME, so a
+// test's derived paths stay inside its temp home.
 func withDerived(id Identity) Identity {
 	fill := func(v *string, derived func() string) {
 		if *v == "" {
@@ -248,12 +249,10 @@ func withDerived(id Identity) Identity {
 		home = h
 	}
 	fill(&id.DevboxHost, func() string { return id.User + "-devbox" })
-	fill(&id.WorkRepo, func() string { return filepath.Join(home, "Documents", "work-repo") })
-	fill(&id.WorkRepoOrca, func() string { return "path:" + id.WorkRepo })
 	fill(&id.BrainRepo, func() string { return filepath.Join(home, "Documents", "saahil-brain") })
-	fill(&id.AWSSSOSession, func() string { return "Example-Session" })
-	fill(&id.GithubCert, func() string { return filepath.Join(home, ".ssh", "work_github-cert.pub") })
-	fill(&id.DefaultPRRepo, func() string { return "example-org/work-repo" })
+	if id.WorkRepo != "" {
+		fill(&id.WorkRepoOrca, func() string { return "path:" + id.WorkRepo })
+	}
 	return id
 }
 

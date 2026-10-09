@@ -43,18 +43,16 @@ func TestOwnerIdentityKeepsTodaysValues(t *testing.T) {
 
 // TestIdentityDerivedDefaults catches a new person's machines breaking before identity.json exists (or with a file
 // holding only some keys, or a broken one): every value must still come out, each from this machine's own login and
-// home, and a test home (BRAIN_HOME) must keep every derived path inside it.
+// home, a test home (BRAIN_HOME) must keep every derived path inside it, and no team value (the work repo, an SSO
+// session, a cert, a PR repo) may come from code.
 func TestIdentityDerivedDefaults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("BRAIN_HOME", home)
 	t.Setenv("USER", "test-user")
 	t.Setenv("HOME", "/home/test-user")
 	t.Setenv("BRAIN_MACHINE", "devbox")
-	work := filepath.Join(home, "Documents", "work-repo")
 	want := Identity{User: "test-user", LaptopHome: "/Users/test-user", DevboxHome: "/home/test-user", DevboxHost: "test-user-devbox",
-		WorkRepo: work, WorkRepoOrca: "path:" + work, BrainRepo: filepath.Join(home, "Documents", "saahil-brain"),
-		AWSSSOSession: "Example-Session", GithubCert: filepath.Join(home, ".ssh", "work_github-cert.pub"),
-		DefaultPRRepo: "example-org/work-repo"}
+		BrainRepo: filepath.Join(home, "Documents", "saahil-brain")}
 	if got := CurrentIdentity(); !identical(got, want) {
 		t.Errorf("devbox, no file: %+v\nwant              %+v", got, want)
 	}
@@ -65,7 +63,10 @@ func TestIdentityDerivedDefaults(t *testing.T) {
 		t.Errorf("laptop, no file: homes %s %s", LaptopHome(), DevboxHome())
 	}
 
-	writeIdentityFile(t, home, `{"devbox_host": "box-1", "laptop_home": "/Users/test-user/", "someday": 1}`)
+	writeIdentityFile(t, home, `{"devbox_host": "box-1", "laptop_home": "/Users/test-user/", "work_repo": "/w/repo", "someday": 1}`)
+	if got := CurrentIdentity().WorkRepoOrca; got != "path:/w/repo" {
+		t.Errorf("work_repo_orca = %q, want it to follow work_repo", got)
+	}
 	st := ReadIdentityStatus()
 	if st.Err != nil || DevboxHost() != "box-1" || !st.FromFile["devbox_host"] || st.FromFile["devbox_home"] {
 		t.Errorf("partial file: host %s, err %v, from file %v", DevboxHost(), st.Err, st.FromFile)

@@ -21,9 +21,8 @@ func TestIdentityInitKeepsWhatTheFileSays(t *testing.T) {
 		t.Fatalf("--init exit %d", code)
 	}
 	got := readIdentity(t, home)
-	work := filepath.Join(home, "Documents", "work-repo")
 	for key, want := range map[string]any{"user": "test-laptop", "laptop_home": "/Users/test-laptop", "devbox_home": "/home/test-user",
-		"devbox_host": "box-old", "orca_env": "env-1", "work_repo": work, "devbox_region": "us-west-2", "shadow_docs": []any{}} {
+		"devbox_host": "box-old", "orca_env": "env-1", "devbox_region": "us-west-2", "shadow_docs": []any{}} {
 		if raw, _ := json.Marshal(got[key]); string(raw) != mustJSON(want) {
 			t.Errorf("%s = %s, want %s", key, raw, mustJSON(want))
 		}

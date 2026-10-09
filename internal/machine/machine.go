@@ -81,7 +81,9 @@ func LocalStatus(ctx context.Context, host squad.Host) string {
 	}
 	fmt.Fprintf(&b, "devbox (this machine): %s, up %s, load %s\n", name, uptime, load)
 	now := time.Now()
-	if expiry, err := githubCertExpiry(ctx, host, config.CurrentIdentity().GithubCert); err != nil {
+	if config.CurrentIdentity().GithubCert == "" {
+		fmt.Fprintf(&b, "GitHub cert: not set (github_cert in brain identity)\n")
+	} else if expiry, err := githubCertExpiry(ctx, host, config.CurrentIdentity().GithubCert); err != nil {
 		fmt.Fprintf(&b, "GitHub cert: unreadable (%v)\n", err)
 	} else {
 		fmt.Fprintf(&b, "GitHub cert: %s\n", until(expiry, now, "brain machine login github"))
@@ -176,6 +178,8 @@ func (m *Machine) Login(ctx context.Context, services []string) error {
 			err = m.Stream(ctx, "ssh", "-t", "-L", "8250:127.0.0.1:8250", config.DevboxHost(), devboxBin("devbox-github-login"), "--tunnel")
 		case service == "github":
 			err = m.Stream(ctx, devboxBin("devbox-github-login"))
+		case service == "aws" && config.CurrentIdentity().AWSSSOSession == "":
+			err = errors.New("aws_sso_session is not set: brain identity --init --aws-sso-session <name> (or --profile <team>)")
 		case service == "aws" && m.Host.Remote:
 			err = m.Stream(ctx, "ssh", "-t", config.DevboxHost(), "bash -lc "+squad.Quote(awsLogin()))
 		case service == "aws":

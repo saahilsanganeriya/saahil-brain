@@ -56,6 +56,11 @@ func cmdIdentity(args []string) int {
 	return printIdentity(config.ReadIdentityStatus())
 }
 
+// identityNeeds names what waits on each key that may stay empty.
+var identityNeeds = map[string]string{"orca_env": "brain agents on the devbox from the laptop",
+	"work_repo": "brain agents new without --repo", "aws_sso_session": "brain machine login aws",
+	"github_cert": "the GitHub cert line of brain machine status", "default_pr_repo": "linking a bare 'PR #123' in notes"}
+
 func printIdentity(st config.IdentityStatus) int {
 	_, statErr := os.Stat(st.Path)
 	switch {
@@ -70,6 +75,9 @@ func printIdentity(st config.IdentityStatus) int {
 		source := "derived"
 		if st.FromFile[kv[0]] {
 			source = "file"
+		}
+		if need := identityNeeds[kv[0]]; kv[1] == "" && need != "" {
+			source += " (empty: " + need + " waits on it)"
 		}
 		fmt.Printf("%-18s %-60s %s\n", kv[0], cmp.Or(kv[1], "-"), source)
 	}

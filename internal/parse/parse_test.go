@@ -104,7 +104,8 @@ func TestFrontmatterWrappedFlowList(t *testing.T) {
 }
 
 // TestLinksAndPRsFollowTheIdentity catches a person's own absolute paths not counting as links (only the owner's two
-// homes did) and a bare "PR #123" in their docs pointing at the owner's repo instead of default_pr_repo.
+// homes did), a bare "PR #123" in their docs pointing at the owner's repo instead of default_pr_repo, and one
+// attributed to a repo at all when default_pr_repo is not set.
 func TestLinksAndPRsFollowTheIdentity(t *testing.T) {
 	identitytest.Write(t, `{"laptop_home": "/Users/test-user", "devbox_home": "/home/test-user", "default_pr_repo": "example-org/widgets"}`)
 	d := Markdown([]byte("# Notes\n\nSee /Users/test-user/brain/notes/x.md and /home/test-user/runs/out.txt.\nMerged PR #123 today.\n"))
@@ -114,5 +115,9 @@ func TestLinksAndPRsFollowTheIdentity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(d.Mentions, []string{"pr:example-org/widgets#123"}) {
 		t.Errorf("mentions = %v", d.Mentions)
+	}
+	identitytest.Write(t, `{}`)
+	if d := Markdown([]byte("Merged PR #123 today.\n")); len(d.Mentions) != 0 {
+		t.Errorf("no default_pr_repo: mentions = %v, want none", d.Mentions)
 	}
 }

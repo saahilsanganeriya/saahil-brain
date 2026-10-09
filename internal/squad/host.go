@@ -27,6 +27,9 @@ var SSH = []string{"ssh", "-o", "ConnectTimeout=8", "-o", "ControlPath=none"}
 // ErrViaBridge: from the devbox the laptop is reached only through the bridge's allow-listed operations.
 var ErrViaBridge = errors.New("the laptop is reached from the devbox only through the bridge's read-only operations")
 
+// ErrNoWorkRepo: brain agents new needs a checkout to make the worktree in.
+var ErrNoWorkRepo = errors.New("work_repo is not set: pass --repo <checkout>, or brain identity --init --work-repo <path> (or --profile <team>)")
+
 // ErrNoOrcaEnv: the laptop reaches the devbox's Orca server through the environment its Orca app paired, orca_env.
 var ErrNoOrcaEnv = errors.New("orca_env is not set: brain identity --init --orca-env <id> (the devbox's environment in the laptop's Orca app)")
 
