@@ -1,4 +1,4 @@
-# AGENT-SETUP: install the brain on a laptop and a devbox
+# SETUP: install the brain on a laptop and a devbox
 
 **For the coding agent that runs this.** Follow the steps in order. Each step says where to run it (LAPTOP or
 DEVBOX), what to run, what you should see, and the check that proves the step worked. Do not skip a check. When a
@@ -21,6 +21,10 @@ Read [README.md](README.md) first, then [docs/DEVBOX-AND-ORCA.md](docs/DEVBOX-AN
 Supported setup: a MacBook (Apple silicon) plus a Linux devbox on EC2, Orca, Claude Code. **Laptop-only is not
 supported:** the dream, Temporal and the daily care agent run on the devbox.
 
+**What you run it from.** A release, `brain-setup-<version>.zip`: this repository plus prebuilt binaries in `bin/`
+and their `SHA256SUMS`. Unzip it on the laptop. From a clone of the repository, `make dist` (Go 1.26) builds the
+same zip under `dist/`. Below, "the release folder" is the unzipped `brain-setup-<version>/`.
+
 ## Conventions
 
 | Mark | Meaning |
@@ -32,9 +36,17 @@ supported:** the dream, Temporal and the daily care agent run on the devbox.
 | **Check** | a command whose output proves the step. If it differs, the step failed |
 
 Placeholders: `<user>` your laptop login (`id -un` on the laptop) · `<devbox-user>` your Linux user on the devbox ·
-`<devbox-host>` the ssh alias of the devbox · `<version>` the kit version · `<orca-env>` the Orca environment id
-of the devbox · `<work-repo>` absolute path of your main work repo · `<brain-repo>` absolute path where the brain's
-code will live on the devbox (default `/Users/<user>/Documents/saahil-brain`).
+`<devbox-host>` the ssh alias of the devbox · `<version>` the release version · `<orca-env>` the Orca environment id
+of the devbox · `<work-repo>` absolute path of your main work repo · `<brain-repo>` absolute path where your copy of
+the brain's code will live on the devbox (default `/Users/<user>/Documents/saahil-brain`) · `<profile>` the name of a
+team profile in `profiles/` (for example `example`), or nothing.
+
+**Team profile.** A profile is `profiles/<profile>.json`, committed in the repository: the settings a whole team
+shares (SSO session name, GitHub certificate path, the default PR repo, the usual work repo). Pass `--profile
+<profile>` to both setup scripts; the profile fills only the keys the human did not set. Without a profile, the
+code's defaults are generic and the features that need a team value say which key to set
+([docs/CONFIG.md](docs/CONFIG.md#1-settings-identityjson-and-team-profiles)). Leave out every `--profile <profile>`
+below when there is none.
 
 Ground rules for the agent: never open, print or copy a secrets file (`.env*`, keys, tokens; the bridge token is
 copied by the scripts, never shown). Never delete anything in `~/brain`; move it into `~/brain/.archive/`. Kill a
@@ -51,14 +63,14 @@ process only by the PID you were given. Never change a company repo for the brai
 |---|---|---|
 | 0.1 | Create the devbox: Ubuntu x86_64, ≥ 8 vCPU, ≥ 32 GB RAM, ≥ 200 GB gp3 disk, an Elastic IP, ssh (tcp/22) open only to the human's addresses | the instance runs |
 | 0.2 | Add the ssh alias `<devbox-host>` to the laptop's `~/.ssh/config`; key-based login, no password | check 0.a passes |
-| 0.3 | On the devbox: `sudo apt-get install -y git unison`; Claude Code installed at `~/.local/bin/claude` and signed in; GitHub and AWS sign-ins the way the team does them. Decide how the worker calls models (row 3.14 of section 7) | check 0.b passes |
+| 0.3 | On the devbox: `sudo apt-get install -y git unison`; Claude Code installed at `~/.local/bin/claude` and signed in with the human's own Claude login (the dream's worker uses that login; no API key); `gh` signed in; GitHub and AWS sign-ins the way the team does them | check 0.b passes |
 | 0.4 | On the laptop: Homebrew, Claude Code, the Orca app | `brew --version`, `claude --version` print versions |
-| 0.5 | Orca on the devbox: the AppImage at `/opt/orca/orca-linux.AppImage`; the `orca-serve` user unit rendered from the kit (below); linger on | check 0.c passes |
+| 0.5 | Orca on the devbox: the AppImage at `/opt/orca/orca-linux.AppImage`; the `orca-serve` user unit rendered from the release (below); linger on | check 0.c passes |
 | 0.6 | Pair the laptop's Orca app with the devbox's `orca serve` (pairing link → `orca environment add`), and keep the laptop tunnel `ssh -N -L 16768:127.0.0.1:6768 <devbox-host>` up with a LaunchAgent | check 0.d passes |
 | 0.7 | Collect the values below | the table is filled |
 
-Render the Orca unit from the kit. First put the kit on the devbox and check it (the commands of
-[step 1.1](#11-put-the-kit-on-the-devbox-and-check-it)). Then, on the DEVBOX in `~/brain-setup-<version>`
+Render the Orca unit from the release. First put the release on the devbox and check it (the commands of
+[step 1.1](#11-put-the-release-on-the-devbox-and-check-it)). Then, on the DEVBOX in `~/brain-setup-<version>`
 (`setup-devbox.sh` renders the unit again the same way later):
 
 ```
@@ -79,6 +91,7 @@ sudo loginctl enable-linger <devbox-user>                 # [HUMAN] sudo
 | `<orca-env>` | LAPTOP: `orca environment list --json` → the id of the devbox environment |
 | `<work-repo>` | the absolute path of the main work repo checkout, laptop spelling (`/Users/<user>/…`) |
 | `<brain-repo>` | where the brain's code will be checked out on the devbox (default `/Users/<user>/Documents/saahil-brain`) |
+| `<profile>` | the team's profile name, if the team has one in `profiles/` (`ls profiles/` in the release folder) |
 | devbox instance id, region, AWS profile | for the laptop's `devbox` helper; the human's AWS console or team docs |
 
 **Checks:**
@@ -86,8 +99,8 @@ sudo loginctl enable-linger <devbox-user>                 # [HUMAN] sudo
 ```
 0.a  LAPTOP  ssh -o BatchMode=yes <devbox-host> 'uname -sm; nproc; free -g | awk "/Mem:/{print \$2}"; df -h ~ | tail -1'
      Expect: Linux x86_64 · a number ≥ 8 · a number ≥ 30 (GiB) · a disk with ≥ 200G      (no password prompt)
-0.b  LAPTOP  ssh <devbox-host> '/usr/bin/unison -version; ~/.local/bin/claude --version; git --version'
-     Expect: unison version 2.5x… · <version> (Claude Code) · git version …
+0.b  LAPTOP  ssh <devbox-host> '/usr/bin/unison -version; ~/.local/bin/claude --version; git --version; gh auth status'
+     Expect: unison version 2.5x… · <version> (Claude Code) · git version … · Logged in to github.com …
 0.c  LAPTOP  ssh <devbox-host> 'systemctl --user is-active orca-serve; loginctl show-user $(id -un) -p Linger'
      Expect: active · Linger=yes
 0.d  LAPTOP  orca environment list --json
@@ -98,12 +111,12 @@ sudo loginctl enable-linger <devbox-user>                 # [HUMAN] sudo
 
 ## 1. Devbox (`scripts/setup-devbox.sh`)
 
-### 1.1 Put the kit on the devbox and check it
+### 1.1 Put the release on the devbox and check it
 
-**Run** (LAPTOP, where the human unpacked the kit):
+**Run** (LAPTOP, where the human unzipped the release):
 
 ```
-cd ~/Downloads/brain-setup-<version>        # wherever the kit was unpacked
+cd ~/Downloads/brain-setup-<version>        # wherever the release was unzipped
 shasum -a 256 -c SHA256SUMS
 rsync -a ./ <devbox-host>:brain-setup-<version>/
 ```
@@ -117,14 +130,14 @@ rsync -a ./ <devbox-host>:brain-setup-<version>/
 **Run** (DEVBOX, in `~/brain-setup-<version>`):
 
 ```
-scripts/setup-devbox.sh --dry-run --laptop-home /Users/<user> --devbox-host <devbox-host> --orca-env <orca-env> \
-    --work-repo <work-repo> --brain-repo <brain-repo> --aws-profile <aws-profile>
-scripts/setup-devbox.sh --laptop-home /Users/<user> --devbox-host <devbox-host> --orca-env <orca-env> \
-    --work-repo <work-repo> --brain-repo <brain-repo> --aws-profile <aws-profile>
+scripts/setup-devbox.sh --dry-run --profile <profile> --laptop-home /Users/<user> --devbox-host <devbox-host> \
+    --orca-env <orca-env> --work-repo <work-repo> --brain-repo <brain-repo> --aws-profile <aws-profile>
+scripts/setup-devbox.sh --profile <profile> --laptop-home /Users/<user> --devbox-host <devbox-host> \
+    --orca-env <orca-env> --work-repo <work-repo> --brain-repo <brain-repo> --aws-profile <aws-profile>
 ```
 
-`--laptop-home` is required (the devbox cannot guess the laptop's login). `--aws-profile` is optional: it is the
-laptop AWS profile the `devbox` helper uses.
+`--laptop-home` is required (the devbox cannot guess the laptop's login). `--work-repo` may be left out when the
+profile sets it. `--aws-profile` is optional: it is the laptop AWS profile the `devbox` helper uses.
 
 **[HUMAN]** The script uses `sudo` twice and says why before each: to add the bind mount to `/etc/fstab`, and to turn
 on linger. If `sudo` asks for a password, the human types it.
@@ -136,8 +149,8 @@ install) · laptop files staged · daily care · next, on the laptop. Under each
 (`installed`, `added`, `created`, `set`, `sha256 ok`) or that it was already done (`present`, `unchanged`,
 `running`). The daily care step says `todo` on the first run: that is step 4. The script is safe to run again.
 
-A `SKIPPED … (differs from the kit; --force replaces it, keeping a .bak)` line means a file on the devbox differs
-from the kit's copy. Show it to the human before you rerun with `--force`.
+A `SKIPPED … (differs from …; --force replaces it, keeping a .bak)` line means a file on the devbox differs
+from the release's copy. Show it to the human before you rerun with `--force`.
 
 ### 1.3 Check every part the script did
 
@@ -150,12 +163,13 @@ Run each check on the DEVBOX. All must match before step 2.
 | | `grep -c ' /Users/<user> none bind' /etc/fstab` | `1` |
 | binaries | `brain version` | `brain <version> (devbox)` |
 | | `test -x ~/.local/bin/brain-worker && echo worker-ok` | `worker-ok` |
-| identity | `brain identity` | every key with its value; `devbox_host`, `orca_env`, `work_repo`, `brain_repo` say `file` |
+| identity | `brain identity` | every key with its value; `devbox_host`, `orca_env`, `work_repo`, `brain_repo` come from the file (the profile's values are merged into it by `--init`), not `derived` |
 | | `grep -c devbox_instance_id ~/.config/brain/identity.json` | `1` (the script reads the instance id and region from EC2 instance metadata) |
 | brain skeleton | `brain init` | `brain skeleton ready at /Users/<user>/brain` |
 | live marker | `cat ~/brain/.brain/live` | a UTC time. `brain init` writes it for a fresh brain (no `shadow_docs`) |
 | Temporal CLI | `temporal --version` | `temporal version 1.7.<n> (Server …, UI …)` or newer |
 | services | `systemctl --user is-active brain-temporal brain-worker` | `active` twice |
+| | `systemctl --user show brain-worker -p Environment` | contains `BRAIN_LLM_LOGIN=1` (model calls use the human's Claude login) |
 | linger | `loginctl show-user <devbox-user> -p Linger` | `Linger=yes` |
 | dream schedule | `brain dream status` | its last line: `schedule brain-dream-hourly: next <time>, <n> runs so far, paused=false` |
 | retention | `temporal operator namespace describe -n brain --address 127.0.0.1:7233` | a line `Config.WorkflowExecutionRetentionTtl  720h0m0s` |
@@ -163,7 +177,8 @@ Run each check on the DEVBOX. All must match before step 2.
 | hosts wired | `brain install --verify` | `ok` for `claude: rules, memory, mod`, `mesh: hooks`, `git: ignore`; `ok` or `skip` for the others |
 | Claude Code mod | `claude plugin list` | lists `saahil-brain` (enabled). `brain install` creates and registers the local marketplace `~/mods/saahil-mods` when missing |
 | memory folder | `grep -o '"autoMemoryDirectory": *"[^"]*"' ~/.claude/settings.json` | `"autoMemoryDirectory": "/Users/<user>/brain/memory"` |
-| laptop files staged | `ls ~/.local/share/brain/dist/` | `brain-darwin-arm64`, `brain-darwin-arm64.sha256`, `setup-laptop.sh` |
+| laptop files staged | `ls ~/.local/share/brain/dist/` | `brain-darwin-arm64`, `brain-darwin-arm64.sha256`, `devbox`, `setup-laptop.sh` |
+| seed hubs | `ls ~/brain/hubs/` | the generic hubs `brain init` seeded (the home `index.md` and practice topics) |
 | health so far | `brain doctor` | every line `ok`, `skip` or `info`, except the lines about the laptop (`mesh.peer`, `sync.last`) and lines that say there is no data yet |
 
 ---
@@ -176,11 +191,11 @@ launchd jobs from reading `~/Documents` and they hang
 
 ### 2.1 Run the script
 
-**Run** (LAPTOP, in the kit folder; the devbox also stages the same script, see the last lines of step 1.2):
+**Run** (LAPTOP, in the release folder; the devbox also stages the same script, see the last lines of step 1.2):
 
 ```
-scripts/setup-laptop.sh <devbox-host> --dry-run
-scripts/setup-laptop.sh <devbox-host>
+scripts/setup-laptop.sh <devbox-host> --profile <profile> --dry-run
+scripts/setup-laptop.sh <devbox-host> --profile <profile>
 ```
 
 **[HUMAN]** macOS may ask to allow Terminal to access a folder, and Homebrew may ask for the password. The human
@@ -243,7 +258,7 @@ this order and run each step's check before the next.
 |---|---|---|---|---|
 | 3.1 | each machine | `brain import memory` | `imported <N> memory files …`; manifest has `<N>` lines | free |
 | 3.2 | LAPTOP | `brain sync` | DEVBOX `ls ~/brain/.import/` shows `devbox laptop` | free |
-| 3.3 | DEVBOX | `brain file --seed-hubs` | `seed hubs: <n> created …`; the human reviews the hub list in `~/brain/hubs/` | free |
+| 3.3 | DEVBOX | `ls ~/brain/hubs/`; the human adds a hub for each domain of their work (BACKFILL step 1) | every topic the human works on has a hub | free |
 | 3.4 | DEVBOX | `brain file --dry-run` | the batch plan and a balanced reconcile | free |
 | 3.5 | DEVBOX | `brain file` | ends `… balanced ✓` | **[HUMAN] spend** ≈ $3 per 2,000 memories (Haiku) |
 | 3.6 | DEVBOX | `brain file --model opus --retry-skipped` | skipped count falls | **[HUMAN] spend** ≈ $8 for the hardest few dozen (Opus) |
@@ -273,14 +288,17 @@ It works in the human's own private copy of the brain's code. See [docs/OPERATIO
 **[HUMAN]** The human creates an empty PRIVATE repository on GitHub for it (any name), says where, and makes sure
 `gh` is installed and signed in on the devbox (`gh auth status`): the care agent pushes through it.
 
-**Run** (DEVBOX, in `~/brain-setup-<version>`):
+The release folder is the repository (a `git archive` of it) plus build outputs, so the human's repo starts from it.
+If the human cloned the repository instead, use that clone as `<brain-repo>` and only point `origin` at the private
+repo.
+
+**Run** (DEVBOX):
 
 ```
 mkdir -p <brain-repo>
-tar -xzf source/saahil-brain-<version>.tar.gz -C <brain-repo>     # check: <brain-repo>/go.mod exists
-                                                                 # (if the archive has one top folder, move its contents up)
+rsync -a --exclude bin/ --exclude SHA256SUMS ~/brain-setup-<version>/ <brain-repo>/   # check: <brain-repo>/go.mod exists
 git -C <brain-repo> init -b main
-git -C <brain-repo> add -A && git -C <brain-repo> commit -m "brain <version> from the setup kit"
+git -C <brain-repo> add -A && git -C <brain-repo> commit -m "brain <version> from the release"
 git -C <brain-repo> remote add origin <the human's private repo URL>
 git -C <brain-repo> config credential.helper '!gh auth git-credential'      # repo-local; the global git config is untouched
 git -C <brain-repo> push -u origin main
@@ -289,7 +307,8 @@ git -C <brain-repo> push -u origin main
 Then register it with Orca on the devbox (in an Orca terminal there): `orca repo add --path <brain-repo>`.
 
 **Check:** `git -C <brain-repo> status -sb` → `## main...origin/main` with no changes; the laptop's Orca app lists the
-project on the devbox environment. The repo holds code only: never commit brain data (`~/brain`) into it.
+project on the devbox environment. The repo holds code and team profiles only: never commit brain data (`~/brain`)
+or the personal `identity.json` into it.
 
 ### 4.2 Install the care agent
 
@@ -299,8 +318,8 @@ step 1.2.
 **Run** (DEVBOX, in `~/brain-setup-<version>`):
 
 ```
-scripts/setup-devbox.sh --laptop-home /Users/<user> --devbox-host <devbox-host> --orca-env <orca-env> \
-    --work-repo <work-repo> --brain-repo <brain-repo> --aws-profile <aws-profile>
+scripts/setup-devbox.sh --profile <profile> --laptop-home /Users/<user> --devbox-host <devbox-host> \
+    --orca-env <orca-env> --work-repo <work-repo> --brain-repo <brain-repo> --aws-profile <aws-profile>
 ```
 
 **Expect:** under `== daily care`: `installed  …/.local/bin/brain-care`, `present  credential.helper in <brain-repo>`,
@@ -322,8 +341,8 @@ says `present`, `unchanged` or `running`.
 
 **Check:** `brain agents list` shows `devbox:brain-care-<day>`. When it ends (≤ 2.5 h),
 `~/brain/work/brain-care/runs/<day>/REPORT.md` exists, holds the health output and the metrics table, and
-`brain agents list` no longer shows the agent. The care goal ends with a `happier notify` line; without Happier
-installed that one line fails and the report is still written.
+`brain agents list` no longer shows the agent. The care agent sends a notification at the end only when a
+notifier is installed on the devbox; without one it skips that step, and the report is the record.
 
 ---
 
@@ -353,6 +372,7 @@ DEVBOX  systemctl --user is-active brain-temporal brain-worker orca-serve brain-
 | 2.1 | macOS folder-access prompts, the Homebrew password |
 | 2.3, sign-ins | `brain machine login aws`, `github` and `gcloud` are browser flows |
 | 3.5, 3.6, 3.10, 3.13, 3.14, 4.3 | they spend money on model calls |
+| 0.7 | choosing the team profile (or none) |
 | 3.3 | choosing and wording the hubs (the topics of the human's work) |
 | 3.8 | which doc folders to bring in, and their box names |
 | 4.1 | creating the private GitHub repo |
@@ -366,7 +386,7 @@ Find the symptom, fix the cause, run the step's check again. More causes are in 
 | Step | Symptom | Cause | Fix |
 |---|---|---|---|
 | 0.a | ssh asks for a password or times out | wrong alias, key or security group | fix `~/.ssh/config`; open tcp/22 to your current address |
-| 1.1 | a `FAILED` line in the checksum check | a damaged or changed file | get the kit again; never run a binary that fails its checksum |
+| 1.1 | a `FAILED` line in the checksum check | a damaged or changed file | get the release again; never run a binary that fails its checksum |
 | 1.3 bind mount | `findmnt` prints nothing | the mount line is missing or `/Users/<user>` was not created | `sudo mkdir -p /Users/<user>`; add `/home/<devbox-user> /Users/<user> none bind,nofail 0 0` to `/etc/fstab`; `sudo mount /Users/<user>` **[HUMAN]** |
 | 1.3 services | `brain-temporal` is `failed` | port 7233 or 8233 is taken, or the Temporal CLI is missing | `journalctl --user -u brain-temporal -n 50 --no-pager`; free the port or install the CLI, then `systemctl --user restart brain-temporal brain-worker` |
 | 1.3 dream schedule | `temporal at 127.0.0.1:7233: …` | Temporal not up yet | wait 10 s after the services start; run `brain dream schedule` again |
@@ -378,8 +398,8 @@ Find the symptom, fix the cause, run the step's check again. More causes are in 
 | 2.2 sync | `unison not installed` | Homebrew step skipped | `brew install unison`, then `brain sync --setup`, `brain sync --enable` |
 | 2.2 sync | exit 2, "failed: <file>" | a file was being written during the sync | run `brain sync` again |
 | any laptop step | the command hangs at 0% with no error | a launchd-started process tried to read `~/Documents` (macOS privacy control) | stop it by its PID; run the same command in an interactive Terminal |
-| 3.5 | `no hubs under …/hubs` | hubs not seeded | `brain file --seed-hubs` |
+| 3.5 | `no hubs under …/hubs` | `brain init` did not seed hubs (an older binary) | `brain file --seed-hubs` copies the binary's seed hubs where missing |
 | 3.8 | `compare` reports `missing` or `changed` | something deleted or edited files during the move | stop; find the writer; never continue to the next folder until it is explained |
-| 3.14 | a dream step `failed` with an auth error | the worker's `claude --bare -p` has no API key (a systemd unit gets no shell profile) | give the worker one way in: `~/.local/bin/devbox-exec` (your team's wrapper that loads the provider and key), an API key in its environment, or the devbox's Claude Code sign-in through `systemctl --user edit brain-worker` → `[Service]` `Environment=BRAIN_LLM_LOGIN=1`; then `systemctl --user restart brain-worker` and `brain dream run --now` |
+| 3.14 | a dream step `failed` with an auth error | the worker uses the human's Claude login (`BRAIN_LLM_LOGIN=1` in its unit), and Claude Code on the devbox is not signed in, or the unit lacks the line | **[HUMAN]** run `claude` once on the devbox and sign in; check `systemctl --user show brain-worker -p Environment`; then `systemctl --user restart brain-worker` and `brain dream run --now` |
 | 3.15 | doctor red on `graph dangling links` | a note links to a file that moved | `brain show <path>` to see who links to it; move the file back or let the next dream relink |
 | 4.3 | no agent appears | Orca does not know `<brain-repo>`, or `brain agents new` failed | `journalctl --user -u brain-care.service -n 30 --no-pager`; `orca repo add --path <brain-repo>` in an Orca terminal on the devbox |

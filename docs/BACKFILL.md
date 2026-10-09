@@ -1,6 +1,6 @@
 # Backfill: bring your history into the brain
 
-Read this for step 3 of [AGENT-SETUP.md](../AGENT-SETUP.md). Do it once, after both machines are set up and
+Read this for step 3 of [SETUP.md](../SETUP.md). Do it once, after both machines are set up and
 `brain peer status` answers from the devbox.
 
 **In plain words.** A new brain is empty. Your history is not: Claude Code already keeps memories per repo,
@@ -49,14 +49,17 @@ cannot open files under `~/Documents` ([LESSONS.md](LESSONS.md#5-launchd-jobs-ha
 2. On the laptop, push the copies to the devbox: `brain sync`. Check on the devbox: `ls ~/brain/.import/` shows
    both `devbox` and `laptop`.
 
-3. On the devbox, seed the hubs (the topic pages notes join). Edit the scope line of each seeded hub to fit your work
-   before you file; delete nothing.
+3. On the devbox, check the hubs (the topic pages notes join). `brain init` seeded generic ones: the home page
+   `index.md` and practice topics that fit any engineer. Before you file, add a hub for each domain of the human's
+   own work, so its notes have a home: copy a seeded hub (for example `hubs/git.md`) to `hubs/<hub-id>.md`, then set
+   its frontmatter (`id` = the file name, `type: hub`, `status: current`, a one-line `summary`, `aliases`,
+   `broader: [index]`), its title and its scope paragraph, and leave the dream's placeholder sections empty. Seeding a hub is the one hub write that is
+   the human's; after it, the dream maintains hubs. Delete nothing.
 
    ```
-   brain file --seed-hubs
+   ls ~/brain/hubs/
+   brain lint ~/brain/hubs/        # exit 0, or 1 for warnings; never 2
    ```
-
-   Expect: `seed hubs: <n> created, 0 already there (never overwritten)`.
 
 4. Plan, then file (Haiku, in batches of 20):
 

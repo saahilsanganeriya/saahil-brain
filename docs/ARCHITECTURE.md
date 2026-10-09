@@ -119,8 +119,8 @@ graph clean; everything mechanical is computed.
 ```
 
 A hub page holds a scope paragraph, aliases, a "start here" list (≤ 7), current decisions and top lessons, ≤ 5 open
-questions and child hubs. Its member list is a query over the notes, never a hand-kept list. `brain file
---seed-hubs` writes the seed hubs that ship in the binary. Edit their scope to fit your work before the first
+questions and child hubs. Its member list is a query over the notes, never a hand-kept list. `brain init` seeds
+generic hubs (the home page and practice topics). You add a hub for each domain of your own work before the first
 filing; after that the dream maintains hubs and proposes new ones when ≥ 8 notes from ≥ 2 boxes share a topic.
 
 ## 3. The four levels (L0–L3)

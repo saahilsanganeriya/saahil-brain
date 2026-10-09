@@ -2,7 +2,7 @@
 
 Read this before you change the setup, and when something looks wrong. Each lesson happened on the reference setup
 (2026-10-08 and 2026-10-09) and cost real time. Each one is written as **symptom → cause → fix → rule**. The fix is
-already in the kit's code or scripts unless the lesson says otherwise; the rule is what you must keep doing.
+already in this repository's code or scripts unless the lesson says otherwise; the rule is what you must keep doing.
 
 | # | Lesson | Area |
 |---|---|---|
@@ -293,8 +293,8 @@ already in the kit's code or scripts unless the lesson says otherwise; the rule 
 
 ## 26. Gaps a fresh install exposed
 
-The reference brain went through a shadow phase and a hand-run cut-over. Packaging it for a new person showed two
-steps that only ever happened by hand:
+The reference brain went through a shadow phase and a hand-run cut-over, on one person's machines. Packaging it for
+a new person showed steps that only ever happened by hand, and values that only fit the first owner:
 
 - **The live marker.** Nothing wrote `~/brain/.brain/live`; it was written by hand at the cut-over. Without it the
   hooks stay in shadow (they log and inject nothing), `brain install` never sets Claude Code's `autoMemoryDirectory`,
@@ -306,4 +306,17 @@ steps that only ever happened by hand:
   file and the mesh hooks but no digest, pointers, guard or `brain_*` tools. **Fix:** `brain install` creates
   `~/mods/saahil-mods/.claude-plugin/marketplace.json` when it is missing, registers it, then installs the mod.
   **Check:** `claude plugin list` shows `saahil-brain`, and `brain doctor` shows `host.claude … mod ✓ · loaded ✓`.
-- **Rule.** A step that ran by hand once is a step a new install will miss. Put it in code with a check.
+- **The worker's model login.** The worker ran `claude --bare -p`, which needs an API key, or a team wrapper
+  (`devbox-exec`) that the first owner's devbox had. A systemd unit gets no shell profile, so on a new devbox the
+  dream's model calls would fail auth. **Fix:** the `brain-worker` unit template sets `BRAIN_LLM_LOGIN=1`: the
+  calls use the person's own Claude login on the devbox; no API key. **Check:** `systemctl --user show brain-worker
+  -p Environment` contains `BRAIN_LLM_LOGIN=1`.
+- **The care agent's notification.** The care goal ended with a notifier command that only the first owner had
+  installed. **Fix:** the notify step runs only when a notifier is installed; the report is the record either way.
+- **Seed hubs and code defaults.** The seed hubs were the first owner's topics, and code defaults held one team's
+  SSO session, certificate path and PR repo. **Fix:** `brain init` seeds only generic hubs (the person adds their
+  own domains); code defaults are generic; team values live in a committed profile (`profiles/<team>.json`, merged by
+  `brain identity --init --profile <team>`); personal values stay in the never-committed `identity.json`. The
+  Makefile's dist path comes from settings, not a fixed home.
+- **Rule.** A step that ran by hand once is a step a new install will miss, and a value that fits one person is a
+  bug for the next. Put the step in code with a check, and the value in settings.

@@ -10,7 +10,7 @@ report, answer the rare question the brain cannot settle, and sign in again when
 ```
  every prompt    hooks: digest + ≤ 3 pointers  (both machines, every host)
  every hour      laptop: brain sync (Unison) · devbox: dream if something new landed
- every day 15:00 devbox: brain-care agent → doctor both · fix · one experiment · REPORT.md · notification
+ every day 15:00 devbox: brain-care agent → doctor both · fix · one experiment · REPORT.md · (notification)
  every week      devbox: evals (brain-eval-weekly, once `brain eval schedule` created it)
  when you want   brain doctor · brain metrics · Temporal UI · brain view (Obsidian)
 ```
@@ -141,7 +141,7 @@ improvement and keeps it only if the numbers say so, ships it to both machines, 
               IMPROVE metrics + evals → check yesterday's change (revert if it did not help)
                       → one general change on a shadow copy (DEV to tune, TEST once) → keep only if it passes
               SHIP    commit · push to main · make publish · brain install · laptop update + install · re-check
-              REPORT  runs/<day>/REPORT.md · one line in EXPERIMENTS.md · one notification
+              REPORT  runs/<day>/REPORT.md · one line in EXPERIMENTS.md · a notification if a notifier is installed
               WIND DOWN  remove its worktree and branch · brain agents stop <itself>
 ```
 
@@ -206,9 +206,10 @@ brain peer step install --wait 10m      # laptop hosts
 brain doctor && brain peer step doctor --wait 10m
 ```
 
-The care agent does exactly this when it ships a change. From a new kit release instead of the repo, run the kit's
-`scripts/setup-devbox.sh` again (every step skips what is already done), then the update and install steps above.
-Running sessions pick up a new mod or new hooks at their next restart.
+The care agent does exactly this when it ships a change. `make publish` stages the laptop binary in the dist
+folder your settings name (`~/.local/share/brain/dist` under your home). From a new release instead of the repo,
+run its `scripts/setup-devbox.sh` again with the same flags (every step skips what is already done), then the update
+and install steps above. Running sessions pick up a new mod or new hooks at their next restart.
 
 ## Turning it off
 

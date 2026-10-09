@@ -1,6 +1,6 @@
 # The devbox and Orca
 
-Read this before step 0 of [AGENT-SETUP.md](../AGENT-SETUP.md). Step 0 is yours, not your agent's: it needs your
+Read this before step 0 of [SETUP.md](../SETUP.md). Step 0 is yours, not your agent's: it needs your
 AWS account, `sudo` and the Orca app.
 
 **In plain words.** A *devbox* is a Linux machine in the cloud (an AWS EC2 instance) that stays on while your laptop
@@ -35,7 +35,7 @@ Contents: [1 create the devbox](#1-create-the-devbox) · [2 the bind mount](#2-t
 
 | Need | Minimum | Why |
 |---|---|---|
-| OS | Ubuntu (24.04 LTS on the reference setup), x86_64 | the kit's Linux binaries are `linux-amd64` |
+| OS | Ubuntu (24.04 LTS on the reference setup), x86_64 | the release's Linux binaries are `linux-amd64` |
 | CPU / RAM | ≥ 8 vCPU, ≥ 32 GB | Temporal, the worker, Orca and a few agents at once |
 | Disk | ≥ 200 GB gp3, `DeleteOnTermination=false` | boxes, worktrees and results grow; the disk must outlive the instance |
 | Address | an Elastic IP | the ssh alias keeps working after a stop and start |
@@ -127,7 +127,7 @@ same-folder
 **Install.** Put the Orca Linux AppImage at `/opt/orca/orca-linux.AppImage` (root-owned, executable), from Orca's
 official release. On Linux outside an Orca terminal, the CLI is `orca-ide`; a bare `orca` may be another program.
 
-**Run it as a user service.** The kit ships `deploy/systemd/orca-serve.service` (rendered by `setup-devbox.sh`):
+**Run it as a user service.** The repository ships `deploy/systemd/orca-serve.service` (rendered by `setup-devbox.sh`):
 
 ```
 [Service]
@@ -226,7 +226,7 @@ It reads three optional keys from `~/.config/brain/identity.json`: `devbox_insta
 | GitHub (SSH certificate, `github_cert`) | hours (company flow) | `brain machine login github`, or your team's flow | `git push`: `Permission denied (publickey)` |
 | AWS SSO (`aws_sso_session`) | the SSO session length | `brain machine login aws` | `devbox up`/`status`: `Token has expired`; `brain machine status` shows it |
 | gcloud | until Google asks again | `brain machine login gcloud` | `Reauthentication required` |
-| Claude (for the dream's model calls) | persistent | an API key in the worker's environment, `~/.local/bin/devbox-exec`, or `Environment=BRAIN_LLM_LOGIN=1` on `brain-worker` with Claude Code signed in ([CONFIG.md](CONFIG.md#2-environment-variables)) | dream steps fail with an auth error in `.brain/dream-runs/` |
+| Claude (for the dream's model calls) | persistent | sign in to Claude Code on the devbox with your own login; the `brain-worker` unit sets `BRAIN_LLM_LOGIN=1` so the dream uses it, no API key ([CONFIG.md](CONFIG.md#2-environment-variables)) | dream steps fail with an auth error in `.brain/dream-runs/` |
 
 `brain machine login` drives the same sign-in helpers as your team's devbox setup. Each sign-in is a browser flow:
 **[HUMAN]**.
