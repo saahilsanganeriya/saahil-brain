@@ -133,6 +133,33 @@ func TestQueryWordsAndPathsReachTheDoc(t *testing.T) {
 	}
 }
 
+// TestQueryNamingAHubRanksItFirst catches a search for a hub by its own name that ranks a note above the hub: on
+// 2026-10-08 `brain search "identity resolution"` put a decision note whose id and summary repeat the words above
+// hub identity-resolution. A query equal to a hub's title, id or an alias puts that hub first; one word more does not.
+func TestQueryNamingAHubRanksItFirst(t *testing.T) {
+	brain := t.TempDir()
+	st := indexFiles(t, brain, map[string]string{
+		"hubs/glacier-shards.md": "---\nid: glacier-shards\ntype: hub\nstatus: current\nsummary: Sharding the glacier corpus\naliases: [shard ladder, gs]\n---\n# Glacier shards\n\nStart here.\n",
+		"notes/decision-glacier-shards-width.md": "---\nid: decision-glacier-shards-width\ntype: decision\nstatus: current\n" +
+			"summary: Glacier shards stay eight wide; glacier shards past eight stall the shard ladder\naliases: [glacier shards width]\n---\n# Glacier shards width\n\nGlacier shards, glacier shards.\n",
+	}, nil)
+	top := func(q string) string {
+		hits, err := Search(st.DB, q, Opts{Limit: 3})
+		if err != nil || len(hits) == 0 {
+			t.Fatalf("%q: hits %v, err %v", q, hits, err)
+		}
+		return hits[0].ID
+	}
+	for _, q := range []string{"glacier shards", "Glacier-Shards", "shard ladder"} {
+		if got := top(q); got != "glacier-shards" {
+			t.Errorf("%q: top hit %s, want hub glacier-shards", q, got)
+		}
+	}
+	if got := top("glacier shards width"); got != "decision-glacier-shards-width" {
+		t.Errorf("a query naming the note, not the hub: top hit %s", got)
+	}
+}
+
 // indexFiles writes files under brain, runs touch (file times) and indexes them into a fresh store.
 func indexFiles(t *testing.T, brain string, files map[string]string, touch func()) *store.Store {
 	t.Helper()
