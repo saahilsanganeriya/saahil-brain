@@ -258,7 +258,8 @@ func archiveMoves(dest, root string, moves [][2]string, now time.Time) (int, err
 }
 
 // archiveStaleTemps moves unison's half-copies (.unison.<name>.<hash>.unison.tmp) that predate this run from the
-// folders of files that failed to transfer: an aborted transfer of a file a live agent was writing leaves them.
+// folders of files that failed to transfer (an aborted transfer of a file a live agent was writing leaves them), and
+// any half-copy past config.UnisonTempGrace anywhere in the synced tree.
 func archiveStaleTemps(root string, unisonOut []byte, started time.Time) (int, error) {
 	dest := filepath.Join(root, ".archive", "conflicts", string(config.ThisMachine()))
 	dirs := map[string]bool{}
@@ -278,5 +279,25 @@ func archiveStaleTemps(root string, unisonOut []byte, started time.Time) (int, e
 			moves = append(moves, [2]string{filepath.Join(root, dir, e.Name()), filepath.Join(dest, dir, e.Name())})
 		}
 	}
+	// half-copies an earlier run abandoned, wherever they are: past the grace no transfer is still writing them
+	queued := map[string]bool{}
+	for _, m := range moves {
+		queued[m[0]] = true
+	}
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && p != root && (d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive" ||
+			config.IsSyncBulkDir(d.Name())) {
+			return filepath.SkipDir
+		}
+		if info, err := d.Info(); err == nil && !d.IsDir() && strings.HasPrefix(d.Name(), ".unison.") && !queued[p] &&
+			time.Since(info.ModTime()) > config.UnisonTempGrace {
+			rel, _ := filepath.Rel(root, p)
+			moves = append(moves, [2]string{p, filepath.Join(dest, rel)})
+		}
+		return nil
+	})
 	return archiveMoves(dest, root, moves, time.Now())
 }

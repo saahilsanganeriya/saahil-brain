@@ -156,7 +156,7 @@ func checkConflicts(context.Context) (Status, string) {
 		}
 		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {
 			// unison's half-copy of a file it is moving now, or just failed to: the next sync retries and cleans it
-			if info, err := d.Info(); err == nil && strings.HasPrefix(d.Name(), ".unison.") && time.Since(info.ModTime()) < 2*time.Hour {
+			if info, err := d.Info(); err == nil && strings.HasPrefix(d.Name(), ".unison.") && time.Since(info.ModTime()) < config.UnisonTempGrace {
 				inFlight++
 				return nil
 			}

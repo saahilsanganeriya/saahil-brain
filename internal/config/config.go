@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Both machines see the owner's home at LaptopHome: the devbox bind-mounts DevboxHome there, so every stored path
@@ -129,6 +130,9 @@ func IsSyncBulkDir(name string) bool {
 	}
 	return false
 }
+
+// UnisonTempGrace is how long a unison half-copy (.unison.*) may be a transfer in flight; past it, it was abandoned.
+const UnisonTempGrace = 2 * time.Hour
 
 // SyncWorkTextExts are the only file extensions the sync carries under work/ (bulk stays on the machine that made it).
 var SyncWorkTextExts = []string{"md", "txt", "py", "sh", "js", "toml", "yml", "yaml"}
