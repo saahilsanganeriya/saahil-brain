@@ -6,9 +6,9 @@ GOAL: Daily brain care {{DATE}}: keep the brain healthy on both machines and mak
 
 3. SHIP what you keep: commit (end each message with: Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>); git fetch -q origin && git rebase origin/main && git push origin HEAD:main; make publish; brain install; brain peer step update --wait 5m; brain peer step install --wait 10m; re-check.
 
-LIMITS: about 90 minutes; at most $5 of model calls. Never delete brain data (move it into ~/brain/.archive/), never push brain data, never change a company repo, never read .env files, kill only your own processes by PID, never call AskUserQuestion (decide by the playbook, BRAIN.md and ~/brain/work/brain-redesign-2026-10-07/plans/DESIGN.md; log each decision), start no other agents or workers. Owner-only steps (a sign-in, a decision): list them, do not wait.
+LIMITS: about 90 minutes; at most $5 of model calls. Never delete brain data (move it into ~/brain/.archive/), never push brain data, never change a company repo, never read .env files, kill only your own processes by PID, never call AskUserQuestion (decide by the playbook, BRAIN.md and this repo's docs/ARCHITECTURE.md; log each decision), start no other agents or workers. Owner-only steps (a sign-in, a decision): list them, do not wait.
 
-REPORT: ~/brain/work/brain-care/runs/{{RUN}}/REPORT.md: health (command, result); the metrics table with changes since yesterday; yesterday's change checked; today's experiment (hypothesis, numbers, verdict, commit); what stays open. Then one line: happier notify -t brain-care -p "<health> | <experiment and verdict> | <needs you: ...>".
+REPORT: ~/brain/work/brain-care/runs/{{RUN}}/REPORT.md: health (command, result); the metrics table with changes since yesterday; yesterday's change checked; today's experiment (hypothesis, numbers, verdict, commit); what stays open. Then, if a notifier is installed, one line: command -v happier >/dev/null && happier notify -t brain-care -p "<health> | <experiment and verdict> | <needs you: ...>".
 
 WIND DOWN: once main has your commits (or you made none): b=$(git branch --show-current); git -C {{BRAIN_REPO}} pull --ff-only -q; orca-ide worktree rm --worktree path:<this folder> --force; git -C {{BRAIN_REPO}} branch -D "$b"; then, as your very last command, brain agents stop {{NAME}}.
 

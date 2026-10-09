@@ -27,7 +27,7 @@ then a Happier (tmux) agent in `names.json`.
 
 ```
  from \ target    devbox agent                                   laptop agent
- laptop           ssh devbox-host 'bash -lc …'                 local bash + orca
+ laptop           ssh <devbox-host> 'bash -lc …'                 local bash + orca
                   + orca --environment <ORCA_ENV>
  devbox           local bash + orca (in Orca) | orca-ide         bridge: rpc op "screen" only (read-only);
                                                                  every other command refuses with a message

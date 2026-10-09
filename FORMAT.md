@@ -1,8 +1,8 @@
 # The brain's file formats and code conventions
 
 The contract every part of `brain` (index, hooks, dream, adapters) reads and writes. The design behind it lives in the
-brain-redesign box (`plans/DESIGN.md`, v3). Paths are always spelled `/Users/test-user/...` — the devbox
-bind-mounts `/home/test-user` there, and `config.Canonical` maps the other spelling.
+brain-redesign box (`plans/DESIGN.md`, v3). Paths are always spelled `<laptop_home>/...` (for example `/Users/<user>/...`) — the devbox
+bind-mounts its home (`/home/<user>`) there, and `config.Canonical` maps the other spelling.
 
 ## Layout of `~/brain`
 
@@ -25,7 +25,7 @@ inbox/          anything dropped for the dream to file
 ```
 
 Shadow phase: until the cut-over, `work/` is empty and the index reads each machine's saahil-docs read-only,
-presenting it as `work/<box>/...` (root alias `work` → `/Users/test-user/Documents/work-repo/saahil-docs`).
+presenting it as `work/<box>/...` (root alias `work` → a pre-cut-over docs folder, settings key `shadow_docs`).
 Nothing under any saahil-docs tree is ever written before the cut-over.
 
 ## Note frontmatter (notes/, hubs/, CARD.md, brain-ready docs)
@@ -65,10 +65,10 @@ type: session
 machine: devbox
 session_id: d0d200fd-294f-46df-b0cc-d655067a45bd
 name: image-unified-f1
-cwd: /Users/test-user/Documents/worktrees/work-repo/image-unified
+cwd: /Users/<user>/Documents/worktrees/<repo>/<task>
 started: 2026-10-08T01:02:03Z
 ended: 2026-10-08T06:00:00Z
-transcript: /Users/test-user/.claude/projects/<slug>/<id>.jsonl
+transcript: /Users/<user>/.claude/projects/<slug>/<id>.jsonl
 works: [image-lane-2026-10]          # work boxes touched
 touched: [work/image-lane-2026-10/STATE.md, ...]   # files read or written by any tool, Bash included (≤ 60, most-used first)
 produced: [work/image-lane-2026-10/.data/run-7/result.json]

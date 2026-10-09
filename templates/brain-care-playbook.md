@@ -17,14 +17,14 @@ A run that finds a better method changes this file in a commit, like any other c
 ## 2. Check yesterday's change
 
 The newest kept experiment in EXPERIMENTS.md names the metric it should move. If the live snapshot shows it did not,
-or a guard regressed (any eval number below in 6, prompt p95 over 150 ms, spend up by more than half, pointers
+or a guard regressed (any eval number below the bar in section 5, prompt p95 over 150 ms, spend up by more than half, pointers
 opened or sessions pulling falling three days running), revert it (`git revert`, push, deploy) and record
 "reverted" with the numbers.
 
 ## 3. Choose one thing to improve
 
 In this order: (a) anything broken (doctor, failed dream steps, deletions, a missing record); (b) the owner-typed
-eval (human within 3 calls, then top-3), the closest measure of whether the brain helps Saahil; (c) use: pointers
+eval (human within 3 calls, then top-3), the closest measure of whether the brain helps its owner; (c) use: pointers
 opened per shown, sessions pulling, MCP calls; (d) spend per dream; (e) navigation and QA. Read EXPERIMENTS.md
 first and never retry a rejected idea without new evidence.
 

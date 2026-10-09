@@ -5,6 +5,8 @@ After=brain-temporal.service
 Requires=brain-temporal.service
 
 [Service]
+# model calls use this person's own Claude Code login (no API key); a devbox-exec wrapper, when installed, wins
+Environment=BRAIN_LLM_LOGIN=1
 ExecStart=@DEVBOX_HOME@/.local/bin/brain-worker
 Restart=on-failure
 RestartSec=10
