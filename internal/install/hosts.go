@@ -2,6 +2,7 @@ package install
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,16 +54,21 @@ func Hosts(repo string) []Host {
 			Key: []string{"autoMemoryDirectory"}, Value: filepath.Join(config.LaptopHome(), "brain", "memory")})
 	}
 	// The mod carries every brain hook. Claude Code refuses plugin files that resolve outside its marketplace folder,
-	// so the embedded files are written into the marketplace as ordinary managed files (no symlink).
-	if _, err := os.Stat(filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json")); err == nil {
-		claudeSteps = append(claudeSteps, modFileSteps()...)
+	// so the embedded files are written into the marketplace as ordinary managed files (no symlink). A machine without
+	// the marketplace gets a minimal one; an existing one keeps its own name and owner.
+	market := filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json")
+	if _, err := os.Stat(market); errors.Is(err, os.ErrNotExist) {
 		claudeSteps = append(claudeSteps,
-			Step{Kind: "json-item", Path: filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json"), Label: "mod",
-				Key: []string{"plugins"}, Value: map[string]any{"name": ModName, "source": "./" + ModName,
-					"description": "The brain in Claude Code: brain_* tools, a pane, a band, the write guard and the brain hooks"}},
-			Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "mod",
-				Key: []string{"enabledPlugins", ModName + "@" + ModMarketplace}, Value: true})
+			Step{Kind: "json-key", Path: market, Label: "mod", Key: []string{"name"}, Value: ModMarketplace},
+			Step{Kind: "json-key", Path: market, Label: "mod", Key: []string{"owner"}, Value: map[string]any{"name": config.CurrentIdentity().User}})
 	}
+	claudeSteps = append(claudeSteps, modFileSteps()...)
+	claudeSteps = append(claudeSteps,
+		Step{Kind: "json-item", Path: market, Label: "mod",
+			Key: []string{"plugins"}, Value: map[string]any{"name": ModName, "source": "./" + ModName,
+				"description": "The brain in Claude Code: brain_* tools, a pane, a band, the write guard and the brain hooks"}},
+		Step{Kind: "json-key", Path: filepath.Join(claude, "settings.json"), Label: "mod",
+			Key: []string{"enabledPlugins", ModName + "@" + ModMarketplace}, Value: true})
 
 	codex := filepath.Join(home, ".codex")
 	cursor := filepath.Join(home, ".cursor")

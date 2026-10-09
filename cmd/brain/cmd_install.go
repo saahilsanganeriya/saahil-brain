@@ -85,10 +85,12 @@ func cmdInstall(args []string) int {
 	}
 	// after the manifest is saved: a failing claude CLI must not lose the record of what install already changed
 	if *off == "" {
-		if msg, err := install.EnsureClaudePlugin(); err != nil {
-			return fail("claude plugin: %v", err)
-		} else if msg != "" {
-			fmt.Println(msg)
+		for _, ensure := range []func() (string, error){install.EnsureClaudeMarketplace, install.EnsureClaudePlugin} {
+			if msg, err := ensure(); err != nil {
+				return fail("claude plugin: %v", err)
+			} else if msg != "" {
+				fmt.Println(msg)
+			}
 		}
 	}
 	fmt.Println("manifest:", manifestPath)

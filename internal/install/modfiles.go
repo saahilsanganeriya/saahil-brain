@@ -105,6 +105,29 @@ func dropOldModLink() error {
 	return os.Remove(link)
 }
 
+// EnsureClaudeMarketplace registers the mods marketplace with Claude Code when Claude does not know it yet (Claude
+// reads a directory marketplace only once added). Its registry is checked first; the CLI runs only when needed.
+func EnsureClaudeMarketplace() (string, error) {
+	if _, err := os.Stat(filepath.Join(ModsDir(), ".claude-plugin", "marketplace.json")); err != nil {
+		return "", nil
+	}
+	var known map[string]json.RawMessage
+	if raw, err := os.ReadFile(filepath.Join(config.ClaudeDir(), "plugins", "known_marketplaces.json")); err == nil &&
+		json.Unmarshal(raw, &known) == nil && known[ModMarketplace] != nil {
+		return "", nil
+	}
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		return "", nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, bin, "plugin", "marketplace", "add", ModsDir()).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("claude plugin marketplace add %s: %v %s", ModsDir(), err, strings.TrimSpace(string(out)))
+	}
+	return "claude plugin: added marketplace " + ModsDir(), nil
+}
+
 // EnsureClaudePlugin installs the mod as a Claude Code plugin when Claude does not list it yet: a plugin in a
 // directory marketplace is only listed in the marketplace file until `claude plugin install` registers it.
 func EnsureClaudePlugin() (string, error) {

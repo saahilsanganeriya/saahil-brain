@@ -3,18 +3,20 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"saahil.local/brain/internal/config"
 )
 
 func init() {
-	register("init", "create the ~/brain skeleton on this machine (idempotent)", cmdInit)
+	register("init", "create the ~/brain skeleton on this machine (idempotent); a fresh brain with no shadow_docs starts live", cmdInit)
 	register("import memory", "copy (never move) every Claude memory folder into <brain>/.import/<machine>/ with a manifest", cmdImportMemory)
 }
 
@@ -29,6 +31,14 @@ func cmdInit([]string) int {
 		}
 	}
 	fmt.Println("brain skeleton ready at", root)
+	// a brain with no shadow doc roots has no cut-over ahead of it: it is live from the start
+	live := filepath.Join(root, ".brain", "live")
+	if _, err := os.Stat(live); errors.Is(err, os.ErrNotExist) && len(config.CurrentIdentity().ShadowDocs) == 0 {
+		if err := os.WriteFile(live, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644); err != nil {
+			return fail("%v", err)
+		}
+		fmt.Println("brain marked live:", live)
+	}
 	return 0
 }
 

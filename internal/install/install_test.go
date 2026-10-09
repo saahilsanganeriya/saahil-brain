@@ -235,3 +235,45 @@ func TestInstallRendersThePersonsPaths(t *testing.T) {
 	}
 }
 
+// Catches a fresh machine (no ~/mods marketplace yet) where install wrote no mod and Claude never loads it, a
+// marketplace Claude Code was never told about, or the claude CLI run on every install although Claude already
+// knows the marketplace (under launchd it hangs).
+func TestInstallMakesAndRegistersTheMarketplace(t *testing.T) {
+	home := identitytest.Write(t, `{"user": "test-user"}`)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	m, _ := LoadManifest(ManifestPath())
+	if _, err := Install(m, home, []string{"claude"}, t0, false); err != nil {
+		t.Fatal(err)
+	}
+	var market struct {
+		Name    string                          `json:"name"`
+		Owner   struct{ Name string }           `json:"owner"`
+		Plugins []struct{ Name, Source string } `json:"plugins"`
+	}
+	raw, _ := os.ReadFile(filepath.Join(home, "mods/saahil-mods/.claude-plugin/marketplace.json"))
+	if err := json.Unmarshal(raw, &market); err != nil || market.Name != "saahil-mods" || market.Owner.Name != "test-user" ||
+		len(market.Plugins) != 1 || market.Plugins[0].Source != "./saahil-brain" {
+		t.Fatalf("marketplace.json (%v):\n%s", err, raw)
+	}
+	if _, err := os.Stat(filepath.Join(home, "mods/saahil-mods/saahil-brain/.claude-plugin/plugin.json")); err != nil {
+		t.Errorf("mod not written: %v", err)
+	}
+	again, err := Install(m, home, []string{"claude"}, t0.Add(time.Hour), false)
+	if err != nil || len(again[0].Added) > 0 || len(again[0].Conflicts) > 0 {
+		t.Errorf("second install: %+v, %v", again, err)
+	}
+
+	bin, log := t.TempDir(), filepath.Join(t.TempDir(), "claude.log")
+	_ = os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\necho \"$*\" >> "+log+"\n"), 0o755)
+	t.Setenv("PATH", bin)
+	for range 2 {
+		if _, err := EnsureClaudeMarketplace(); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.MkdirAll(filepath.Join(home, ".claude/plugins"), 0o755)
+		_ = os.WriteFile(filepath.Join(home, ".claude/plugins/known_marketplaces.json"), []byte(`{"saahil-mods": {}}`), 0o600)
+	}
+	if calls, _ := os.ReadFile(log); string(calls) != "plugin marketplace add "+filepath.Join(home, "mods/saahil-mods")+"\n" {
+		t.Errorf("claude ran %q, want one marketplace add", calls)
+	}
+}
