@@ -24,7 +24,8 @@ func TestNoOwnerLiteralsInShippedCode(t *testing.T) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if path != root && (name == "testdata" || name == "node_modules" || name == "bin" || strings.HasPrefix(name, ".")) {
+			hidden := strings.HasPrefix(name, ".") && name != ".claude-plugin"
+			if path != root && (name == "testdata" || name == "node_modules" || name == "bin" || hidden) {
 				return filepath.SkipDir
 			}
 			return nil
