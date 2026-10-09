@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -11,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"saahil.local/brain/profiles"
 )
 
 // Identity is everything per-person: ~/.config/brain/identity.json, the same file on both machines. A missing file
@@ -117,10 +121,36 @@ func PersonalWords() []string {
 	return out
 }
 
+// LoadProfile finds a team profile: name as a path to a .json file; else <config>/profiles/<name>.json (the person's
+// own copy wins); else the profiles built into this binary from the repo's profiles/. It returns the values and where
+// they came from.
+func LoadProfile(name string) (map[string]json.RawMessage, string, error) {
+	var raw []byte
+	var from string
+	own := filepath.Join(filepath.Dir(IdentityPath()), "profiles", name+".json")
+	if strings.HasSuffix(name, ".json") || strings.Contains(name, "/") {
+		own = name
+	}
+	if b, err := os.ReadFile(own); err == nil {
+		raw, from = b, own
+	} else if b, err := profiles.FS.ReadFile(name + ".json"); err == nil && !strings.Contains(name, "/") {
+		raw, from = b, "built-in profiles/"+name+".json"
+	} else {
+		builtIn, _ := fs.Glob(profiles.FS, "*.json")
+		return nil, "", fmt.Errorf("no profile %q: not at %s, and this binary carries %s", name, own, strings.Join(builtIn, ", "))
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, "", fmt.Errorf("%s: %w", from, err)
+	}
+	return values, from, nil
+}
+
 // InitIdentity writes identity.json: each value in set (json key → value) unless the file already holds that key and
-// force is false, every other value pinned as it is now, and the keys the brain does not use kept. work_repo_orca is
-// written only when the file or set has it, so by default it follows work_repo. It returns the keys it kept.
-func InitIdentity(set map[string]string, force bool) (kept []string, err error) {
+// force is false, then the file's values, then the profile's (its <home> … filled with this person's), then derived
+// ones; every value is pinned as it is now and the keys the brain does not use are kept. work_repo_orca is written
+// only when the file, set or profile has it, so by default it follows work_repo. It returns the keys it kept.
+func InitIdentity(set map[string]string, profile map[string]json.RawMessage, force bool) (kept []string, err error) {
 	st := resolveIdentity()
 	if st.Err != nil {
 		return nil, fmt.Errorf("%w (fix or remove it first)", st.Err)
@@ -137,6 +167,33 @@ func InitIdentity(set map[string]string, force bool) (kept []string, err error) 
 		}
 	}
 	fromFile.ShadowDocs = st.Identity.ShadowDocs
+	homes := withDerived(fromFile)
+	fill := strings.NewReplacer("<home>", homes.LaptopHome, "<laptop_home>", homes.LaptopHome,
+		"<devbox_home>", homes.DevboxHome, "<user>", homes.User)
+	extras, fields := maps.Clone(st.Extra), stringFields(&fromFile)
+	for key, raw := range profile {
+		var value string
+		_ = json.Unmarshal(raw, &value)
+		switch {
+		case key == "shadow_docs":
+			var docs []string
+			if !st.FromFile[key] && json.Unmarshal(raw, &docs) == nil {
+				for i := range docs {
+					docs[i] = fill.Replace(docs[i])
+				}
+				fromFile.ShadowDocs = docs
+			}
+		case fields[key] != nil:
+			if *fields[key] == "" && value != "" {
+				*fields[key] = fill.Replace(value)
+			}
+		case extras[key] == nil:
+			if value != "" {
+				raw, _ = json.Marshal(fill.Replace(value))
+			}
+			extras[key] = raw
+		}
+	}
 	next := withDerived(fromFile)
 	if fromFile.WorkRepoOrca == "" {
 		next.WorkRepoOrca = ""
@@ -148,8 +205,8 @@ func InitIdentity(set map[string]string, force bool) (kept []string, err error) 
 	if err != nil {
 		return nil, err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	var written map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &written); err != nil {
 		return nil, err
 	}
 	var b strings.Builder
@@ -160,17 +217,13 @@ func InitIdentity(set map[string]string, force bool) (kept []string, err error) 
 		sep = ",\n"
 	}
 	for _, kv := range next.Pairs() {
-		if v, ok := fields[kv[0]]; ok {
+		if v, ok := written[kv[0]]; ok {
 			write(kv[0], v)
 		}
 	}
-	extra := make([]string, 0, len(st.Extra))
-	for k := range st.Extra {
-		extra = append(extra, k)
-	}
-	slices.Sort(extra)
+	extra := slices.Sorted(maps.Keys(extras))
 	for _, k := range extra {
-		write(k, st.Extra[k])
+		write(k, extras[k])
 	}
 	b.WriteString("\n}\n")
 	if err := os.MkdirAll(filepath.Dir(st.Path), 0o755); err != nil {
@@ -184,13 +237,16 @@ func InitIdentity(set map[string]string, force bool) (kept []string, err error) 
 	return kept, os.Rename(tmp, st.Path)
 }
 
-// setField sets one string setting by its json key.
-func setField(id *Identity, key, value string) {
-	fields := map[string]*string{"user": &id.User, "laptop_home": &id.LaptopHome, "devbox_home": &id.DevboxHome,
+// stringFields are id's string settings by json key.
+func stringFields(id *Identity) map[string]*string {
+	return map[string]*string{"user": &id.User, "laptop_home": &id.LaptopHome, "devbox_home": &id.DevboxHome,
 		"devbox_host": &id.DevboxHost, "orca_env": &id.OrcaEnv, "work_repo": &id.WorkRepo, "work_repo_orca": &id.WorkRepoOrca,
 		"brain_repo": &id.BrainRepo, "aws_sso_session": &id.AWSSSOSession, "github_cert": &id.GithubCert,
 		"default_pr_repo": &id.DefaultPRRepo}
-	if f, ok := fields[key]; ok {
+}
+
+func setField(id *Identity, key, value string) {
+	if f := stringFields(id)[key]; f != nil {
 		*f = value
 	}
 }

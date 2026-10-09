@@ -1,0 +1,6 @@
+{
+  "aws_sso_session": "Example-Session",
+  "github_cert": "<home>/.ssh/work_github-cert.pub",
+  "default_pr_repo": "example-org/work-repo",
+  "work_repo": "<laptop_home>/Documents/work-repo"
+}

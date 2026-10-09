@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 func init() {
 	register("identity", "this person's settings and where each comes from (file | derived): "+
 		"[--init [--devbox-host H] [--orca-env E] [--work-repo P] [--brain-repo P] [--devbox-home P] [--laptop-home P] "+
-		"[--aws-sso-session S] [--github-cert P] [--pr-repo R] [--user U] [--force]]", cmdIdentity)
+		"[--aws-sso-session S] [--github-cert P] [--pr-repo R] [--user U] [--profile <team>] [--force]]", cmdIdentity)
 }
 
 // identityFlags maps each --init flag to its identity.json key.
@@ -27,6 +28,8 @@ func cmdIdentity(args []string) int {
 	fs := flag.NewFlagSet("identity", flag.ContinueOnError)
 	initFile := fs.Bool("init", false, "write ~/.config/brain/identity.json: these flags, then the file's values, then derived ones")
 	force := fs.Bool("force", false, "with --init, a flag replaces a value the file already holds")
+	profileName := fs.String("profile", "", "with --init, team values under the person's own: a path to a .json, else "+
+		"~/.config/brain/profiles/<name>.json, else the binary's built-in profiles/<name>.json (example)")
 	values := map[string]*string{}
 	for _, f := range identityFlags {
 		values[f[1]] = fs.String(f[0], "", "with --init: "+f[1])
@@ -40,11 +43,20 @@ func cmdIdentity(args []string) int {
 			set[key] = *v
 		}
 	}
-	if !*initFile && (len(set) > 0 || *force) {
-		return fail("identity: the value flags and --force need --init")
+	if !*initFile && (len(set) > 0 || *force || *profileName != "") {
+		return fail("identity: the value flags, --profile and --force need --init")
 	}
 	if *initFile {
-		kept, err := config.InitIdentity(set, *force)
+		var profile map[string]json.RawMessage
+		if *profileName != "" {
+			var from string
+			var err error
+			if profile, from, err = config.LoadProfile(*profileName); err != nil {
+				return fail("identity --init: %v", err)
+			}
+			fmt.Println("profile:", from)
+		}
+		kept, err := config.InitIdentity(set, profile, *force)
 		if err != nil {
 			return fail("identity --init: %v", err)
 		}

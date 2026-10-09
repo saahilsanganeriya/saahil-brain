@@ -53,3 +53,36 @@ func readIdentity(t *testing.T, home string) map[string]any {
 }
 
 func mustJSON(v any) string { raw, _ := json.Marshal(v); return string(raw) }
+
+// TestIdentityInitMergesAProfileUnderThePersonsKeys catches a team profile overriding what the person set (their file,
+// their flags), a <home> left unexpanded or filled with someone else's home, and a profile not found where the help
+// says: built into the binary (profiles/example.json) or the person's own ~/.config/brain/profiles/<name>.json.
+func TestIdentityInitMergesAProfileUnderThePersonsKeys(t *testing.T) {
+	home := identitytest.Write(t, `{"work_repo": "/own/repo"}`)
+	t.Setenv("USER", "test-user")
+	t.Setenv("HOME", "/Users/test-user")
+	t.Setenv("BRAIN_MACHINE", "laptop")
+	if code := cmdIdentity([]string{"--init", "--profile", "example", "--pr-repo", "example-org/own"}); code != 0 {
+		t.Fatalf("--init --profile example exit %d", code)
+	}
+	got := readIdentity(t, home)
+	for key, want := range map[string]string{"work_repo": "/own/repo", "default_pr_repo": "example-org/own",
+		"aws_sso_session": "Example-Session", "github_cert": "/Users/test-user/.ssh/work_github-cert.pub"} {
+		if got[key] != want {
+			t.Errorf("%s = %v, want %s", key, got[key], want)
+		}
+	}
+
+	own := filepath.Join(home, ".config", "brain", "profiles", "team.json")
+	_ = os.MkdirAll(filepath.Dir(own), 0o755)
+	_ = os.WriteFile(own, []byte(`{"aws_sso_session": "Team-Session", "work_repo": "<home>/src/app"}`), 0o644)
+	if code := cmdIdentity([]string{"--init", "--force", "--profile", "team"}); code != 0 {
+		t.Fatalf("--profile team exit %d", code)
+	}
+	if got := readIdentity(t, home); got["aws_sso_session"] != "Example-Session" || got["work_repo"] != "/own/repo" {
+		t.Errorf("a profile replaced the file's values (even --force is for flags only): %v", got)
+	}
+	if code := cmdIdentity([]string{"--init", "--profile", "no-such-team"}); code == 0 {
+		t.Error("an unknown profile was accepted")
+	}
+}
