@@ -226,7 +226,7 @@ It reads three optional keys from `~/.config/brain/identity.json`: `devbox_insta
 | GitHub (SSH certificate, `github_cert`) | hours (company flow) | `brain machine login github`, or your team's flow | `git push`: `Permission denied (publickey)` |
 | AWS SSO (`aws_sso_session`) | the SSO session length | `brain machine login aws` | `devbox up`/`status`: `Token has expired`; `brain machine status` shows it |
 | gcloud | until Google asks again | `brain machine login gcloud` | `Reauthentication required` |
-| Claude (for the dream's model calls) | persistent | `claude` sign-in on the devbox, or an API key the worker can read | dream steps fail with an auth error in `.brain/dream-runs/` |
+| Claude (for the dream's model calls) | persistent | an API key in the worker's environment, `~/.local/bin/devbox-exec`, or `Environment=BRAIN_LLM_LOGIN=1` on `brain-worker` with Claude Code signed in ([CONFIG.md](CONFIG.md#2-environment-variables)) | dream steps fail with an auth error in `.brain/dream-runs/` |
 
 `brain machine login` drives the same sign-in helpers as your team's devbox setup. Each sign-in is a browser flow:
 **[HUMAN]**.

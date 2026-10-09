@@ -55,7 +55,7 @@ files new memories, refreshes cards or checks the brain's health.
 | MacBook, Apple silicon | the kit ships `darwin-arm64` |
 | An EC2 devbox you control | Ubuntu x86_64, ≥ 8 vCPU, ≥ 32 GB RAM, ≥ 200 GB disk, an Elastic IP, ssh open only to you ([docs/DEVBOX-AND-ORCA.md](docs/DEVBOX-AND-ORCA.md)) |
 | ssh from the laptop to the devbox | a key-based alias in `~/.ssh/config` |
-| Claude Code on both machines, signed in | the dream's model calls use the devbox's Claude Code |
+| Claude Code on both machines, signed in | the dream's model calls run the devbox's `claude` CLI, with an API key or its sign-in ([docs/CONFIG.md](docs/CONFIG.md#2-environment-variables)) |
 | Orca | the app on the laptop; `orca serve` on the devbox, paired with the app |
 | On the devbox: `git`, `unison` | `sudo apt-get install -y git unison` |
 | On the laptop: Homebrew | the setup installs Unison with it |

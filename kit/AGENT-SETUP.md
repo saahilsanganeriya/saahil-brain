@@ -51,7 +51,7 @@ process only by the PID you were given. Never change a company repo for the brai
 |---|---|---|
 | 0.1 | Create the devbox: Ubuntu x86_64, ≥ 8 vCPU, ≥ 32 GB RAM, ≥ 200 GB gp3 disk, an Elastic IP, ssh (tcp/22) open only to the human's addresses | the instance runs |
 | 0.2 | Add the ssh alias `<devbox-host>` to the laptop's `~/.ssh/config`; key-based login, no password | check 0.a passes |
-| 0.3 | On the devbox: `sudo apt-get install -y git unison`; Claude Code installed at `~/.local/bin/claude` and signed in (the dream uses it); GitHub and AWS sign-ins the way the team does them | check 0.b passes |
+| 0.3 | On the devbox: `sudo apt-get install -y git unison`; Claude Code installed at `~/.local/bin/claude` and signed in; GitHub and AWS sign-ins the way the team does them. Decide how the worker calls models (row 3.14 of section 7) | check 0.b passes |
 | 0.4 | On the laptop: Homebrew, Claude Code, the Orca app | `brew --version`, `claude --version` print versions |
 | 0.5 | Orca on the devbox: the AppImage at `/opt/orca/orca-linux.AppImage`; the `orca-serve` user unit rendered from the kit (below); linger on | check 0.c passes |
 | 0.6 | Pair the laptop's Orca app with the devbox's `orca serve` (pairing link → `orca environment add`), and keep the laptop tunnel `ssh -N -L 16768:127.0.0.1:6768 <devbox-host>` up with a LaunchAgent | check 0.d passes |
@@ -380,6 +380,6 @@ Find the symptom, fix the cause, run the step's check again. More causes are in 
 | any laptop step | the command hangs at 0% with no error | a launchd-started process tried to read `~/Documents` (macOS privacy control) | stop it by its PID; run the same command in an interactive Terminal |
 | 3.5 | `no hubs under …/hubs` | hubs not seeded | `brain file --seed-hubs` |
 | 3.8 | `compare` reports `missing` or `changed` | something deleted or edited files during the move | stop; find the writer; never continue to the next folder until it is explained |
-| 3.14 | a dream step `failed` with an auth error | the worker cannot call a model | sign in to Claude Code on the devbox (or give the worker an API key it can read), then `systemctl --user restart brain-worker` and `brain dream run --now` |
+| 3.14 | a dream step `failed` with an auth error | the worker's `claude --bare -p` has no API key (a systemd unit gets no shell profile) | give the worker one way in: `~/.local/bin/devbox-exec` (your team's wrapper that loads the provider and key), an API key in its environment, or the devbox's Claude Code sign-in through `systemctl --user edit brain-worker` → `[Service]` `Environment=BRAIN_LLM_LOGIN=1`; then `systemctl --user restart brain-worker` and `brain dream run --now` |
 | 3.15 | doctor red on `graph dangling links` | a note links to a file that moved | `brain show <path>` to see who links to it; move the file back or let the next dream relink |
 | 4.3 | no agent appears | Orca does not know `<brain-repo>`, or `brain agents new` failed | `journalctl --user -u brain-care.service -n 30 --no-pager`; `orca repo add --path <brain-repo>` in an Orca terminal on the devbox |
