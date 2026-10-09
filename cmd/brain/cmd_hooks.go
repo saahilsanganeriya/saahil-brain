@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"saahil.local/brain/internal/store"
 	"syscall"
 	"time"
 
@@ -95,19 +97,77 @@ func cmdHookNames([]string) int {
 func cmdHookBench(args []string) int {
 	fs := flag.NewFlagSet("hook bench", flag.ContinueOnError)
 	n := fs.Int("n", 40, "how many questions (spread over the QA set)")
+	cold := fs.Bool("cold", false, "run each question in a fresh process, as a real hook runs, and split the time by phase")
+	one := fs.String("one", "", "") // a --cold child: time this one prompt and print its phases as JSON
 	if _, err := parseAll(fs, args); err != nil {
 		return 2
+	}
+	env := hooks.DefaultEnv()
+	if *one != "" {
+		phases, _, err := hooks.BenchPhases(env, []string{*one}, config.BrainRoot())
+		if err != nil || len(phases) != 1 {
+			return fail("bench: %v", err)
+		}
+		raw, _ := json.Marshal(phases[0])
+		fmt.Println(string(raw))
+		return 0
 	}
 	prompts, err := hooks.BenchQuestions(config.BrainRoot(), *n)
 	if err != nil {
 		return fail("qa set: %v (brain eval build makes it)", err)
 	}
-	took, abstained, err := hooks.Bench(hooks.DefaultEnv(), prompts, config.BrainRoot())
+	if *cold {
+		return benchCold(env, prompts)
+	}
+	took, abstained, err := hooks.Bench(env, prompts, config.BrainRoot())
 	if err != nil || len(took) == 0 {
 		return fail("bench: %v", err)
 	}
 	fmt.Printf("prompt hook on %s: n %d · p50 %s · p95 %s · max %s · abstained %d (budget p95 150ms)\n", config.ThisMachine(),
 		len(took), hooks.Quantile(took, 0.5).Round(time.Millisecond), hooks.Quantile(took, 0.95).Round(time.Millisecond),
 		hooks.Quantile(took, 1).Round(time.Millisecond), abstained)
+	return 0
+}
+
+// benchCold runs each prompt in a fresh process of this binary, as a hook runs, and reports each phase's p50 and
+// p95, the whole process's wall time, and the sizes of the files a hook opens: what a warm in-process bench hides.
+func benchCold(env hooks.Env, prompts []string) int {
+	exe, err := os.Executable()
+	if err != nil {
+		return fail("%v", err)
+	}
+	var open, names, turn, total, wall []time.Duration
+	for _, p := range prompts {
+		started := time.Now()
+		out, err := exec.Command(exe, "hook", "bench", "--one", p).Output()
+		if err != nil {
+			return fail("child: %v", err)
+		}
+		wall = append(wall, time.Since(started))
+		var ph hooks.Phases
+		if err := json.Unmarshal(out, &ph); err != nil {
+			return fail("child output: %v", err)
+		}
+		open, names, turn, total = append(open, ph.Open), append(names, ph.Names), append(turn, ph.Turn), append(total, ph.Total())
+	}
+	row := func(name string, d []time.Duration) {
+		fmt.Printf("  %-34s p50 %6s  p95 %6s\n", name, hooks.Quantile(d, 0.5).Round(time.Millisecond), hooks.Quantile(d, 0.95).Round(time.Millisecond))
+	}
+	fmt.Printf("prompt hook on %s, %d prompts, each in a fresh process (nothing logged):\n", config.ThisMachine(), len(prompts))
+	row("open the index", open)
+	row("load the names cache", names)
+	row("turn (read prompt, digest, pointers)", turn)
+	row("in-process total (what lookups.ms holds)", total)
+	row("whole process (exec to exit)", wall)
+	size := func(p string) string {
+		fi, err := os.Stat(p)
+		if err != nil {
+			return "missing"
+		}
+		return fmt.Sprintf("%.1f MB", float64(fi.Size())/1e6)
+	}
+	db := store.Path(config.BrainRoot())
+	fmt.Printf("  files: index %s · wal %s · names cache %s · often cache %s\n", size(db), size(db+"-wal"),
+		size(filepath.Join(env.StateDir, "names.tsv")), size(filepath.Join(env.StateDir, "often.tsv")))
 	return 0
 }
