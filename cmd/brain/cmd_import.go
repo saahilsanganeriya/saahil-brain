@@ -6,17 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"saahil.local/brain/internal/config"
+	"saahil.local/brain/templates"
 )
 
 func init() {
-	register("init", "create the ~/brain skeleton on this machine (idempotent); a fresh brain with no shadow_docs starts live", cmdInit)
+	register("init", "create the ~/brain skeleton on this machine (idempotent); a fresh brain gets the generic hubs and, with no shadow_docs, starts live", cmdInit)
 	register("import memory", "copy (never move) every Claude memory folder into <brain>/.import/<machine>/ with a manifest", cmdImportMemory)
 }
 
@@ -31,6 +34,11 @@ func cmdInit([]string) int {
 		}
 	}
 	fmt.Println("brain skeleton ready at", root)
+	if n, err := seedFreshHubs(root); err != nil {
+		return fail("seed hubs: %v", err)
+	} else if n > 0 {
+		fmt.Printf("seeded %d generic hubs in %s\n", n, filepath.Join(root, "hubs"))
+	}
 	// a brain with no shadow doc roots has no cut-over ahead of it: it is live from the start
 	live := filepath.Join(root, ".brain", "live")
 	if _, err := os.Stat(live); errors.Is(err, os.ErrNotExist) && len(config.CurrentIdentity().ShadowDocs) == 0 {
@@ -40,6 +48,44 @@ func cmdInit([]string) int {
 		fmt.Println("brain marked live:", live)
 	}
 	return 0
+}
+
+// freshHubs are the hubs a new brain starts with; the other templates are the owner's topics, which the skills'
+// examples cite.
+var freshHubs = []string{"brain", "git", "pr-shipping", "devbox-and-laptop", "orca-and-agents", "pii-and-security",
+	"explaining-to-the-owner"}
+
+var topHubsRE = regexp.MustCompile(`(?s)(## Top hubs\n\n)(?:- \[[^\n]*\n)+`)
+
+// seedFreshHubs writes freshHubs and a home page listing only them, when hubs/ holds no hub yet.
+func seedFreshHubs(root string) (int, error) {
+	dir := filepath.Join(root, "hubs")
+	if have, _ := filepath.Glob(filepath.Join(dir, "*.md")); len(have) > 0 {
+		return 0, nil
+	}
+	pages := map[string][]byte{}
+	list := ""
+	for _, id := range freshHubs {
+		b, err := fs.ReadFile(templates.FS, "hubs/"+id+".md")
+		if err != nil {
+			return 0, err
+		}
+		pages[id], list = b, list+"- ["+id+"]("+id+".md)\n"
+	}
+	index, err := fs.ReadFile(templates.FS, "hubs/index.md")
+	if err != nil {
+		return 0, err
+	}
+	if !topHubsRE.Match(index) {
+		return 0, errors.New("templates/hubs/index.md has no Top hubs list to fill")
+	}
+	pages["index"] = topHubsRE.ReplaceAll(index, []byte("${1}"+list))
+	for id, b := range pages {
+		if err := os.WriteFile(filepath.Join(dir, id+".md"), b, 0o644); err != nil {
+			return 0, err
+		}
+	}
+	return len(pages), nil
 }
 
 // cmdImportMemory copies each ~/.claude/projects/<slug>/memory/*.md into .import/<machine>/<slug>/ and writes

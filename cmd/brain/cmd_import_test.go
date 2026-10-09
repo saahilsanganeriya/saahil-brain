@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -41,5 +42,44 @@ func TestInitMarksOnlyAFreshBrainLive(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: .brain/live = %q (%v), want %q", tc.name, got, err, tc.want)
 		}
+	}
+}
+
+// TestInitSeedsGenericHubsOnAFreshBrainOnly catches a new person's brain starting with the owner's work topics
+// (image lane, identity resolution …) as hubs, a seeded home page linking hubs that were not seeded, and init adding
+// hubs to a brain that already has its own.
+func TestInitSeedsGenericHubsOnAFreshBrainOnly(t *testing.T) {
+	home := identitytest.Write(t, `{}`)
+	root := filepath.Join(home, "brain")
+	t.Setenv("BRAIN_ROOT", root)
+	if code := cmdInit(nil); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	seeded, _ := filepath.Glob(filepath.Join(root, "hubs", "*.md"))
+	if len(seeded) < 3 {
+		t.Fatalf("seeded %v", seeded)
+	}
+	for _, owners := range []string{"image-lane", "identity-resolution", "multimodal", "nas"} {
+		if _, err := os.Stat(filepath.Join(root, "hubs", owners+".md")); err == nil {
+			t.Errorf("seeded the owner's hub %s", owners)
+		}
+	}
+	index, _ := os.ReadFile(filepath.Join(root, "hubs", "index.md"))
+	for _, m := range regexp.MustCompile(`\]\(([^)]+\.md)\)`).FindAllStringSubmatch(string(index), -1) {
+		if _, err := os.Stat(filepath.Join(root, "hubs", m[1])); err != nil {
+			t.Errorf("index.md links %s, which was not seeded", m[1])
+		}
+	}
+
+	home = identitytest.Write(t, `{}`)
+	root = filepath.Join(home, "brain")
+	t.Setenv("BRAIN_ROOT", root)
+	_ = os.MkdirAll(filepath.Join(root, "hubs"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "hubs", "my-topic.md"), []byte("---\nid: my-topic\ntype: hub\n---\n"), 0o644)
+	if code := cmdInit(nil); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	if hubs, _ := filepath.Glob(filepath.Join(root, "hubs", "*.md")); len(hubs) != 1 {
+		t.Errorf("an existing brain got hubs: %v", hubs)
 	}
 }
