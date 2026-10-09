@@ -14,6 +14,6 @@ LIMITS: about 60 minutes; at most $5 of model calls. Never delete brain data (mo
 
 REPORT: ~/brain/work/brain-care/runs/{{RUN}}/REPORT.md with each check (command, result), each fix (commit, test) and what stays open. Then one line: happier notify -t brain-care -p "<all green | fixed N: ... | needs you: ...>".
 
-WIND DOWN: once main has your commits (or you made none): git -C /Users/test-user/Documents/saahil-brain pull --ff-only -q; orca-ide worktree rm --worktree path:<this folder> --force; git -C /Users/test-user/Documents/saahil-brain branch -D {{NAME}} (its commits are on main); then, as your very last command, brain agents stop {{NAME}}.
+WIND DOWN: once main has your commits (or you made none): b=$(git branch --show-current); git -C /Users/test-user/Documents/saahil-brain pull --ff-only -q; orca-ide worktree rm --worktree path:<this folder> --force; git -C /Users/test-user/Documents/saahil-brain branch -D "$b" (its commits are on main); then, as your very last command, brain agents stop {{NAME}}.
 
 DONE when: the report holds every check's output; brain doctor is green on both machines or the report says why not; every fix is on main and installed on both machines; the owner is notified; this worktree is removed and {{NAME}} is stopped.
