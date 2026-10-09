@@ -1,5 +1,6 @@
 #!/bin/bash
-# publish.sh <dist> — install bin/brain-linux-amd64 as the devbox's brain and stage the darwin build + bootstrap.
+# publish.sh <dist> — install bin/brain-linux-amd64 as the devbox's brain and stage the darwin build, bootstrap-laptop.sh
+# and what it fetches (setup-laptop.sh, the laptop's devbox helper).
 set -euo pipefail
 dist=$1
 mkdir -p "$dist" "$HOME/.local/bin"
@@ -11,4 +12,5 @@ fi
 install -m 755 bin/brain-darwin-arm64 "$dist/.brain-darwin-arm64.new"
 (cd "$dist" && mv -f .brain-darwin-arm64.new brain-darwin-arm64 && sha256sum brain-darwin-arm64 > brain-darwin-arm64.sha256)
 install -m 644 scripts/bootstrap-laptop.sh "$dist/bootstrap-laptop.sh"
+install -m 755 scripts/setup-laptop.sh scripts/devbox "$dist/"
 echo "published $(brain version) and darwin $(cut -c1-12 "$dist/brain-darwin-arm64.sha256")"
