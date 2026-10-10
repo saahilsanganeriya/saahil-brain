@@ -63,6 +63,14 @@ func unisonArgs(root string) []string {
 	return append(args, "-ignorenot", workText, "-maxsizethreshold", "2048")
 }
 
+// unisonCommand runs unison under this machine's fixed name: unison names its archive after the local hostname, and
+// macOS changes a laptop's with the network, which moved syncs onto another name's stale archive (conflict copies).
+func unisonCommand(unison string, args []string) *exec.Cmd {
+	cmd := exec.Command(unison, args...)
+	cmd.Env = append(os.Environ(), "UNISONLOCALHOSTNAME="+string(config.ThisMachine()))
+	return cmd
+}
+
 func cmdSync(args []string) int {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	dry := fs.Bool("dry-run", false, "list what would change, change nothing")
@@ -126,13 +134,13 @@ func cmdSync(args []string) int {
 		}
 	}
 	rec := syncRecord{Started: time.Now().UTC()}
-	cmd := exec.Command(unison, uargs...)
+	cmd := unisonCommand(unison, uargs)
 	out, _ := cmd.CombinedOutput()
 	rec.Ended, rec.ExitCode = time.Now().UTC(), cmd.ProcessState.ExitCode()
 	// exit 2 is a file that failed to transfer, usually one a live agent wrote during the run: one more pass carries it
 	if rec.ExitCode == 2 && !*dry {
 		fmt.Println("unison exit 2 (a file failed to transfer, often one written during the run): one more pass")
-		cmd = exec.Command(unison, uargs...)
+		cmd = unisonCommand(unison, uargs)
 		out, _ = cmd.CombinedOutput()
 		rec.Ended, rec.ExitCode = time.Now().UTC(), cmd.ProcessState.ExitCode()
 	}

@@ -8,7 +8,7 @@ already in this repository's code or scripts unless the lesson says otherwise; t
 |---|---|---|
 | 1 | [A move across the two path spellings copies instead of renaming](#1-a-move-across-the-two-path-spellings-copies-instead-of-renaming) | bind mount |
 | 2 | [The git snapshot hashed all of work/](#2-the-git-snapshot-hashed-all-of-work) | git |
-| 3 | [Unison: bulk, the 2 MB limit, half-copies, a "dry run" that was live](#3-unison-bulk-the-2-mb-limit-half-copies-and-a-dry-run-that-was-live) | sync |
+| 3 | [Unison: bulk, the 2 MB limit, half-copies, a "dry run" that was live, a renamed laptop](#3-unison-bulk-the-2-mb-limit-half-copies-and-a-dry-run-that-was-live) | sync |
 | 4 | [A link that loops back into work/ arrived by sync](#4-a-link-that-loops-back-into-work-arrived-by-sync) | sync |
 | 5 | [launchd jobs hang on ~/Documents (TCC)](#5-launchd-jobs-hang-on-documents-tcc) | macOS |
 | 6 | [The claude CLI hangs under launchd](#6-the-claude-cli-hangs-under-launchd) | macOS |
@@ -60,16 +60,23 @@ already in this repository's code or scripts unless the lesson says otherwise; t
 
 - **Symptom A.** The first Unison "dry run" copied files. **Symptom B.** Each sync prints hundreds of "skipped:
   would transfer a file of size greater than maxsizethreshold" lines. **Symptom C.** `brain doctor` on the laptop
-  went red two hours after a sync, on files named `.unison.*`.
+  went red two hours after a sync, on files named `.unison.*`. **Symptom D** (2026-10-10). Conflict copies of files
+  that only one machine wrote, after the laptop moved to a different network.
 - **Cause A.** `-noupdate` on both roots still CREATES new files. **Cause B.** By design: the sync carries text up to
   2 MB (`-maxsizethreshold 2048`, in KB); bulk stays on the machine that made it (the boxes hold ~600 GB on the
-  devbox and ~220 GB on the laptop). **Cause C.** An interrupted sync leaves Unison temp files behind.
+  devbox and ~220 GB on the laptop). **Cause C.** An interrupted sync leaves Unison temp files behind. **Cause D.**
+  Unison names its archive after the local hostname. macOS changes the laptop's hostname with the network, so the
+  devbox had two archives (`~/.unison/ar*`), one for each name. After a change, the sync used the other, older
+  archive, and a file that changed after that archive was written read as changed on both replicas.
 - **Fix.** `brain sync --dry-run` sets `-nocreation -noupdate -nodeletion` on both replicas (proven by a probe file
   that was skipped). Bulk folders (`artifacts`, `.venv`, `node_modules`, …) and everything but text under `work/` are
-  ignored. Every sync archives a `.unison.*` file older than 2 h (`config.UnisonTempGrace`).
+  ignored. Every sync archives a `.unison.*` file older than 2 h (`config.UnisonTempGrace`). `brain sync` runs
+  Unison with `UNISONLOCALHOSTNAME` set to the machine name. The first sync with a new name has no archive, so each
+  file that is different on the two replicas at that time becomes a conflict copy, one time only.
 - **Rule.** Skip lines are normal; read `brain sync status` for the exit, not the scrollback. Put results that must
   reach the other machine in a text file, or copy a box on purpose with `brain agents box`. Never run Unison with
-  `-watch` (editors already crawl these trees).
+  `-watch` (editors already crawl these trees). Run Unison only through `brain sync`: a manual run uses the
+  hostname and makes a second archive.
 
 ## 4. A link that loops back into work/ arrived by sync
 

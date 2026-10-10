@@ -2,7 +2,10 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
+
+	"saahil.local/brain/internal/config"
 )
 
 // TestSyncIgnoresDreamOwnState catches the 2026-10-09 doctor failure on both machines: .brain/dream-last-skip.json,
@@ -15,5 +18,21 @@ func TestSyncIgnoresDreamOwnState(t *testing.T) {
 		if i < 1 || args[i-1] != "-ignore" {
 			t.Errorf("unison must ignore %s", path)
 		}
+	}
+}
+
+// TestSyncNamesThisMachineStably catches the 2026-10-10 conflict copies: unison names its archive after the local
+// hostname, which macOS changes with the network; each change moved the sync onto the other name's stale archive, and
+// files both replicas already agreed on came back as conflict copies. Unison runs under the machine's fixed name.
+func TestSyncNamesThisMachineStably(t *testing.T) {
+	t.Setenv("UNISONLOCALHOSTNAME", "Some-MacBook.local")
+	name := ""
+	for _, kv := range unisonCommand("/usr/bin/unison", unisonArgs("/brain")).Env {
+		if v, ok := strings.CutPrefix(kv, "UNISONLOCALHOSTNAME="); ok {
+			name = v
+		}
+	}
+	if want := string(config.ThisMachine()); name != want {
+		t.Errorf("unison runs as host %q, want the fixed %q", name, want)
 	}
 }

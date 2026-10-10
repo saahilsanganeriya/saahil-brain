@@ -225,7 +225,7 @@ and install steps above. Running sessions pick up a new mod or new hooks at thei
 | Symptom | First command | Usual cause and fix |
 |---|---|---|
 | doctor red on `sync.last` | `brain sync status` | the laptop slept or the tunnel is down: `launchctl kickstart -k gui/$(id -u)/com.saahil.brain-tunnel`, then `brain sync` |
-| doctor red on `sync.conflicts` | `brain sync --archive-conflicts` | both machines wrote the same file; the newer copy stays live |
+| doctor red on `sync.conflicts` | `brain sync --archive-conflicts` | both machines wrote the same file; the newer copy stays live. If only one machine wrote it, look for a second archive on the devbox (`ls -lt ~/.unison/ar*`): a sync that did not run through `brain sync` |
 | `mesh.peer` unreachable | `brain peer status` | the laptop is asleep (steps queue), or the bridge or tunnel stopped: see `~/Library/Logs/brain-bridge.log` and `brain-tunnel.log` |
 | dream step failed | `.brain/dream-runs/<run-id>.json` | a model auth error (sign in to Claude on the devbox), the cost cap, or a bug: the care agent picks it up |
 | no pointers ever | `brain doctor` (`hooks mode`) | `~/brain/.brain/live` is missing, or `BRAIN_OFF=1` is set |
