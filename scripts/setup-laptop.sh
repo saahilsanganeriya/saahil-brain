@@ -110,6 +110,45 @@ else
   act "$brain" bridge install </dev/null
 fi
 
+step "the Orca tunnel to the devbox's orca serve (LaunchAgent com.saahil.orca-devbox-tunnel)"
+# the laptop's own Orca runtime holds 127.0.0.1:6768, so the devbox server is reached on 127.0.0.1:16768
+orca_label=com.saahil.orca-devbox-tunnel
+orca_plist=$HOME/Library/LaunchAgents/$orca_label.plist
+cat >"$tmp/orca-tunnel.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$orca_label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/ssh</string><string>-N</string>
+    <string>-o</string><string>ExitOnForwardFailure=yes</string>
+    <string>-o</string><string>ServerAliveInterval=30</string>
+    <string>-o</string><string>ServerAliveCountMax=3</string>
+    <string>-o</string><string>BatchMode=yes</string>
+    <string>-L</string><string>127.0.0.1:16768:127.0.0.1:6768</string>
+    <string>$host</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/orca-devbox-tunnel.log</string>
+</dict>
+</plist>
+PLIST
+install_file "$tmp/orca-tunnel.plist" "$orca_plist" 644
+if [ "$changed" = 1 ] && loaded "$orca_label"; then act launchctl bootout "gui/$(id -u)/$orca_label"; fi
+if loaded "$orca_label" && [ "$changed" = 0 ]; then
+  say "  present    $orca_label loaded"
+elif [ -f "$orca_plist" ] || [ "$dry" = 1 ]; then
+  act launchctl bootstrap "gui/$(id -u)" "$orca_plist"
+fi
+if [ "$dry" != 1 ]; then
+  if nc -z -G 5 127.0.0.1 16768 2>/dev/null; then say "  check      127.0.0.1:16768 answers (pair the Orca app: docs/DEVBOX-AND-ORCA.md section 3)"
+  else say "  todo       127.0.0.1:16768 does not answer yet: is orca-serve running on the devbox? see ~/Library/Logs/orca-devbox-tunnel.log"; fi
+fi
+
 step "unison and the hourly brain sync (com.saahil.brain-sync)"
 if command -v unison >/dev/null || [ -x /opt/homebrew/bin/unison ]; then say "  present    unison"; else act "$brain" sync --setup </dev/null; fi
 if loaded com.saahil.brain-sync && [ "$force" != 1 ]; then say "  present    com.saahil.brain-sync"; else act "$brain" sync --enable </dev/null; fi

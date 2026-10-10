@@ -40,7 +40,7 @@ Contents: [1 create the devbox](#1-create-the-devbox) · [2 the bind mount](#2-t
 | Disk | ≥ 200 GB gp3, `DeleteOnTermination=false` | boxes, worktrees and results grow; the disk must outlive the instance |
 | Address | an Elastic IP | the ssh alias keeps working after a stop and start |
 | Security group | inbound tcp/22 from your own addresses only | every other service (Orca 6768, Temporal, the bridge) is reached through ssh |
-| Packages | `git`, `unison` (apt, 2.52 or newer, at `/usr/bin/unison`), Claude Code in `~/.local/bin/claude` | the sync calls `/usr/bin/unison` on the devbox; the dream calls `claude -p` |
+| Packages | `git`, `unison` (apt, 2.52 or newer, at `/usr/bin/unison`; the laptop's Homebrew build may be newer, e.g. 2.54 against the devbox's 2.53: any two versions from 2.52 on work together), Claude Code in `~/.local/bin/claude` | the sync calls `/usr/bin/unison` on the devbox; the dream calls `claude -p` |
 
 Sizing guide (AWS us-west-2 on-demand Linux prices, read 2026-09-30; compute is not billed while the instance is
 stopped, the disk is):
@@ -148,7 +148,9 @@ prints `Linger=yes`.
 **Why port 16768.** The laptop's own Orca runtime already listens on `127.0.0.1:6768`, so the laptop forwards
 `127.0.0.1:16768` to the devbox's `6768`, and the server advertises that address in its pairing link.
 
-**The laptop tunnel.** Keep this forward up with a LaunchAgent (KeepAlive), so it comes back after sleep:
+**The laptop tunnel.** `scripts/setup-laptop.sh` installs and loads it as the LaunchAgent `com.saahil.orca-devbox-tunnel`
+(KeepAlive, so it comes back after sleep; log `~/Library/Logs/orca-devbox-tunnel.log`) and checks that `127.0.0.1:16768`
+answers. It runs:
 
 ```
 /usr/bin/ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o BatchMode=yes \
@@ -181,7 +183,7 @@ Every connection between the machines rides on ssh. Nothing listens on a public 
 
 | Tunnel | Command shape | Started by | What uses it |
 |---|---|---|---|
-| Orca | laptop `ssh -N -L 16768:127.0.0.1:6768 <devbox-host>` | your LaunchAgent (step 0) | the laptop Orca app → `orca serve` |
+| Orca | laptop `ssh -N -L 127.0.0.1:16768:127.0.0.1:6768 <devbox-host>` | `com.saahil.orca-devbox-tunnel` (`setup-laptop.sh`) | the laptop Orca app → `orca serve` |
 | brain bridge | laptop `ssh -N -R 127.0.0.1:7722:127.0.0.1:7722 <devbox-host>` | `com.saahil.brain-tunnel` (`brain bridge install`) | the devbox → the laptop's `brain bridge` (mesh, peer steps, sync) |
 | sync | laptop `ssh <devbox-host>` running `/usr/bin/unison` | `com.saahil.brain-sync`, `brain sync` | Unison |
 | Temporal UI | laptop `ssh -N -L 8233:127.0.0.1:8233 <devbox-host>` | you, when you want the UI | http://127.0.0.1:8233/namespaces/brain/workflows |
@@ -234,7 +236,8 @@ It reads three optional keys from `~/.config/brain/identity.json`: `devbox_insta
 ## 7. Security
 
 - No public ports. Orca's `6768` listens on all interfaces (it has no bind flag), so the security group must keep it
-  closed; reach it through the ssh forward only.
+  closed; reach it through the ssh forward only. `setup-devbox.sh` probes the devbox's public address and warns if
+  6768 answers there.
 - The bridge listens only on the laptop's `127.0.0.1`, needs the token, answers an allow-list of named steps, and
   logs every request without its text. It is not a shell.
 - Temporal and its UI bind to the devbox's `127.0.0.1`. The brain's Temporal is local and personal; never point it

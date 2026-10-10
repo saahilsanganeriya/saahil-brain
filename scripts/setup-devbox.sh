@@ -229,6 +229,18 @@ enable_unit brain-temporal.service "$temporal_changed" restart
 enable_unit brain-worker.service "$worker_changed" restart
 if [ -x /opt/orca/orca-linux.AppImage ]; then
   enable_unit orca-serve.service "$orca_changed" never
+  # orca serve listens on every interface (it has no bind flag); only the security group keeps 6768 private
+  if [ "$dry" != 1 ]; then
+    imds=$(curl -s -m 3 -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+    pub=$(curl -s -m 3 -H "X-aws-ec2-metadata-token: $imds" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
+    if printf '%s' "$pub" | grep -qE '^[0-9.]+$'; then
+      if timeout 5 bash -c "</dev/tcp/$pub/6768" 2>/dev/null; then
+        say "  WARNING    Orca's port 6768 answers on this devbox's public address: close it in the security group (only ssh 22 should be open)"
+      else
+        say "  check      port 6768 is closed from outside (the laptop reaches it through the ssh tunnel)"
+      fi
+    fi
+  fi
 else
   say "  todo       Orca is not at /opt/orca/orca-linux.AppImage (SETUP.md step 0); orca-serve stays off"
 fi
