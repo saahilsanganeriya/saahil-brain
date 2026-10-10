@@ -111,18 +111,14 @@ func cmdPeerStep(args []string) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	resp, err := peer.Call(context.Background(), rpc.Request{Op: "step", Step: fs.Arg(0)})
-	if err != nil {
-		return fail("%v", err)
-	}
-	job, err := rpc.Decode[rpc.Job](resp)
-	if err != nil {
-		return fail("%v", err)
-	}
 	deadline := time.Now().Add(*wait)
+	job, err := startStep(context.Background(), peer, fs.Arg(0), deadline, time.Now, time.Sleep)
+	if err != nil {
+		return fail("%v", err)
+	}
 	for job.State == "running" && time.Now().Before(deadline) {
 		time.Sleep(2 * time.Second)
-		if resp, err = peer.Call(context.Background(), rpc.Request{Op: "job", ID: job.ID}); err == nil {
+		if resp, err := peer.Call(context.Background(), rpc.Request{Op: "job", ID: job.ID}); err == nil {
 			if j, err := rpc.Decode[rpc.Job](resp); err == nil {
 				job = j
 			}
@@ -134,6 +130,29 @@ func cmdPeerStep(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+const peerRetry = 10 * time.Second
+
+// startStep sends a step once the other machine answers: a laptop that sleeps or changes networks comes back within
+// minutes, so --wait covers reaching it too. Only the read-only status op is retried, so a step never starts twice.
+func startStep(ctx context.Context, peer rpc.Peer, step string, deadline time.Time, now func() time.Time,
+	sleep func(time.Duration)) (rpc.Job, error) {
+	for {
+		_, err := peer.Call(ctx, rpc.Request{Op: "status"})
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, rpc.ErrUnreachable) || !now().Before(deadline) {
+			return rpc.Job{}, err
+		}
+		sleep(peerRetry)
+	}
+	resp, err := peer.Call(ctx, rpc.Request{Op: "step", Step: step})
+	if err != nil {
+		return rpc.Job{}, err
+	}
+	return rpc.Decode[rpc.Job](resp)
 }
 
 func cmdPeerJob(args []string) int {

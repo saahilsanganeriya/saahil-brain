@@ -303,7 +303,7 @@ devbox can reach that localhost port. The bridge answers only a short allow-list
 | discovery | `~/.claude/sessions/*.json` registries; a session is alive by pid + process start time; `/rename` names are the addresses |
 | messages | `brain agents note <machine>:<name> "…"` writes a file into `~/.local/state/agents/inbox/<session-id>/` on the target machine; the inbox hook delivers it inside that session at its next tool call, prompt or turn end; it is claimed by atomic rename (exactly once) and a receipt goes to `delivered/`; the sender sees `DELIVERED` or `QUEUED` |
 | idle Orca terminal | on the devbox, an idle target also gets a nudge through Orca so it wakes |
-| laptop asleep | the step waits in a queue; the devbox carries on |
+| laptop asleep | a note waits in a queue; `brain peer step <name> --wait D` asks the laptop's status every 10 s until it answers or D passes, then starts the step once; the devbox carries on |
 
 Native cross-machine messaging in Claude Code needs Remote Control, which does not work with API keys, so the mesh
 uses files keyed by session id. A note can never reach the wrong session in the same folder.

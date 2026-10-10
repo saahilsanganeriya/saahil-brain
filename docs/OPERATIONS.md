@@ -189,7 +189,7 @@ edit in `~/brain` or let the dream do it. Obsidian is a viewer only: the brain w
 | resume a saved devbox conversation | `brain agents resume <name> <session>` |
 | stop a finished agent (transcript kept) | `brain agents stop <name> [--rm-worktree]` |
 | copy a box with its bulk to the devbox (never deletes) | `brain agents box <box>` |
-| run an allowed step on the other machine | `brain peer step <name> [--wait 10m]`, `brain peer job <id>`, `brain peer status` |
+| run an allowed step on the other machine | `brain peer step <name> [--wait 10m]` (the wait also covers a laptop that is asleep or between networks: the step starts once, when it answers), `brain peer job <id>`, `brain peer status` |
 
 Name a session with `/rename <name>` inside it; that name is its address.
 
@@ -226,7 +226,7 @@ and install steps above. Running sessions pick up a new mod or new hooks at thei
 |---|---|---|
 | doctor red on `sync.last` | `brain sync status` | the laptop slept or the tunnel is down: `launchctl kickstart -k gui/$(id -u)/com.saahil.brain-tunnel`, then `brain sync` |
 | doctor red on `sync.conflicts` | `brain sync --archive-conflicts` | both machines wrote the same file; the newer copy stays live. If only one machine wrote it, look for a second archive on the devbox (`ls -lt ~/.unison/ar*`): a sync that did not run through `brain sync` |
-| `mesh.peer` unreachable | `brain peer status` | the laptop is asleep (steps queue), or the bridge or tunnel stopped: see `~/Library/Logs/brain-bridge.log` and `brain-tunnel.log` |
+| `mesh.peer` unreachable | `brain peer status` | the laptop is asleep (a step with `--wait` starts when it answers; notes queue), or the bridge or tunnel stopped: see `~/Library/Logs/brain-bridge.log` and `brain-tunnel.log` |
 | dream step failed | `.brain/dream-runs/<run-id>.json` | a model auth error (sign in to Claude on the devbox), the cost cap, or a bug: the care agent picks it up |
 | no pointers ever | `brain doctor` (`hooks mode`) | `~/brain/.brain/live` is missing, or `BRAIN_OFF=1` is set |
 | `brain_*` tools answer nothing in Claude Code | `brain doctor` (`host.claude`) | restart the session; check `claude plugin list` shows `saahil-brain` |
