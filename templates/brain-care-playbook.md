@@ -6,9 +6,10 @@ A run that finds a better method changes this file in a commit, like any other c
 ## 1. Observe
 
 - `brain metrics --write` on the devbox and `brain peer step metrics --wait 5m` for the laptop: the last 24 h of
-  dreams (runs, failed steps, edits, deletions, spend), model spend by workflow, the prompt hook (prompts, p95,
-  abstain rate), use (sessions pulling from the brain, pointers shown, opened, ignored, brain tool calls through MCP
-  and the CLI) and the newest eval numbers, each with its change since the previous day.
+  dreams (runs, failed steps, units refused inside ok steps, edits, deletions, spend), model spend by workflow, the
+  prompt hook (prompts, p95, abstain rate), use (sessions pulling from the brain, pointers shown, opened, ignored,
+  brain tool calls through MCP and the CLI) and the newest eval numbers, each with its change since the previous
+  day.
 - The evals, on the devbox: `brain eval navigation`, `brain eval qa`, `brain eval ab`, `brain eval human` (the devbox
   writes the merged human report; the laptop's rows come from its last run).
 - History: the last 7 snapshots in `~/brain/.brain/metrics/`, the last reports in `~/brain/work/brain-care/runs/`,
@@ -23,10 +24,10 @@ opened or sessions pulling falling three days running), revert it (`git revert`,
 
 ## 3. Choose one thing to improve
 
-In this order: (a) anything broken (doctor, failed dream steps, deletions, a missing record); (b) the owner-typed
-eval (human within 3 calls, then top-3), the closest measure of whether the brain helps its owner; (c) use: pointers
-opened per shown, sessions pulling, MCP calls; (d) spend per dream; (e) navigation and QA. Read EXPERIMENTS.md
-first and never retry a rejected idea without new evidence.
+In this order: (a) anything broken (doctor, failed dream steps, units a dream refuses again and again, deletions, a
+missing record); (b) the owner-typed eval (human within 3 calls, then top-3), the closest measure of whether the
+brain helps its owner; (c) use: pointers opened per shown, sessions pulling, MCP calls; (d) spend per dream; (e)
+navigation and QA. Read EXPERIMENTS.md first and never retry a rejected idea without new evidence.
 
 ## 4. Hypothesis, build, measure
 

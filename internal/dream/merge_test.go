@@ -137,12 +137,12 @@ func readNote(t *testing.T, acts *Activities, id string) delta.Note {
 // TestCurateMergeMergesNarrowsAndAsks catches curate.merge losing or misplacing facts: a duplicate kept on the older
 // note, a superseded note whose facts never reached the kept body (a merged body the applier refused, or no usable
 // body, must leave its whole group alone), one group's bad bodies answer costing the other groups their merge, a
-// narrow not written, a same-date pair settled by the model's guess instead of going to the owner, a stale note left
+// narrow not written, a refused unit missing from the step record, a same-date pair settled by the model's guess instead of going to the owner, a stale note left
 // current, a delete, and a merge whose own writes wake the next dream's merge.
 func TestCurateMergeMergesNarrowsAndAsks(t *testing.T) {
 	acts, model := newMergeBrain(t)
 	rep := runDream(t, acts, Input{Force: true}, mergeT0)
-	if s := step(rep, "curate.merge"); s.Status != "ok" || s.Edits != 5 {
+	if s := step(rep, "curate.merge"); s.Status != "ok" || s.Edits != 5 || s.Refused != 1 {
 		t.Fatalf("curate.merge: %+v", s)
 	} else if !strings.Contains(s.Reason, "1 duplicate groups wait, first: anti-pattern-noisy-new") {
 		t.Fatalf("the group with no usable body is not reported as waiting: %s", s.Reason)
@@ -189,6 +189,45 @@ func TestCurateMergeMergesNarrowsAndAsks(t *testing.T) {
 	}
 	if f, b := model.counts(); f != finds || b != bodies {
 		t.Fatalf("model asked again: finds %d→%d bodies %d→%d", finds, f, bodies, b)
+	}
+}
+
+// TestNarrowOfAFullLessonGoesInItsLink catches a narrow that can never land: most lesson bodies sit near their
+// 300-char cap, so the appended "Narrowed …" line was refused every dream (twelve dreams for one pair) and the older
+// rule stayed live as written. A line the body cannot hold goes in the related link's why, and is not written twice.
+func TestNarrowOfAFullLessonGoesInItsLink(t *testing.T) {
+	acts, _ := newMergeBrain(t)
+	brain := acts.Cfg.BrainRoot
+	full := strings.TrimSpace(strings.Repeat("Run heavy builds on Depot. ", 10))
+	write(t, filepath.Join(brain, "notes", "lesson-full.md"), "---\nid: lesson-full\ntype: lesson\nstatus: current\n"+
+		"summary: Heavy builds run on Depot\nscope: global\nhubs: [ci-depot]\nevidence: [hubs/ci-depot.md]\n"+
+		"as_of: 2026-09-19\n---\n"+full+"\n")
+	plan := MergePlan{Conflicts: []Conflict{{Newer: "decision-flakes-only-rerun", Older: "lesson-full",
+		Resolution: "narrow", Why: "package tests may run locally"}}}
+	narrow := func(today string) ([]unit, []Edit, []string) {
+		_, notes, err := globalCatalog(brain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		units, _ := mergeUnits(plan, nil, notes, today)
+		_, edits, refused, err := acts.dryRunUnits(t.Context(), units)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return units, edits, refused
+	}
+	_, edits, refused := narrow("2026-10-08")
+	if len(refused) > 0 || len(edits) != 1 {
+		t.Fatalf("the narrow of a full lesson did not land: refused %v, %d edits", refused, len(edits))
+	}
+	write(t, filepath.Join(brain, edits[0].Path), edits[0].Content)
+	n := readNote(t, acts, "lesson-full")
+	if strings.TrimSpace(n.Body) != full || len(n.Related) != 1 || n.Related[0].ID != "decision-flakes-only-rerun" ||
+		n.Related[0].Why != "Narrowed 2026-10-08: package tests may run locally" {
+		t.Fatalf("narrowing not in the link's why, body unchanged: body %q related %+v", n.Body, n.Related)
+	}
+	if units, _, _ := narrow("2026-10-09"); len(units) != 0 {
+		t.Fatalf("a narrow already in the link is written again: %+v", units)
 	}
 }
 

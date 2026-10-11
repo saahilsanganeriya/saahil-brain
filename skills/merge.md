@@ -52,10 +52,10 @@ Stage bodies:
    rule counts. Keep ONE: the newest `as_of`; on a tie, the most specific and complete. List the others to supersede.
 3. **conflicts**: pairs whose rules contradict — one says do X, the other says do not, or they give different values
    for the same setting. Resolve by the newest owner statement (`as_of`): `supersede` when the newer fully replaces
-   the older; `narrow` when the older is still right inside its own project or situation (say which in `why`, in a few
-   words: the code writes "Narrowed <date> by <newer>: <why>" into the older note); `owner` when the dates are equal or
-   missing, or you cannot tell which situation each covers. Code sends a supersede or narrow between equal or missing
-   dates to the owner anyway.
+   the older; `narrow` when the older is still right inside its own project or situation (say which in `why`, in a
+   few words: the code writes "Narrowed <date> by <newer>: <why>" into the older note, or into its link to the newer
+   note when the body is full); `owner` when the dates are equal or missing, or you cannot tell which situation each
+   covers. Code sends a supersede or narrow between equal or missing dates to the owner anyway.
 4. **stale**: notes that name a tool, path or practice that another note in the input shows replaced (one note says X
    was replaced by Y). Only when that other note proves it; `replaced_by` is that note.
 5. **bodies**: hold every distinct fact of the whole group — dates, incident names, numbers, commands, the mechanism,

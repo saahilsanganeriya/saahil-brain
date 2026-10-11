@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.temporal.io/sdk/workflow"
 
@@ -556,13 +557,18 @@ func mergeUnits(p MergePlan, bodies map[string]string, notes map[string]delta.No
 			units = append(units, unit{label: c.Newer + " supersedes " + c.Older,
 				ops: []delta.Op{{Op: "supersede", Old: c.Older, New: c.Newer}}})
 		case "narrow":
-			if strings.Contains(older.Body, "by "+c.Newer+":") {
+			if narrowed(older, c.Newer) {
 				continue
 			}
-			units = append(units, unit{label: c.Newer + " narrows " + c.Older, ops: []delta.Op{
-				{Op: "update_note", ID: c.Older, AppendBody: "Narrowed " + today + " by " + c.Newer + ": " + oneLine(c.Why, 300)},
-				{Op: "link", Src: c.Older, Rel: "related", Dst: c.Newer, Why: "the newer owner rule that narrows this one"},
-			}})
+			why := oneLine(c.Why, 300)
+			line := "Narrowed " + today + " by " + c.Newer + ": " + why
+			link := delta.Op{Op: "link", Src: c.Older, Rel: "related", Dst: c.Newer, Why: "the newer owner rule that narrows this one"}
+			ops := []delta.Op{{Op: "update_note", ID: c.Older, AppendBody: line}, link}
+			if !bodyHolds(older, line, link) {
+				link.Why = "Narrowed " + today + ": " + why
+				ops = []delta.Op{link}
+			}
+			units = append(units, unit{label: c.Newer + " narrows " + c.Older, ops: ops})
 		case "owner":
 			owner = append(owner, OwnerQuestion{
 				IDs:  [2]string{c.Newer, c.Older},
@@ -577,6 +583,28 @@ func mergeUnits(p MergePlan, bodies map[string]string, notes map[string]delta.No
 			ops: []delta.Op{{Op: "supersede", Old: s.ID, New: s.ReplacedBy}}})
 	}
 	return units, owner
+}
+
+// narrowed: the older note already names the newer as its narrower, in a body line or in the related link's why.
+func narrowed(older delta.Note, newer string) bool {
+	if strings.Contains(older.Body, "by "+newer+":") {
+		return true
+	}
+	return slices.ContainsFunc(older.Related, func(r delta.Related) bool {
+		return r.ID == newer && strings.HasPrefix(r.Why, "Narrowed ")
+	})
+}
+
+// bodyHolds: the note stays within the applier's caps (a lesson's 300 chars, a note's 4 KB) with the line appended
+// and the link added; a lesson body usually sits near its cap, so its narrowing goes in the link's why instead.
+func bodyHolds(n delta.Note, line string, link delta.Op) bool {
+	n.Body = strings.TrimRight(n.Body, "\n") + "\n\n" + line + "\n"
+	if n.Type == "lesson" && utf8.RuneCountInString(strings.TrimSpace(n.Body)) > config.LessonMaxChars {
+		return false
+	}
+	n.Related = append(slices.Clone(n.Related), delta.Related{ID: link.Dst, Why: link.Why})
+	n.Updated = time.Time{}.Format(time.RFC3339)
+	return len(delta.Render(n)) <= config.NoteMaxBytes
 }
 
 func oneLine(s string, max int) string {
@@ -658,7 +686,7 @@ func (r *run) merge(start time.Time) {
 		RunSpentUSD: r.rep.CostUSD, BudgetUSD: stepBudgetUSD[config.ModelJudgment], CapUSD: RunCapUSD,
 		Today: start.Format("2006-01-02")}).Get(r.ctx, &out)
 	r.rep.CostUSD, r.rep.LLMCalls, r.rep.LLMCached = r.rep.CostUSD+out.CostUSD, r.rep.LLMCalls+out.Calls, r.rep.LLMCached+out.Cached
-	rec.CostUSD, rec.Called, rec.Cached = out.CostUSD, out.Calls > 0, out.Cached > 0
+	rec.CostUSD, rec.Called, rec.Cached, rec.Refused = out.CostUSD, out.Calls > 0, out.Cached > 0, len(out.Refused)
 	if out.StopLLM {
 		r.stopLLM = out.Reason
 	}

@@ -79,6 +79,7 @@ type StepRecord struct {
 	Called     bool    `json:"called,omitempty"`
 	Cached     bool    `json:"cached,omitempty"`
 	Edits      int     `json:"edits,omitempty"`
+	Refused    int     `json:"refused,omitempty"` // units the applier refused; the step can still be ok
 }
 
 // area names the watermark a step consumes; "" for steps that read this run's proposed edits.

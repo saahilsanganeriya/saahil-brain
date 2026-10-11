@@ -240,8 +240,9 @@ JSON list of material on stdin, and a JSON schema for the answer (`{"edits": [..
 an empty temp folder, with no hooks, no MCP servers and no settings: it sees the brain only through its input.
 
 **curate.merge** finds duplicate global notes and conflicting rules. It keeps the newest note of a duplicate group
-with every distinct fact, supersedes the others, narrows a conflict when dates settle it, and queues a pair it cannot
-settle in `.brain/owner-questions.jsonl` for you. **curate.cards** refreshes up to 4 CARDs per dream whose box has
+with every distinct fact, supersedes the others, narrows a conflict when dates settle it (a line at the end of the
+older note, or the why of its `related` link to the newer note when the body has no room, as in most lessons), and
+queues a pair it cannot settle in `.brain/owner-questions.jsonl` for you. **curate.cards** refreshes up to 4 CARDs per dream whose box has
 work at least 1 h newer than the CARD.
 
 ## 8. Temporal

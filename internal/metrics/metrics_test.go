@@ -13,7 +13,8 @@ import (
 
 // TestSnapshotCountsTheLastDayFromEverySource catches a snapshot the daily brain-care agent would misread: a dream or
 // a model call older than the window counted, MCP calls not told from CLI ones, a pointer opened without being shown
-// counted as an open, or the eval numbers taken from an older report than the newest.
+// counted as an open, the eval numbers taken from an older report than the newest, or the units an ok step refused
+// left uncounted (curate.merge dropped the same unit for twelve dreams and every metric read clean).
 func TestSnapshotCountsTheLastDayFromEverySource(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -25,8 +26,9 @@ func TestSnapshotCountsTheLastDayFromEverySource(t *testing.T) {
 		}
 	}
 	write(".brain/dream-runs/a.json", `{"run_id":"a","status":"completed","started":"2026-10-09T10:00:00Z","edits":5,"deletions":0,"cost_usd":1.5,
-		"steps":[{"name":"reindex","status":"failed","reason":"brain index: exit 1"}]}`)
-	write(".brain/dream-runs/old.json", `{"run_id":"old","status":"completed","started":"2026-10-07T10:00:00Z","edits":50,"cost_usd":7}`)
+		"steps":[{"name":"reindex","status":"failed","reason":"brain index: exit 1"},{"name":"curate.merge","status":"ok","refused":2}]}`)
+	write(".brain/dream-runs/old.json", `{"run_id":"old","status":"completed","started":"2026-10-07T10:00:00Z","edits":50,"cost_usd":7,
+		"steps":[{"name":"curate.merge","status":"ok","refused":5}]}`)
 	write(".brain/evals/reports/2026-10-08/navigation.json", `{"ran":"2026-10-08T00:00:00Z","metrics":[{"name":"top-3 hit rate (pointer ranker)","all":{"value":0.5,"n":10}}]}`)
 	write(".brain/evals/reports/2026-10-09/navigation.json", `{"ran":"2026-10-09T00:00:00Z","metrics":[{"name":"top-3 hit rate (pointer ranker)","all":{"value":0.7,"n":10}}],
 		"split_metrics":[{"name":"top-3 hit rate (pointer ranker)","split":"test","all":{"value":0.75,"n":4}}]}`)
@@ -68,8 +70,8 @@ func TestSnapshotCountsTheLastDayFromEverySource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Dreams.Runs != 1 || s.Dreams.Edits != 5 || len(s.Dreams.FailedSteps) != 1 {
-		t.Errorf("dreams %+v, want the one run of the last day with its failed step", s.Dreams)
+	if s.Dreams.Runs != 1 || s.Dreams.Edits != 5 || len(s.Dreams.FailedSteps) != 1 || s.Dreams.Refused != 2 {
+		t.Errorf("dreams %+v, want the one run of the last day with its failed step and its 2 refused units", s.Dreams)
 	}
 	if s.LLM["dream"].Calls != 1 {
 		t.Errorf("llm %+v, want the one call of the last day", s.LLM)

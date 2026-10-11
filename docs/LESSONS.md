@@ -162,6 +162,13 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   many questions wait. `brain dream merge` is a dry run.
 - **Rule.** Merge, don't copy. When a question waits, answer it (see [OPERATIONS.md](OPERATIONS.md#owner-questions));
   the newer dated rule wins only when the dates differ.
+- **Later (2026-10-11): a narrowing that never landed.** For 12 dreams the merge narrowed the same lesson, and the
+  applier refused it each time: "a lesson body is ≤ 300 chars". The narrowing line goes at the end of the older
+  note's body. A lesson body holds at most 300 chars, and 108 of the 109 global lessons had no room for the line. The
+  step stayed `ok`, and no metric counted the refusal. **Fix:** when the body has no room, the narrowing goes in the
+  older note's `related` link to the newer note, as its why (`Narrowed <date>: <why>`). Each dream step record has a
+  `refused` count, and `brain metrics` shows "dream units refused". **Rule:** a write that must fit a cap needs a
+  second place to go. Count the units a step refused, not only the steps that failed.
 
 ## 12. Evals that leak or misdate their targets
 
