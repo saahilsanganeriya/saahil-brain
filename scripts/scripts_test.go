@@ -198,11 +198,13 @@ func zipKit(t *testing.T, dir string) string {
 	return zip
 }
 
-// The release is the whole repo: check-kit must find an owner path in any file deep in the tree, and notice a binary
-// swapped after the checksums were written; a clean release passes, so a failure means the planted defect.
+// The release is the whole repo: check-kit must find an owner path in any file deep in the tree, the owner's name in
+// any file but the LICENSE copyright line, and a binary swapped after the checksums were written; a clean release
+// passes, so a failure means the planted defect.
 func TestCheckKitCatchesOwnerPathInTreeAndTamperedBinary(t *testing.T) {
 	env := []string{"HOME=" + t.TempDir(), "PATH=/usr/bin:/bin:/opt/homebrew/bin"}
 	owner := "/Users/saahilsangan" + "eriya/brain"
+	name := "Saa" + "hil Sangan" + "eriya"
 	for _, tc := range []struct {
 		name, want string
 		before     func(kit string)
@@ -213,6 +215,12 @@ func TestCheckKitCatchesOwnerPathInTreeAndTamperedBinary(t *testing.T) {
 			before: func(kit string) {
 				_ = os.WriteFile(filepath.Join(kit, "internal", "config", "config.go"), []byte("package config\nconst root = \""+owner+"\"\n"), 0o644)
 			}},
+		{name: "copyright line in LICENSE", want: "PASS",
+			before: func(kit string) {
+				_ = os.WriteFile(filepath.Join(kit, "LICENSE"), []byte("MIT License\n\nCopyright (c) 2026 "+name+"\n"), 0o644)
+			}},
+		{name: "owner name outside LICENSE", want: "FAIL  owner surname in README.md",
+			before: func(kit string) { _ = os.WriteFile(filepath.Join(kit, "README.md"), []byte("by "+name+"\n"), 0o644) }},
 		{name: "binary swapped after the sums", want: "FAIL  checksum: bin/brain-linux-amd64",
 			after: func(kit string) { writeExec(t, filepath.Join(kit, "bin", "brain-linux-amd64"), "echo swapped\n") }},
 	} {

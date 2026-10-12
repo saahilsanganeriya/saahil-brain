@@ -31,6 +31,29 @@ fixes it and tries one measured improvement.
      L2  brain_search / show / sections / neighbors / note      L3  read the file
 ```
 
+## How the pieces fit
+
+```
+ ONE PROMPT (either machine, ~100 ms)                 EVERY HOUR (devbox, only when something new landed)
+ ────────────────────────────────────                 ────────────────────────────────────────────────────
+ you type a prompt in Claude Code / Codex / Cursor     new sessions · memories · docs in work/
+        │ hook                                                │
+        ▼                                                     ▼
+ brain hook prompt ─► SQLite index of ~/brain          brain-worker (Temporal): the dream
+   aliases · BM25 · one graph hop · usefulness           code gathers material, skills/ prompts judge,
+        │                                                  code checks every edit, then applies it
+        ▼                                                     ▼
+ ≤ 3 pointers, or nothing ─► the agent                 notes/ · hubs/ · CARD.md · memory/MEMORY.md · hot.md
+        │                                                     │ git commit in ~/brain (never deletes)
+        ▼                                                     ▼
+ brain_search · brain_show · brain_sections            Unison sync ◄────────► the laptop's ~/brain
+   (MCP tools, when the agent wants more)
+```
+
+The two machines share one `~/brain` through Unison. Each machine builds its own index. The devbox runs the
+dream, the daily care agent and `orca serve`; the laptop runs the agents you watch. `brain agents` drives agent
+sessions on either machine, and agents send each other notes through the same mesh.
+
 ## What you get
 
 | You get | What it means day to day |
@@ -76,7 +99,8 @@ agents. You run your own EC2 devbox with Orca's headless server, paired with the
 ```
  code defaults (generic: derived from your OS user; no team or person values)
         ▲ overridden by
- profiles/<team>.json   committed in this repo: team settings (SSO session, cert path, PR repo, work repo)
+ profiles/<team>.json   your team's settings (SSO session, cert path, PR repo, work repo, ticket keys);
+                        kept out of git, built into the binary (profiles/example.json is the template)
         ▲ overridden by
  ~/.config/brain/identity.json   YOURS, on both machines, never committed (homes, devbox host, Orca environment)
 ```
@@ -124,7 +148,7 @@ skills/             the prompts that hold judgment: file, distil, link, hubs, me
 mod/                the Claude Code mod `saahil-brain`: brain_* tools, pane, band, write guard, hooks
 adapters/           Codex, Cursor, Prime and omp wiring
 templates/          BRAIN.md, seed hubs, the care agent's goal and playbook
-profiles/           committed team settings (profiles/<team>.json)
+profiles/           example.json, the template for a team profile; your team's own file stays local
 deploy/systemd/     unit templates: brain-temporal, brain-worker, brain-care (service + timer), orca-serve
 scripts/            setup-devbox.sh · setup-laptop.sh · devbox (EC2 helper) · brain-care · publish.sh
 testdata/           a tiny synthetic corpus (no real data)
@@ -150,3 +174,7 @@ Your `identity.json` is personal and is never committed either. Brain data stays
 them only as input to model API calls, as every agent session already does. Nothing in the brain changes your
 company repos: a `brain` link in a repo is optional, git-ignored by the global `/brain` rule, and never committed
 ([docs/LESSONS.md](docs/LESSONS.md#21-a-brain-link-in-a-repo-can-be-uploaded-or-crawled)).
+
+## License
+
+MIT, see [LICENSE](LICENSE).

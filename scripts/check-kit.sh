@@ -72,12 +72,18 @@ fixture() { # $1 = label, $2 = file relative to the release
   case $2 in internal/session/session_test.go | testdata/session/main.ndjson) return 0 ;; esac
   return 1
 }
+# the MIT licence names its copyright holder; only LICENSE may hold the owner's name
+copyright() { # $1 = label, $2 = file relative to the release
+  case $1 in "owner surname" | "owner first name") [ "$2" = LICENSE ] ;; *) return 1 ;; esac
+}
 for entry in "${patterns[@]}"; do
   label=${entry%%|*}
   while IFS= read -r f; do
     f=${f#"$kit"/}
     if fixture "$label" "$f"; then
       printf 'note  synthetic %s in %s (redaction test fixture, allowed)\n' "$label" "$f"
+    elif copyright "$label" "$f"; then
+      printf 'note  %s in LICENSE (the copyright line, allowed)\n' "$label"
     else
       bad "$label in $f"
     fi

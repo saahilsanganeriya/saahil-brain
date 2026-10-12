@@ -329,8 +329,9 @@ a new person showed steps that only ever happened by hand, and values that only 
   installed. **Fix:** the notify step runs only when a notifier is installed; the report is the record either way.
 - **Seed hubs and code defaults.** The seed hubs were the first owner's topics, and code defaults held one team's
   SSO session, certificate path and PR repo. **Fix:** `brain init` seeds only generic hubs (the person adds their
-  own domains); code defaults are generic; team values live in a committed profile (`profiles/<team>.json`, merged by
-  `brain identity --init --profile <team>`); personal values stay in the never-committed `identity.json`. The
+  own domains); code defaults are generic; team values live in a team profile (`profiles/<team>.json`, kept out of
+  git and built into the binary, merged by `brain identity --init --profile <team>`); personal values stay in the
+  never-committed `identity.json`. The
   Makefile's dist path comes from settings, not a fixed home.
 - **Rule.** A step that ran by hand once is a step a new install will miss, and a value that fits one person is a
   bug for the next. Put the step in code with a check, and the value in settings.
