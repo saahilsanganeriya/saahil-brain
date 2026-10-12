@@ -177,8 +177,8 @@ func frontmatterLine(note, key string) string {
 	return ""
 }
 
-// Catches nondeterministic output (map order) and a rewrite on every hook run when nothing changed, and a renamed
-// session leaving its old note behind.
+// Catches nondeterministic output (map order), a rewrite on every hook run when nothing changed, and a renamed
+// session moving its note: notes cite a session by path, so a moved note leaves every citation dangling.
 func TestNoteRewrittenOnlyWhenTranscriptChanges(t *testing.T) {
 	transcript, brain := projectsFixture(t), t.TempDir()
 	first, note1 := writeNote(t, transcript, brain)
@@ -197,12 +197,15 @@ func TestNoteRewrittenOnlyWhenTranscriptChanges(t *testing.T) {
 	}
 	fmt.Fprintf(f, `{"type":"custom-title","customTitle":"renamed-worker","sessionId":"%s"}`+"\n", fixtureID)
 	f.Close()
-	third, _ := writeNote(t, transcript, brain)
-	if third.Status != Written || !strings.HasSuffix(third.Path, "-renamed-worker.md") {
-		t.Fatalf("after change: %s %s", third.Status, third.Path)
+	third, note3 := writeNote(t, transcript, brain)
+	if third.Status != Written || third.Path != first.Path {
+		t.Fatalf("after rename: %s at %s, want written at the first path %s", third.Status, third.Path, first.Path)
 	}
-	if _, err := os.Stat(first.Path); !os.IsNotExist(err) {
-		t.Errorf("stale note %s kept after rename", first.Path)
+	if !strings.Contains(frontmatterLine(note3, "name"), "renamed-worker") {
+		t.Errorf("renamed note has %q", frontmatterLine(note3, "name"))
+	}
+	if notes, _ := filepath.Glob(filepath.Join(filepath.Dir(first.Path), "*.md")); len(notes) != 1 {
+		t.Errorf("one session, %d notes: %v", len(notes), notes)
 	}
 }
 

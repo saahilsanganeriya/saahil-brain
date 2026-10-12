@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,14 +89,18 @@ func Note(transcript string, opt Options) (Result, error) {
 		res.Status, res.Reason = Skipped, "no timestamps"
 		return res, nil
 	}
+	// a note keeps the path of its first write: notes cite sessions by path, so a rename changes name:, not the file
 	res.Path = filepath.Join(dir, s.Started.Format("2006"), s.Started.Format("01"),
 		fmt.Sprintf("%s-%s-%s.md", s.Started.Format("2006-01-02"), short(s.ID), slugFor(s)))
+	if len(existing) > 0 {
+		res.Path = slices.Min(slices.Collect(maps.Keys(existing)))
+	}
 	if err := writeAtomic(res.Path, renderFitted(s, opt.Machine, fp)); err != nil {
 		return Result{}, err
 	}
 	for path := range existing {
 		if path != res.Path {
-			_ = os.Remove(path) // the session was renamed: its old note is superseded
+			_ = os.Remove(path) // a second note of the same session (an older writer renamed it): one note per session
 		}
 	}
 	res.Status = Written

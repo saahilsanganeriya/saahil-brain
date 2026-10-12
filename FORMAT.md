@@ -58,6 +58,9 @@ code: `links_to part_of section_of copy_of mentions touched produced_by learned_
 
 ## Session note (`sessions/…`)
 
+The path is fixed at the note's first write: `<slug>` is the session's name (or first prompt) then. A later `/rename`
+changes `name:`, never the path, because notes cite a session note by its path.
+
 ```yaml
 ---
 id: session-2026-10-08-d0d200fd
