@@ -33,6 +33,10 @@ type Identity struct {
 	GithubCert    string   `json:"github_cert,omitempty"`
 	DefaultPRRepo string   `json:"default_pr_repo,omitempty"` // owner/repo of a bare "PR #123"
 	ShadowDocs    []string `json:"shadow_docs"`               // read-only doc roots shown as work/ before a cut-over; none when empty
+	// TicketPrefixes are the tracker's team keys: "ABC" makes ABC-123 a ticket mention. None: no ticket mentions.
+	TicketPrefixes []string `json:"ticket_prefixes,omitempty"`
+	// LegacyDocs are old doc-root spellings that history keeps, as path fragments mapped under work/ (LegacyDocsPath).
+	LegacyDocs []string `json:"legacy_docs,omitempty"`
 }
 
 // Pairs are the settings as json key and display value, in the file's order.
@@ -41,7 +45,9 @@ func (id Identity) Pairs() [][2]string {
 		{"devbox_host", id.DevboxHost}, {"orca_env", id.OrcaEnv}, {"work_repo", id.WorkRepo},
 		{"work_repo_orca", id.WorkRepoOrca}, {"brain_repo", id.BrainRepo}, {"aws_sso_session", id.AWSSSOSession},
 		{"github_cert", id.GithubCert}, {"default_pr_repo", id.DefaultPRRepo},
-		{"shadow_docs", "[" + strings.Join(id.ShadowDocs, ", ") + "]"}}
+		{"shadow_docs", "[" + strings.Join(id.ShadowDocs, ", ") + "]"},
+		{"ticket_prefixes", "[" + strings.Join(id.TicketPrefixes, ", ") + "]"},
+		{"legacy_docs", "[" + strings.Join(id.LegacyDocs, ", ") + "]"}}
 }
 
 // IdentityStatus is the effective identity, the file it was read from, which keys that file set, the keys only
@@ -167,6 +173,7 @@ func InitIdentity(set map[string]string, profile map[string]json.RawMessage, for
 		}
 	}
 	fromFile.ShadowDocs = st.Identity.ShadowDocs
+	fromFile.TicketPrefixes, fromFile.LegacyDocs = st.Identity.TicketPrefixes, st.Identity.LegacyDocs
 	homes := withDerived(fromFile)
 	fill := strings.NewReplacer("<home>", homes.LaptopHome, "<laptop_home>", homes.LaptopHome,
 		"<devbox_home>", homes.DevboxHome, "<user>", homes.User)
@@ -182,6 +189,14 @@ func InitIdentity(set map[string]string, profile map[string]json.RawMessage, for
 					docs[i] = fill.Replace(docs[i])
 				}
 				fromFile.ShadowDocs = docs
+			}
+		case key == "ticket_prefixes":
+			if !st.FromFile[key] {
+				_ = json.Unmarshal(raw, &fromFile.TicketPrefixes)
+			}
+		case key == "legacy_docs":
+			if !st.FromFile[key] {
+				_ = json.Unmarshal(raw, &fromFile.LegacyDocs)
 			}
 		case fields[key] != nil:
 			if *fields[key] == "" && value != "" {

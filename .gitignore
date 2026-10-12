@@ -14,5 +14,8 @@ sessions/
 # build outputs
 /bin/
 /dist/
+# team profiles stay out of git; the build still puts them into the binary (profiles/profiles.go)
+/profiles/*.json
+!/profiles/example.json
 # some machines ignore docs/ globally; this repo ships its docs/ folders
 !docs/

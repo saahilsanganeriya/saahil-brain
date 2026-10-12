@@ -10,9 +10,9 @@ import (
 
 	"saahil.local/brain/internal/agents"
 	"saahil.local/brain/internal/config"
-	"saahil.local/brain/internal/squad"
 	"saahil.local/brain/internal/machine"
 	"saahil.local/brain/internal/rpc"
+	"saahil.local/brain/internal/squad"
 )
 
 func init() {

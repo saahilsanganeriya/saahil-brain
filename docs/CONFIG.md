@@ -5,13 +5,13 @@ Read this when you need to know which value comes from where, or which file a co
 **In plain words.** The brain reads one small settings file, `identity.json`. It holds the values that differ from
 person to person: your user name, your two home folders, the name of your devbox, your Orca environment and your
 repos. Both machines keep the same copy, and it is never committed anywhere. A team can share its common values in a
-**profile**, a small file committed in this repository. A value in neither place gets a generic default that `brain`
-works out by itself. Everything else (the caps, the ports, the folder layout) is fixed in the code.
+**profile**, a small file beside the code that the build puts into the binary; git keeps only the example profile. A
+value in neither place gets a generic default that `brain` works out by itself. Everything else (the caps, the ports, the folder layout) is fixed in the code.
 
 ```
  code defaults            generic, derived from your OS user; no team or person values
       ▲ overridden by
- profiles/<team>.json     committed in this repo: what a whole team shares (SSO session, cert path, PR repo, work repo)
+ profiles/<team>.json     what a whole team shares (SSO session, cert, PR repo, work repo, ticket keys); kept out of git
       ▲ overridden by
  identity.json            yours, ~/.config/brain/identity.json, the same on both machines, NEVER committed
 
@@ -38,6 +38,8 @@ in effect, and says where each value came from.
   "github_cert": "/Users/<user>/.ssh/<your-cert>.pub",
   "default_pr_repo": "<org>/<repo>",
   "shadow_docs": [],
+  "ticket_prefixes": ["<KEY>"],
+  "legacy_docs": [],
   "devbox_instance_id": "i-<instance-id>",
   "devbox_region": "<aws-region>",
   "devbox_aws_profile": "<aws-profile>"
@@ -58,6 +60,8 @@ in effect, and says where each value came from.
 | `github_cert` | your GitHub SSH certificate | `brain machine status` (expiry) | empty: the features that need it say which key to set |
 | `default_pr_repo` | the repo a bare PR number refers to in session notes (`#1234`) | session notes, index mentions | empty: the features that need it say which key to set |
 | `shadow_docs` | old doc roots to index READ-ONLY before a cut-over. A new brain has none | index, dream, backfill, evals | `[]` (empty: nothing to shadow) |
+| `ticket_prefixes` | your tracker's team keys: `ABC` makes `ABC-123` a ticket mention | index mentions | `[]`: no ticket mentions |
+| `legacy_docs` | old doc-root spellings that history keeps, mapped under `work/`. Each entry is a path fragment (`*` is one folder, `**` any number), then optionally `=<box>`; without a box the first folder below the fragment is the box. Example: `Documents/<work-repo>/saahil-docs` | pointers, the link graph | `[]`: no mapping |
 
 Three OPTIONAL keys are read only by `scripts/devbox` (the EC2 helper on the laptop). The `brain` loader ignores
 keys it does not use; `brain identity` lists them as `file (scripts)`. `setup-devbox.sh` fills the first two from
@@ -71,9 +75,9 @@ the EC2 instance metadata and the third from its `--aws-profile` flag.
 
 ### Team profiles (`profiles/<team>.json`)
 
-A profile holds only the values a whole team shares. It is committed in this repository, so it must never hold a
-personal value (a name, a home path, a host or an id). Its paths are relative to the person's laptop home, and
-`--init` writes them with your own home. The repository ships `profiles/example.json`:
+A profile holds only the values a whole team shares. It must never hold a personal value (a name, a home path, a
+host or an id). Its paths are relative to the person's laptop home, and `--init` writes them with your own home. Git
+keeps only the template, `profiles/example.json`:
 
 | Key | Value in the profile |
 |---|---|
@@ -85,15 +89,17 @@ personal value (a name, a home path, a host or an id). Its paths are relative to
 `brain identity --init --profile <team>` merges the profile UNDER your own keys: a value you pass as a flag, or one
 already in your `identity.json`, wins over the profile. `scripts/setup-devbox.sh --profile <team>` and
 `scripts/setup-laptop.sh <devbox-host> --profile <team>` pass it on. To start a profile for your team, copy
-`profiles/example.json`, change its values, save it as `profiles/<team>.json` in your copy of the repository and
-commit it.
+`profiles/example.json`, change its values and save it as `profiles/<team>.json` in your checkout. Git ignores it
+(`.gitignore`), and `make build` puts every `profiles/*.json` into the binary, so a release kit built from that
+checkout carries the profile while the repository does not. A profile at `~/.config/brain/profiles/<team>.json` wins
+over the built-in one.
 
 **Rules.**
 
 - Spell every path as an absolute path. Never use `~` inside the file.
 - Keep both copies of `identity.json` equal. A different `laptop_home` on the two machines splits every stored path
   in two.
-- Never commit `identity.json`. Only `profiles/` is shared.
+- Never commit `identity.json` or a team profile. Only `profiles/example.json` is committed.
 - `brain identity --init` keeps the keys that are already in the file. Use `--force` to replace them.
 - Product names do not move into settings: the binary `brain`, the Claude Code mod `saahil-brain`, its MCP tool
   names `mcp__saahil-brain__brain_*`, the launchd labels `com.saahil.*` and the Go module path stay as they are.

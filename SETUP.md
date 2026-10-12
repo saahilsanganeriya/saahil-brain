@@ -39,7 +39,7 @@ Placeholders: `<user>` your laptop login (`id -un` on the laptop) · `<devbox-us
 `<devbox-host>` the ssh alias of the devbox · `<version>` the release version · `<orca-env>` the Orca environment id
 of the devbox · `<work-repo>` absolute path of your main work repo · `<brain-repo>` absolute path where your copy of
 the brain's code will live on the devbox (default `/Users/<user>/Documents/saahil-brain`) · `<profile>` the name of a
-team profile in `profiles/` (for example `example`), or nothing.
+team profile in `profiles/` (your own `profiles/<team>.json`, see docs/CONFIG.md), or nothing.
 
 **Team profile.** A profile is `profiles/<profile>.json`, committed in the repository: the settings a whole team
 shares (SSO session name, GitHub certificate path, the default PR repo, the usual work repo). Pass `--profile

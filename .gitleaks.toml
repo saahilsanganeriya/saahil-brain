@@ -1,0 +1,16 @@
+# gitleaks reads this file from the repository root. The default rules stay on; the only exception is the synthetic,
+# key-shaped secrets that the session redaction tests feed to the redactor, in the two files that hold them.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "synthetic secrets of the session redaction tests"
+condition = "AND"
+paths = ['''^internal/session/session_test\.go$''', '''^testdata/session/main\.ndjson$''']
+regexes = [
+  '''^AKIAABCDEFGHIJKLMNOP$''',
+  '''^ghp_0123456789abcdefghijABCDEFGHIJ012345$''',
+  '''^eyJhbGciOiJub25lIn0\.eyJzdWIiOiJ4eHh4eHh4In0\.''',
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJpYXQiOjE3MDAwMDAwMDB9\.''',
+  '''MIIEowIBAAKCAQEAsecretsecret''',
+]

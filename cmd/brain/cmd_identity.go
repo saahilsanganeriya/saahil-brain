@@ -29,7 +29,7 @@ func cmdIdentity(args []string) int {
 	initFile := fs.Bool("init", false, "write ~/.config/brain/identity.json: these flags, then the file's values, then derived ones")
 	force := fs.Bool("force", false, "with --init, a flag replaces a value the file already holds")
 	profileName := fs.String("profile", "", "with --init, team values under the person's own: a path to a .json, else "+
-		"~/.config/brain/profiles/<name>.json, else the binary's built-in profiles/<name>.json (example)")
+		"~/.config/brain/profiles/<name>.json, else the binary's built-in profiles/<name>.json")
 	values := map[string]*string{}
 	for _, f := range identityFlags {
 		values[f[1]] = fs.String(f[0], "", "with --init: "+f[1])

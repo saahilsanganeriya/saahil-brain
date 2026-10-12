@@ -93,7 +93,7 @@ func TestIncrementalEqualsFull(t *testing.T) {
 	incDB := filepath.Join(t.TempDir(), "inc.db")
 	build(t, incDB, roots, true)
 
-	put(t, docs, "box/plans/PLAN.md", "# Plan\n\nNew file citing ABC-7.\n")                            // add
+	put(t, docs, "box/plans/PLAN.md", "# Plan\n\nNew file citing ABC-7.\n")                             // add
 	put(t, docs, "box/reports/ocr.md", "# OCR\n\n## recall\n\nRe-measured.\n\n## precision\n\nAlso.\n") // edit
 	later := time.Now().Add(time.Hour)
 	_ = os.Chtimes(filepath.Join(docs, "box/reports/ocr.md"), later, later)

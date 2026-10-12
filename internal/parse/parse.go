@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -412,8 +413,32 @@ var (
 	wikiRE    = regexp.MustCompile(`\[\[([^\]|#\n]+)(?:[#|][^\]\n]*)?\]\]`)
 	hrefRE    = regexp.MustCompile(`(?i)href="([^"#]+)`)
 	pullURLRE = regexp.MustCompile(`github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)`)
-	ticketRE  = regexp.MustCompile(`\b(?:ABC|XYZ)-\d{1,5}\b`)
 )
+
+var ticketCache struct {
+	sync.Mutex
+	key string
+	re  *regexp.Regexp
+}
+
+// ticketRE matches the identity's ticket keys (ticket_prefixes: ABC makes ABC-123 a mention); nil when it has none.
+func ticketRE() *regexp.Regexp {
+	prefixes := config.CurrentIdentity().TicketPrefixes
+	key := strings.Join(prefixes, "|")
+	ticketCache.Lock()
+	defer ticketCache.Unlock()
+	if ticketCache.key != key {
+		ticketCache.key, ticketCache.re = key, nil
+		if key != "" {
+			quoted := make([]string, len(prefixes))
+			for i, prefix := range prefixes {
+				quoted[i] = regexp.QuoteMeta(prefix)
+			}
+			ticketCache.re = regexp.MustCompile(`\b(?:` + strings.Join(quoted, "|") + `)-\d{1,5}\b`)
+		}
+	}
+	return ticketCache.re
+}
 
 func links(body string) []Link {
 	seen := map[Link]bool{}
@@ -471,8 +496,8 @@ func mentions(body string) []string {
 			set["pr:"+m[1]+"#"+m[2]] = true
 		}
 	}
-	if strings.Contains(body, "ABC-") || strings.Contains(body, "XYZ-") {
-		for _, m := range ticketRE.FindAllString(body, -1) {
+	if re := ticketRE(); re != nil {
+		for _, m := range re.FindAllString(body, -1) {
 			set["ticket:"+m] = true
 		}
 	}

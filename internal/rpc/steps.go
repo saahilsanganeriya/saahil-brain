@@ -55,7 +55,7 @@ var AllowedSteps = map[string]Step{
 	// the laptop's own copies get the same path rewrite as the devbox's, so the first work/ sync finds them identical;
 	// the live image-lane box is skipped on both machines
 	"cutover-rewrite-laptop": {Args: []string{"cutover", "rewrite-paths", config.LaptopHome() + "/brain/work",
-		"--from", config.LaptopHome() + "/Documents/work-repo/saahil-docs/", "--from", config.DevboxHome() + "/Documents/work-repo/saahil-docs/",
+		"--from", workDocs(config.LaptopHome()) + "/", "--from", workDocs(config.DevboxHome()) + "/",
 		"--to", config.LaptopHome() + "/brain/work/", "--skip", "image-lane-redesign-2026-10-06", "--apply",
 		"--backup-dir", config.LaptopHome() + "/brain/.archive/cutover/rewrite-backup-laptop"}, Timeout: 2 * time.Hour, Only: config.Laptop},
 	"cutover-compare": {Args: []string{"cutover", "compare", cutoverDir + "/laptop-before.tsv", cutoverDir + "/laptop-after.tsv",
@@ -69,9 +69,14 @@ var AllowedSteps = map[string]Step{
 }
 
 var (
-	laptopDocs = config.LaptopHome() + "/Documents/work-repo/saahil-docs"
+	laptopDocs = workDocs(config.LaptopHome())
 	cutoverDir = config.LaptopHome() + "/brain/.archive/cutover"
 )
+
+// workDocs is the old saahil-docs folder of the work repo (identity work_repo) in home's Documents.
+func workDocs(home string) string {
+	return filepath.Join(home, "Documents", filepath.Base(config.CurrentIdentity().WorkRepo), "saahil-docs")
+}
 
 type Job struct {
 	ID       string    `json:"id"`

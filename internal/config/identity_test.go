@@ -29,7 +29,9 @@ func TestOwnerIdentityKeepsTodaysValues(t *testing.T) {
 		WorkRepo: "/Users/test-user/Documents/work-repo", WorkRepoOrca: "id:00000000-0000-4000-8000-0000000000a1",
 		BrainRepo: "/Users/test-user/Documents/saahil-brain", AWSSSOSession: "Example-Session",
 		GithubCert: "/Users/test-user/.ssh/work_github-cert.pub", DefaultPRRepo: "example-org/work-repo",
-		ShadowDocs: []string{}}
+		ShadowDocs: []string{}, TicketPrefixes: []string{"ABC", "XYZ"}, LegacyDocs: []string{"Documents/work-repo/saahil-docs",
+			"Documents/worktrees/work-repo/*/saahil-docs", "Documents/worktrees/work-repo/*/work-repo/saahil-docs",
+			"team-monorepo/**/apps/server/work-repo/saahil-docs=team-monorepo-saahil-docs-2026-08"}}
 	if !identical(id, want) {
 		t.Errorf("identity = %+v\nwant       %+v", id, want)
 	}
