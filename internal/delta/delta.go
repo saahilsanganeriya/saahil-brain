@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -328,6 +330,7 @@ func (a *applier) edit(id string, change func(*Note) error) (*Counter, bool, err
 	if err := change(&n); err != nil {
 		return nil, false, err
 	}
+	a.repoint(&n)
 	if bytes.Equal(Render(n), Render(e.note)) {
 		return nil, true, nil
 	}
@@ -342,6 +345,7 @@ func (a *applier) commit(n Note, orig []byte) error {
 	if orig == nil {
 		// a new note may cite notes that land later; an edit (link, update) must name an existing target
 		a.dropUnresolved(&n)
+		a.repoint(&n)
 		a.normalize(&n)
 	}
 	resolve := func(kind, ref string) bool { return (kind == "id" && a.adding[ref]) || a.resolve(kind, ref) }
@@ -376,6 +380,41 @@ func (a *applier) normalize(n *Note) {
 		return out
 	}
 	n.Evidence, n.Sources = keep(n.Evidence), keep(n.Sources)
+}
+
+// sessionNoteRE is a session note's path (FORMAT.md); its <date>-<session8> part names the session, its slug does not.
+var sessionNoteRE = regexp.MustCompile(`^(sessions/[^/]+/\d{4}/\d{2})/(\d{4}-\d{2}-\d{2}-[0-9a-f]{8}-)[^/]+\.md$`)
+
+// repoint moves an evidence or source path that names a session note by a slug it no longer has onto that session's
+// one note, keeping any #part: session notes written before they kept their first path moved on /rename.
+func (a *applier) repoint(n *Note) {
+	fix := func(paths []string) []string {
+		var out []string
+		for _, p := range paths {
+			file, part, hasPart := strings.Cut(p, "#")
+			if m := sessionNoteRE.FindStringSubmatch(file); m != nil && !a.resolve("path", p) {
+				entries, _ := os.ReadDir(filepath.Join(a.root, m[1]))
+				var same []string
+				for _, e := range entries {
+					if strings.HasPrefix(e.Name(), m[2]) && strings.HasSuffix(e.Name(), ".md") {
+						same = append(same, m[1]+"/"+e.Name())
+					}
+				}
+				if len(same) == 1 {
+					p = same[0]
+					if hasPart {
+						p += "#" + part
+					}
+					a.normalized++
+				}
+			}
+			if !slices.Contains(out, p) {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	n.Evidence, n.Sources = fix(n.Evidence), fix(n.Sources)
 }
 
 // dropUnresolved removes links to notes that neither exist nor are added by this delta; they are queued, not lost.

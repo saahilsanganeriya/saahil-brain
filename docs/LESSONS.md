@@ -304,6 +304,12 @@ already in this repository's code or scripts unless the lesson says otherwise; t
 - **Cause.** A filed note cited that memory as evidence, so the link dangled.
 - **Fix.** The memory went back.
 - **Rule.** Before you move a file out of the live tree, run `brain show <path>` and check what links to it.
+- **Later (2026-10-12): code moved cited files too.** A session note's file name held the session's name, and a
+  `/rename` moved the note. Three renamed sessions left 103 dangling citations in 56 notes. The applier checks every
+  path in a note it edits, so each later edit of those notes was refused, merges into them included. **Fix:** a
+  session note keeps the path of its first write (a rename changes `name:`), and the applier moves a cited session
+  path with an old slug onto the session's one note when it edits the note. An empty `update_note` delta repaired
+  the 56 notes.
 
 ## 26. Gaps a fresh install exposed
 

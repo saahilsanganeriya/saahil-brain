@@ -225,3 +225,34 @@ func TestHelpfulCounterStampsItsTime(t *testing.T) {
 		t.Fatalf("last_helpful_at: helpful %q, harmful %q", at["lesson-a"], at["lesson-b"])
 	}
 }
+
+// Catches a note that cites a session note by an old slug staying frozen: the session note writer used to move a note
+// on /rename, and every later edit of a citing note (a merge into it included) was refused for the dangling path.
+func TestRenamedSessionCitationIsRepointed(t *testing.T) {
+	root := newRoot(t)
+	const dir = "sessions/devbox/2026/10/"
+	files := map[string]string{
+		dir + "2026-10-08-11111111-new-name.md": "---\nid: session-2026-10-08-11111111\ntype: session\n---\n",
+		"notes/lesson-cites-session.md": "---\nid: lesson-cites-session\ntype: lesson\nstatus: current\nsummary: cites a " +
+			"session\nscope: global\nhubs: [git]\nevidence: ['" + dir + "2026-10-08-11111111-old-name.md#Owner prompts']\n" +
+			"sources: [" + dir + "2026-10-08-11111111-old-name.md, " + dir + "2026-10-08-11111111-new-name.md]\n---\nbody.\n",
+	}
+	for path, content := range files {
+		_ = os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0o755)
+		if err := os.WriteFile(filepath.Join(root, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep, err := Apply(context.Background(), root, parse(t, `{"ops":[{"op":"update_note","id":"lesson-cites-session"},
+		{"op":"update_note","id":"lesson-cites-session","set":{"aliases":["session cite"]}}]}`),
+		Options{Now: time.Now()})
+	if err != nil || len(rep.Rejected) != 0 {
+		t.Fatalf("rejected=%+v err=%v", rep.Rejected, err)
+	}
+	b, _ := os.ReadFile(filepath.Join(root, "notes", "lesson-cites-session.md"))
+	got, _ := Parse(b)
+	want := dir + "2026-10-08-11111111-new-name.md"
+	if len(got.Evidence) != 1 || got.Evidence[0] != want+"#Owner prompts" || len(got.Sources) != 1 || got.Sources[0] != want {
+		t.Fatalf("evidence %v, sources %v; want both on %s", got.Evidence, got.Sources, want)
+	}
+}
