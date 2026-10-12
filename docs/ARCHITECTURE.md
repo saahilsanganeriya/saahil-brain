@@ -228,6 +228,7 @@ parts, and the model can only propose edits; code checks and applies them.
 | Rule | Value |
 |---|---|
 | Per run | ≤ 50 note edits; ≤ 60 sessions; ≤ 40 captures; ≤ 10 big docs; the rest waits for the next dream |
+| Edit cap order | learn and file first (they use up their input); curate.link, curate.hubs, curate.merge, curate.cards and verify then get equal shares of what is left (a share a step does not use goes to the steps after it). An edit the cap holds is marked `held` |
 | Models | Opus 5.5 for judgment (learn, link, hubs, merge, verify); Haiku 5.5 for bulk (file, cards, summaries) |
 | Cost | ≤ $8 per run; ≤ $100 per UTC day; a stop skips the remaining LLM steps, the code steps still finish |
 | Writes | only `write` actions to clean `.md` paths under `notes/ hubs/ journal/ memory/ work/` or `hot.md`, `index.md`; ≤ 64 KB each |

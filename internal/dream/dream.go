@@ -4,6 +4,7 @@ package dream
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -238,10 +239,25 @@ func (r *run) llm(s llmStep, material []Material) {
 	r.record(rec, began)
 }
 
+// curationSteps rebuild their edits from the brain every run, so an edit the cap holds back returns next run; learn
+// and file consume their input (a held edit is lost), so they keep first claim on the cap.
+var curationSteps = []string{linkStep.name, hubsStep.name, mergeStepName, cardsStepName, verifyStep.name}
+
+// editBudget is how many edits a step may still apply this run: a curation step gets an equal share of what is left
+// with the curation steps after it, so the first one cannot starve the rest; a share it does not use carries on.
+func editBudget(step string, applied int) int {
+	left := MaxEdits - applied
+	if i := slices.Index(curationSteps, step); i >= 0 && left > 0 {
+		after := len(curationSteps) - i
+		return (left + after - 1) / after
+	}
+	return left
+}
+
 func (r *run) apply(step string, edits []Edit) int {
 	var res ApplyResult
 	err := workflow.ExecuteActivity(r.det, a.ApplyEdits, ApplyInput{RunID: r.rep.RunID, Step: step, Edits: edits,
-		Remaining: MaxEdits - len(r.applied)}).Get(r.ctx, &res)
+		Remaining: editBudget(step, len(r.applied))}).Get(r.ctx, &res)
 	if err != nil {
 		r.rep.Rejected = append(r.rep.Rejected, Rejection{Step: step, Reason: "apply failed: " + err.Error()})
 		return 0

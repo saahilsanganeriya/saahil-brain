@@ -169,6 +169,13 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   older note's `related` link to the newer note, as its why (`Narrowed <date>: <why>`). Each dream step record has a
   `refused` count, and `brain metrics` shows "dream units refused". **Rule:** a write that must fit a cap needs a
   second place to go. Count the units a step refused, not only the steps that failed.
+- **Later (2026-10-12): the merge landed nothing at all.** The fix above worked in a replay, but the three dreams of
+  the next day still changed no merged note. Each dream hit its 50-edit cap in learn, file and curate.link, and the cap
+  went first come, first served, so every curate.hubs, curate.merge, curate.cards and verify edit was held (96 edits;
+  $10 of the day's $13.54 bought edits that never landed). The step reasons still said "5 files" and "refreshed 2".
+  **Fix:** learn and file keep first claim (they use up their input); the five curation steps share what is left
+  equally. A held edit is marked `held`, and `brain metrics` shows "dream edits held by the cap". **Rule:** a shared
+  budget spent in a fixed order needs shares, or the last steps never run.
 
 ## 12. Evals that leak or misdate their targets
 

@@ -213,3 +213,44 @@ func TestShadowDreamNeverWritesWork(t *testing.T) {
 		t.Fatalf("live dream could not write work/: applied=%+v rejected=%+v err=%v", res.Applied, res.Rejected, err)
 	}
 }
+
+// Catches the run's edit cap going first come, first served: on 2026-10-12 learn, file and curate.link filled the 50
+// edits in all three dreams, so curate.hubs, curate.merge, curate.cards and verify landed nothing, run after run.
+func TestCurationStepsShareTheEditCap(t *testing.T) {
+	proposed := []struct {
+		step string
+		n    int
+	}{{"learn", 10}, {"file", 19}, {"curate.link", 22}, {"curate.hubs", 7}, {"curate.merge", 5}, {"curate.cards", 3},
+		{"verify", 5}}
+	applied, landed := 0, map[string]int{}
+	for _, p := range proposed {
+		landed[p.step] = min(p.n, editBudget(p.step, applied))
+		applied += landed[p.step]
+	}
+	if landed["learn"] != 10 || landed["file"] != 19 {
+		t.Fatalf("learn and file consume their input and keep first claim: landed %v", landed)
+	}
+	for _, p := range proposed[2:] {
+		if landed[p.step] == 0 {
+			t.Errorf("%s landed 0 of %d edits: %v", p.step, p.n, landed)
+		}
+	}
+	if applied > MaxEdits {
+		t.Errorf("%d edits applied, cap %d", applied, MaxEdits)
+	}
+}
+
+// Catches an edit the run's cap holds back reading like any other rejection: brain metrics counts only edits marked
+// held, and on 2026-10-12 every hub, merge, card and verify edit was held while every metric read clean.
+func TestEditOverTheCapIsMarkedHeld(t *testing.T) {
+	acts, _ := newBrain(t, 0)
+	edits := []Edit{{Path: "notes/finding-a.md", Action: "write", Content: "a"},
+		{Path: "notes/finding-b.md", Action: "write", Content: "b"}}
+	res, err := acts.ApplyEdits(t.Context(), ApplyInput{RunID: "r", Step: "curate.hubs", Edits: edits, Remaining: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 1 || len(res.Rejected) != 1 || !res.Rejected[0].Held {
+		t.Fatalf("applied=%+v rejected=%+v, want the second edit held by the cap", res.Applied, res.Rejected)
+	}
+}

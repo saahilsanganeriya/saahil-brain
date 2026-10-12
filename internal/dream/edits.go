@@ -29,6 +29,7 @@ type Rejection struct {
 	Path   string `json:"path,omitempty"`
 	Action string `json:"action,omitempty"`
 	Reason string `json:"reason"`
+	Held   bool   `json:"held,omitempty"` // the run's edit cap held it; it waits for a later dream
 }
 
 type ApplyInput struct {
@@ -70,6 +71,10 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 		reject := func(reason string) {
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Reason: reason})
 		}
+		hold := func() {
+			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Held: true,
+				Reason: fmt.Sprintf("run edit cap %d reached; waits for the next dream", MaxEdits)})
+		}
 		if e.Action != "write" {
 			reject("refused " + e.Action + ": the dream never deletes; only writes are applied")
 			continue
@@ -93,7 +98,7 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 			continue
 		}
 		if len(res.Applied) >= in.Remaining {
-			reject(fmt.Sprintf("run edit cap %d reached; waits for the next dream", MaxEdits))
+			hold()
 			continue
 		}
 		backup := filepath.Join(a.Cfg.BrainRoot, ".archive", "dream", in.RunID, "before", e.Path)

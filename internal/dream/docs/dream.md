@@ -53,7 +53,10 @@ asked for (curate.link, curate.hubs and verify read only this). The answer must 
 
 Applied only when: `action` is `write`; the path is a clean relative `.md` path under `notes/ hubs/ journal/ memory/
 work/` or is `hot.md` / `index.md`; no dot-folder; no symlinked file; the real directory is inside the brain root and
-not under saahil-docs or `~/.claude`; content ≤ 64 KB; fewer than 50 edits applied this run. Anything else is listed in
+not under saahil-docs or `~/.claude`; content ≤ 64 KB; the step's share of the 50-edit cap is not full (learn and file
+get what is left; curate.link, curate.hubs, curate.merge, curate.cards and verify each get an equal share of what is
+left with the curation steps after them, so the first cannot starve the rest; an edit over the share is `held`).
+Anything else is listed in
 the report's `rejected`; a `delete` is never applied and is counted in `deletions_rejected`. Identical content is a
 no-op, not an edit. Every overwritten file is first copied to `.archive/dream/<run-id>/before/`.
 

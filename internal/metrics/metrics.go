@@ -37,6 +37,7 @@ type Dreams struct {
 	CostUSD     float64  `json:"cost_usd"`
 	FailedSteps []string `json:"failed_steps,omitempty"` // "<run> <step>: <reason>"
 	Refused     int      `json:"refused"`                // units the applier refused inside ok steps
+	Held        int      `json:"held"`                   // edits the run's edit cap held for a later dream
 }
 
 type Spend struct {
@@ -99,6 +100,9 @@ func (s *Snapshot) readDreams(root string, since time.Time) error {
 				Name, Status, Reason string
 				Refused              int
 			} `json:"steps"`
+			Rejected []struct {
+				Held bool `json:"held"`
+			} `json:"rejected"`
 		}
 		if json.Unmarshal(raw, &run) != nil || run.Started.Before(since) {
 			continue
@@ -110,6 +114,11 @@ func (s *Snapshot) readDreams(root string, since time.Time) error {
 		s.Dreams.Edits += run.Edits
 		s.Dreams.Deletions += run.Deletions
 		s.Dreams.CostUSD += run.CostUSD
+		for _, r := range run.Rejected {
+			if r.Held {
+				s.Dreams.Held++
+			}
+		}
 		for _, st := range run.Steps {
 			s.Dreams.Refused += st.Refused
 			if st.Status == "failed" {
@@ -330,6 +339,7 @@ func Table(cur, prev Snapshot, hasPrev bool) string {
 	row("dream deletions", float64(cur.Dreams.Deletions), float64(prev.Dreams.Deletions), "%.0f")
 	row("dream failed steps", float64(len(cur.Dreams.FailedSteps)), float64(len(prev.Dreams.FailedSteps)), "%.0f")
 	row("dream units refused", float64(cur.Dreams.Refused), float64(prev.Dreams.Refused), "%.0f")
+	row("dream edits held by the cap", float64(cur.Dreams.Held), float64(prev.Dreams.Held), "%.0f")
 	total := func(m map[string]Spend) (calls int, cost float64) {
 		for _, sp := range m {
 			calls, cost = calls+sp.Calls, cost+sp.CostUSD
