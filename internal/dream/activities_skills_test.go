@@ -17,7 +17,8 @@ import (
 
 // TestSkillStepFilesThroughDeltas catches a dream whose skill answers (deltas) never reach notes/ through the
 // workflow's own ApplyEdits (backups, caps, revert), whose later steps cannot see the hubs a note may join, or whose
-// refused delete goes uncounted — with SkillStep wired in under the LLMStep activity name, as brain-worker does.
+// refused delete goes uncounted, or whose other refused ops reach no step record (they showed only in the reason
+// text, so "dream units refused" read 0) — with SkillStep wired in under the LLMStep activity name, as brain-worker does.
 func TestSkillStepFilesThroughDeltas(t *testing.T) {
 	brain, skills := t.TempDir(), t.TempDir()
 	write(t, filepath.Join(brain, "memory/feedback-rebase.md"), "rebase before push\n")
@@ -36,6 +37,8 @@ func TestSkillStepFilesThroughDeltas(t *testing.T) {
  {"op":"add_note","note":{"id":"lesson-rebase-before-push","type":"lesson","status":"current","summary":"rebase before push",
   "scope":"global","hubs":["git"],"evidence":["memory/feedback-rebase.md"],"sources":["memory/feedback-rebase.md"],
   "body":"When pushing → rebase first, because CI ran on a stale base."}},
+ {"op":"add_note","note":{"id":"lesson-rebase-twice","type":"lesson","status":"current","summary":"rebase twice",
+  "scope":"global","hubs":["git"],"evidence":["memory/feedback-rebase.md"],"body":"` + strings.Repeat("x", 301) + `"}},
  {"op":"delete","id":"lesson-rebase-before-push"}]}`)}
 	}}
 	ledger, err := llm.OpenLedger(filepath.Join(brain, ".index", "brain.db"), filepath.Join(brain, ".data", "llm"))
@@ -68,6 +71,11 @@ func TestSkillStepFilesThroughDeltas(t *testing.T) {
 	if rep.DeletionsRejected != 1 || rep.Edits != 1 || rep.EditedPaths[0] != "notes/lesson-rebase-before-push.md" {
 		t.Fatalf("report: edits %d %v, deletions rejected %d, steps %+v", rep.Edits, rep.EditedPaths,
 			rep.DeletionsRejected, rep.Steps)
+	}
+	for _, st := range rep.Steps {
+		if st.Name == "file" && st.Refused != 1 {
+			t.Errorf("file step refused %d ops, want 1 (the lesson over its cap): %+v", st.Refused, st)
+		}
 	}
 	b, err := os.ReadFile(filepath.Join(brain, "notes/lesson-rebase-before-push.md"))
 	if err != nil || !strings.Contains(string(b), "hubs: [git]") {

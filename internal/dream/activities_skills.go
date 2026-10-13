@@ -86,6 +86,7 @@ func (a *Activities) SkillStep(ctx context.Context, in LLMStepInput) (LLMStepRes
 	if len(reasons) > 0 {
 		out.Reason += "; first rejection: " + reasons[0]
 	}
+	out.Refused = len(reasons)
 	return out, nil
 }
 

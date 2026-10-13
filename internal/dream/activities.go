@@ -580,6 +580,7 @@ type LLMStepResult struct {
 	Cached  bool
 	StopLLM bool
 	Edits   []Edit
+	Refused int // ops the applier refused, other than deletes (those come back as delete edits)
 }
 
 const (

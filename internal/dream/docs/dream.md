@@ -60,6 +60,9 @@ Anything else is listed in
 the report's `rejected`; a `delete` is never applied and is counted in `deletions_rejected`. Identical content is a
 no-op, not an edit. Every overwritten file is first copied to `.archive/dream/<run-id>/before/`.
 
+A delta skill's answer is applied in dry run first. An op the applier refuses there (a cap, an id that does not
+resolve) becomes no edit: the step record counts it in `refused`, and its reason names the first one.
+
 ## curate.merge — merge, do not copy
 
 Filing makes about one note per memory. Thus one rule can exist as several global notes, and an old rule can

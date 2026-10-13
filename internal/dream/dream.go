@@ -231,7 +231,7 @@ func (r *run) llm(s llmStep, material []Material) {
 		r.consumed[s.area] = true
 	}
 	rec := StepRecord{Name: s.name, Status: out.Status, Reason: out.Reason, CostUSD: out.CostUSD,
-		Called: out.Called, Cached: out.Cached}
+		Called: out.Called, Cached: out.Cached, Refused: out.Refused}
 	if len(out.Edits) > 0 {
 		r.proposed = append(r.proposed, out.Edits...)
 		rec.Edits = r.apply(s.name, out.Edits)

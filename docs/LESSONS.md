@@ -176,6 +176,14 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   **Fix:** learn and file keep first claim (they use up their input); the five curation steps share what is left
   equally. A held edit is marked `held`, and `brain metrics` shows "dream edits held by the cap". **Rule:** a shared
   budget spent in a fixed order needs shares, or the last steps never run.
+- **Later (2026-10-13): verify paid for fixes that could not land.** The applier refused 109 of the 254 ops that
+  verify proposed in its first 32 runs (43%), each for a cap: a summary over 160 chars, a lesson body over 300, a
+  note over 4 KB. The verify skill named none of them, and its rule "append the reason" can never fit a lesson. So
+  its status changes on lessons (retired, proposed) never landed, and it proposed the same ones again each run.
+  "dream units refused" read 0, because only curate.merge counted refusals. **Fix:** verify states the caps and sets
+  only the status of a lesson; every skill step counts its refused ops in `refused`; a test checks that each skill
+  that writes note text states the three caps. **Rule:** a prompt that writes into a checked format states the
+  checks, and a test keeps the two the same.
 
 ## 12. Evals that leak or misdate their targets
 

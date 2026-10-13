@@ -38,11 +38,17 @@ One verdict per proposed note of the types above; other notes need none.
    is a description instead of the fact. Emit `update_note` with the corrected fields (and `replace_body` when the
    body is wrong). Never weaken a correct claim; never add a fact the evidence does not hold.
 3. **reject** — the evidence does not support the claim, contradicts it, or cannot be read. Emit `update_note` with
-   `set: {"status": "retired"}` and append the reason. Never `delete`.
+   `set: {"status": "retired"}` and append the reason (a lesson: rule 6). Never `delete`.
 4. A lesson must generalise what happened ("When X → do Y, because Z") without contradicting its evidence; a lesson
    drawn from one success with no failure or correction behind it is `fix` → `status: "proposed"`.
-5. Judge only against the given files, not against what you believe. Quote nothing longer than a line in reasons.
-6. Answer with the JSON only.
+5. **Caps.** When the edited note breaks a cap, the applier refuses the whole op and none of the fix lands:
+   `summary` ≤ 160 chars HARD LIMIT (count them); a lesson body ≤ 300 chars, one "When X → do Y, because Z."; the
+   whole note ≤ 4 KB, frontmatter included. Compress to fit: keep every fact, drop narration; the proof goes in
+   `evidence`, not in the body.
+6. A lesson body has no room for an appended line: to retire a lesson or set it to `proposed`, `set` the status
+   only, with no `append_body`. Your verdict's reason is the record of why.
+7. Judge only against the given files, not against what you believe. Quote nothing longer than a line in reasons.
+8. Answer with the JSON only.
 
 ## Examples
 

@@ -2,11 +2,13 @@ package skills
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"regexp"
 	"strings"
 	"testing"
 
+	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/delta"
 	"saahil.local/brain/templates"
 )
@@ -103,5 +105,30 @@ func TestSkillExamplesAndSeedHubsPassLint(t *testing.T) {
 	}
 	if b, _ := fs.ReadFile(templates.FS, "BRAIN.md"); strings.Count(string(b), "\n") > 80 {
 		t.Errorf("BRAIN.md is over 80 lines")
+	}
+}
+
+// noteWriters are the skills whose answers write a note's summary or body (hubs edits hub pages, link only aliases).
+var noteWriters = []string{"file", "distil", "verify", "wrap"}
+
+// TestNoteWritingSkillsStateTheCaps catches a skill that writes note text without stating the caps the applier
+// refuses it for: verify never named them, and the applier refused 43% of its ops (summaries over 160 chars, lesson
+// bodies over 300) while the step stayed ok.
+func TestNoteWritingSkillsStateTheCaps(t *testing.T) {
+	caps := []string{
+		fmt.Sprintf("≤ %d char", config.SummaryMaxChars),
+		fmt.Sprintf("≤ %d char", config.LessonMaxChars),
+		fmt.Sprintf("≤ %d KB", config.NoteMaxBytes/1024),
+	}
+	for _, name := range noteWriters {
+		b, err := fs.ReadFile(FS, name+".md")
+		if err != nil {
+			t.Fatalf("skill %s missing: %v", name, err)
+		}
+		for _, c := range caps {
+			if !strings.Contains(string(b), c) {
+				t.Errorf("%s: does not state the cap %q", name, c)
+			}
+		}
 	}
 }
