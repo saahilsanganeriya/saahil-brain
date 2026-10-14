@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -29,7 +30,8 @@ type Rejection struct {
 	Path   string `json:"path,omitempty"`
 	Action string `json:"action,omitempty"`
 	Reason string `json:"reason"`
-	Held   bool   `json:"held,omitempty"` // the run's edit cap held it; it waits for a later dream
+	Held   bool   `json:"held,omitempty"` // the run's edit cap held it
+	Lost   bool   `json:"lost,omitempty"` // held, and its step judges only this run's proposals: it never returns
 }
 
 type ApplyInput struct {
@@ -72,8 +74,16 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Reason: reason})
 		}
 		hold := func() {
+			limit := fmt.Sprintf("run edit cap %d reached", MaxEdits)
+			if slices.Contains(curationSteps, in.Step) {
+				limit = fmt.Sprintf("%s's share of the edit cap (%d edits) reached", in.Step, in.Remaining)
+			}
+			fate, lost := "waits for the next dream", !rebuildsEachRun[in.Step]
+			if lost {
+				fate = "lost: " + in.Step + " judges only this run's proposals"
+			}
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Held: true,
-				Reason: fmt.Sprintf("run edit cap %d reached; waits for the next dream", MaxEdits)})
+				Lost: lost, Reason: limit + "; " + fate})
 		}
 		if e.Action != "write" {
 			reject("refused " + e.Action + ": the dream never deletes; only writes are applied")

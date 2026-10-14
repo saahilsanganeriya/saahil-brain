@@ -239,9 +239,12 @@ func (r *run) llm(s llmStep, material []Material) {
 	r.record(rec, began)
 }
 
-// curationSteps rebuild their edits from the brain every run, so an edit the cap holds back returns next run; learn
-// and file consume their input (a held edit is lost), so they keep first claim on the cap.
+// curationSteps share what learn and file leave of the cap; learn and file consume their input, so they keep first
+// claim. Of the curation steps only merge and cards rebuild their edits from the whole brain each run, so only their
+// held edits return; link, hubs and verify judge this run's proposals, so an edit the cap holds there is lost.
 var curationSteps = []string{linkStep.name, hubsStep.name, mergeStepName, cardsStepName, verifyStep.name}
+
+var rebuildsEachRun = map[string]bool{mergeStepName: true, cardsStepName: true}
 
 // editBudget is how many edits a step may still apply this run: a curation step gets an equal share of what is left
 // with the curation steps after it, so the first one cannot starve the rest; a share it does not use carries on.

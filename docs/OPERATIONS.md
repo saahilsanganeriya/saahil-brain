@@ -106,7 +106,7 @@ brain metrics --write         # also save a snapshot in ~/brain/.brain/metrics/<
 brain peer step metrics --wait 5m      # the laptop's numbers, from the devbox
 ```
 
-It reports dreams (runs, failed steps, units refused inside ok steps, edits, edits held by the cap, deletions, spend), model spend by workflow, the prompt hook (prompts,
+It reports dreams (runs, failed steps, units refused inside ok steps, edits, edits held by the cap and how many of them are lost, deletions, spend), model spend by workflow, the prompt hook (prompts,
 p95, abstain rate, and the p95 of each part of the hook: open, names, read, digest, pointers), use (sessions pulling, pointers shown / opened / ignored, brain tool calls by MCP and by CLI) and
 the newest eval numbers.
 

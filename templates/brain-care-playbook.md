@@ -6,7 +6,7 @@ A run that finds a better method changes this file in a commit, like any other c
 ## 1. Observe
 
 - `brain metrics --write` on the devbox and `brain peer step metrics --wait 5m` for the laptop: the last 24 h of
-  dreams (runs, failed steps, units refused inside ok steps, edits, edits held by the cap, deletions, spend), model spend by workflow, the
+  dreams (runs, failed steps, units refused inside ok steps, edits, edits held by the cap and how many of them are lost, deletions, spend), model spend by workflow, the
   prompt hook (prompts, p95, abstain rate), use (sessions pulling from the brain, pointers shown, opened, ignored,
   brain tool calls through MCP and the CLI) and the newest eval numbers, each with its change since the previous
   day.

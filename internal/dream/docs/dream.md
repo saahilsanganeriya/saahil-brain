@@ -55,7 +55,9 @@ Applied only when: `action` is `write`; the path is a clean relative `.md` path 
 work/` or is `hot.md` / `index.md`; no dot-folder; no symlinked file; the real directory is inside the brain root and
 not under saahil-docs or `~/.claude`; content ≤ 64 KB; the step's share of the 50-edit cap is not full (learn and file
 get what is left; curate.link, curate.hubs, curate.merge, curate.cards and verify each get an equal share of what is
-left with the curation steps after them, so the first cannot starve the rest; an edit over the share is `held`).
+left with the curation steps after them, so the first cannot starve the rest; an edit over the share is `held`). A
+held edit of curate.merge or curate.cards comes back next run, because these steps rebuild from the whole brain. A held
+edit of any other step is also `lost`, because that step judges only this run's material and proposals.
 Anything else is listed in
 the report's `rejected`; a `delete` is never applied and is counted in `deletions_rejected`. Identical content is a
 no-op, not an edit. Every overwritten file is first copied to `.archive/dream/<run-id>/before/`.

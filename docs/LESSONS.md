@@ -184,6 +184,12 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   only the status of a lesson; every skill step counts its refused ops in `refused`; a test checks that each skill
   that writes note text states the three caps. **Rule:** a prompt that writes into a checked format states the
   checks, and a test keeps the two the same.
+- **Later (2026-10-14): held edits that never came back.** Each dream of the day held curate.link edits (2 and 4)
+  with "run edit cap 50 reached; waits for the next dream", but each run ended 13 to 14 edits under the cap. The
+  edits were over curate.link's share, not the cap. They also never came back: link, hubs and verify judge only the
+  proposals of their own run. Only curate.merge and curate.cards rebuild from the whole brain. **Fix:** a held edit
+  names the share that held it and says whether it waits or is `lost`; `brain metrics` shows "dream edits lost to the
+  cap". **Rule:** a record of a deferral says whether the deferred work can return.
 
 ## 12. Evals that leak or misdate their targets
 

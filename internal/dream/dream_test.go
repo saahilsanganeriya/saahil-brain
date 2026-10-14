@@ -254,3 +254,30 @@ func TestEditOverTheCapIsMarkedHeld(t *testing.T) {
 		t.Fatalf("applied=%+v rejected=%+v, want the second edit held by the cap", res.Applied, res.Rejected)
 	}
 }
+
+// Catches a held edit's record claiming it returns: on 2026-10-14 both dreams logged curate.link edits as "run edit
+// cap 50 reached; waits for the next dream" while each run left 13-14 edits unused, and curate.link judges only its own
+// run's proposals, so those edits never came back. curate.merge rebuilds from the whole brain, so its held edits do.
+func TestHeldEditSaysWhetherItReturns(t *testing.T) {
+	acts, _ := newBrain(t, 0)
+	for _, c := range []struct {
+		step string
+		lost bool
+		fate string
+	}{{"curate.link", true, "lost"}, {"verify", true, "lost"}, {"curate.merge", false, "waits for the next dream"}} {
+		edits := []Edit{{Path: "notes/finding-a-" + c.step + ".md", Action: "write", Content: "a"},
+			{Path: "notes/finding-b-" + c.step + ".md", Action: "write", Content: "b"}}
+		res, err := acts.ApplyEdits(t.Context(), ApplyInput{RunID: "r", Step: c.step, Edits: edits, Remaining: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Rejected) != 1 {
+			t.Fatalf("%s: rejected=%+v, want one held edit", c.step, res.Rejected)
+		}
+		rej := res.Rejected[0]
+		if rej.Lost != c.lost || !strings.Contains(rej.Reason, c.fate) || !strings.Contains(rej.Reason, "share") {
+			t.Errorf("%s: held edit recorded lost=%v %q, want lost=%v, its share and %q", c.step, rej.Lost, rej.Reason,
+				c.lost, c.fate)
+		}
+	}
+}
