@@ -66,8 +66,8 @@ For the laptop from the devbox: `brain peer step doctor --wait 10m`.
 ```
 $ brain dream status
 last dreams:
-  2026-10-09T080000Z-…  completed 50 edits  28 calls (2 cached)  $5.97  deletions 0
-  2026-10-09T070000Z-…  completed 40 edits  17 calls (2 cached)  $3.78  deletions 0
+  2026-10-09T080000Z-…  completed 55 edits on 31 files  28 calls (2 cached)  $5.97  deletions 0
+  2026-10-09T070000Z-…  completed 40 edits on 22 files  17 calls (2 cached)  $3.78  deletions 0
 lock: …
 llm cost today: $20.00 of $100.00
 schedule brain-dream-hourly: next 2026-10-09T10:00:00Z, 25 runs so far, paused=false
@@ -84,7 +84,8 @@ schedule brain-dream-hourly: next 2026-10-09T10:00:00Z, 25 runs so far, paused=f
 | services | `systemctl --user status brain-temporal brain-worker` |
 | undo a dream | `git -C ~/brain revert <commit>` on the devbox, or copy files back from `.archive/dream/<run-id>/before/` |
 
-A dream never deletes. It writes at most 50 edits and spends at most $8. A step that fails is recorded and the rest
+A dream never deletes. It changes at most 50 files (a file it writes twice in one run counts once) and spends at most
+$8. A step that fails is recorded and the rest
 go on; a lint failure reverts every edit of that run.
 
 ## Temporal UI

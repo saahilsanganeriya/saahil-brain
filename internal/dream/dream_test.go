@@ -2,8 +2,10 @@ package dream
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -237,6 +239,35 @@ func TestCurationStepsShareTheEditCap(t *testing.T) {
 	}
 	if applied > MaxEdits {
 		t.Errorf("%d edits applied, cap %d", applied, MaxEdits)
+	}
+}
+
+// Catches the run's edit cap counting a rewrite as a new edit: on 2026-10-14T23 and 2026-10-15T11 curate.link lost 15
+// edits to its share, each a link on a note learn or file had written earlier in the same run, while those runs
+// changed only 31 and 28 files of the 50 the cap allows.
+func TestTheCapCountsFilesTheRunChanges(t *testing.T) {
+	acts, _ := newBrain(t, 0)
+	var applied []Applied
+	for i := range 45 {
+		applied = append(applied, Applied{Path: fmt.Sprintf("notes/finding-%02d.md", i%40), Created: true})
+	}
+	edits := []Edit{{Path: "notes/finding-00.md", Action: "write", Content: "linked"},
+		{Path: "notes/finding-01.md", Action: "write", Content: "linked"},
+		{Path: "notes/finding-new-1.md", Action: "write", Content: "n1"},
+		{Path: "notes/finding-new-2.md", Action: "write", Content: "n2"},
+		{Path: "notes/finding-new-3.md", Action: "write", Content: "n3"}}
+	res, err := acts.ApplyEdits(t.Context(), applyInput("r", "curate.link", edits, applied))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var landed []string
+	for _, ap := range res.Applied {
+		landed = append(landed, ap.Path)
+	}
+	// 40 files changed of 50: curate.link's share is ceil(10 / 5) = 2 new files, and the two rewrites cost nothing
+	want := []string{"notes/finding-00.md", "notes/finding-01.md", "notes/finding-new-1.md", "notes/finding-new-2.md"}
+	if !slices.Equal(landed, want) || len(res.Rejected) != 1 || res.Rejected[0].Path != "notes/finding-new-3.md" {
+		t.Errorf("landed %v, rejected %+v; want %v and finding-new-3 held", landed, res.Rejected, want)
 	}
 }
 

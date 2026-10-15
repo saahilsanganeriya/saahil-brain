@@ -246,7 +246,7 @@ var curationSteps = []string{linkStep.name, hubsStep.name, mergeStepName, cardsS
 
 var rebuildsEachRun = map[string]bool{mergeStepName: true, cardsStepName: true}
 
-// editBudget is how many edits a step may still apply this run: a curation step gets an equal share of what is left
+// editBudget is how many more files a step may change this run: a curation step gets an equal share of what is left
 // with the curation steps after it, so the first one cannot starve the rest; a share it does not use carries on.
 func editBudget(step string, applied int) int {
 	left := MaxEdits - applied
@@ -257,10 +257,27 @@ func editBudget(step string, applied int) int {
 	return left
 }
 
+// applyInput charges a step's share in files: a file the run already changed costs nothing to change again.
+func applyInput(runID, step string, edits []Edit, applied []Applied) ApplyInput {
+	changed := changedFiles(applied)
+	return ApplyInput{RunID: runID, Step: step, Edits: edits, Remaining: editBudget(step, len(changed)), Changed: changed}
+}
+
+func changedFiles(applied []Applied) []string {
+	var files []string
+	seen := map[string]bool{}
+	for _, ap := range applied {
+		if !seen[ap.Path] {
+			seen[ap.Path] = true
+			files = append(files, ap.Path)
+		}
+	}
+	return files
+}
+
 func (r *run) apply(step string, edits []Edit) int {
 	var res ApplyResult
-	err := workflow.ExecuteActivity(r.det, a.ApplyEdits, ApplyInput{RunID: r.rep.RunID, Step: step, Edits: edits,
-		Remaining: editBudget(step, len(r.applied))}).Get(r.ctx, &res)
+	err := workflow.ExecuteActivity(r.det, a.ApplyEdits, applyInput(r.rep.RunID, step, edits, r.applied)).Get(r.ctx, &res)
 	if err != nil {
 		r.rep.Rejected = append(r.rep.Rejected, Rejection{Step: step, Reason: "apply failed: " + err.Error()})
 		return 0
@@ -296,10 +313,7 @@ func (r *run) check() {
 		r.record(StepRecord{Name: "check", Status: "skipped", Reason: "no edits"}, workflow.Now(r.ctx))
 		return
 	}
-	paths := make([]string, len(r.applied))
-	for i, ap := range r.applied {
-		paths[i] = ap.Path
-	}
+	paths := changedFiles(r.applied)
 	began := workflow.Now(r.ctx)
 	var out StepOutcome
 	err := workflow.ExecuteActivity(r.det, a.BrainCommand, BrainCommandInput{Command: []string{"lint"}, Args: paths}).

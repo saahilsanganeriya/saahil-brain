@@ -38,7 +38,8 @@ type ApplyInput struct {
 	RunID     string
 	Step      string
 	Edits     []Edit
-	Remaining int
+	Remaining int      // new files this step may still change
+	Changed   []string // files the run already changed: changing one again costs nothing
 }
 
 type ApplyResult struct {
@@ -69,6 +70,11 @@ const maxEditBytes = 64 * 1024
 
 func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, error) {
 	var res ApplyResult
+	changed := make(map[string]bool, len(in.Changed))
+	for _, p := range in.Changed {
+		changed[p] = true
+	}
+	newFiles := 0
 	for _, e := range in.Edits {
 		reject := func(reason string) {
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Reason: reason})
@@ -76,7 +82,7 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 		hold := func() {
 			limit := fmt.Sprintf("run edit cap %d reached", MaxEdits)
 			if slices.Contains(curationSteps, in.Step) {
-				limit = fmt.Sprintf("%s's share of the edit cap (%d edits) reached", in.Step, in.Remaining)
+				limit = fmt.Sprintf("%s's share of the edit cap (%d new files) reached", in.Step, in.Remaining)
 			}
 			fate, lost := "waits for the next dream", !rebuildsEachRun[in.Step]
 			if lost {
@@ -107,7 +113,7 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 			res.Noop++
 			continue
 		}
-		if len(res.Applied) >= in.Remaining {
+		if !changed[e.Path] && newFiles >= in.Remaining {
 			hold()
 			continue
 		}
@@ -123,6 +129,10 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 			return res, err
 		}
 		res.Applied = append(res.Applied, Applied{Path: e.Path, Created: !exists})
+		if !changed[e.Path] {
+			changed[e.Path] = true
+			newFiles++
+		}
 	}
 	return res, nil
 }

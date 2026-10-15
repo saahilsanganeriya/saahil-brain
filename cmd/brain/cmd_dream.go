@@ -79,8 +79,13 @@ func cmdDreamStatus([]string) int {
 		}
 		var rep dream.Report
 		if b, err := os.ReadFile(p); err == nil && json.Unmarshal(b, &rep) == nil {
-			fmt.Printf("  %s  %-9s %2d edits  %d calls (%d cached)  $%.2f  deletions %d\n", rep.RunID, rep.Status,
-				rep.Edits, rep.LLMCalls, rep.LLMCached, rep.CostUSD, rep.Deletions)
+			// the edit cap counts files: a file changed twice in one run is one of its 50
+			files := map[string]bool{}
+			for _, p := range rep.EditedPaths {
+				files[p] = true
+			}
+			fmt.Printf("  %s  %-9s %2d edits on %2d files  %d calls (%d cached)  $%.2f  deletions %d\n", rep.RunID,
+				rep.Status, rep.Edits, len(files), rep.LLMCalls, rep.LLMCached, rep.CostUSD, rep.Deletions)
 		}
 	}
 	var skip dream.Report

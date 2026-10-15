@@ -190,6 +190,12 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   proposals of their own run. Only curate.merge and curate.cards rebuild from the whole brain. **Fix:** a held edit
   names the share that held it and says whether it waits or is `lost`; `brain metrics` shows "dream edits lost to the
   cap". **Rule:** a record of a deferral says whether the deferred work can return.
+- **Later (2026-10-15): the cap counted a rewrite as a new edit.** Both dreams of the day lost curate.link edits to
+  its share (5 and 10), and each lost edit was a link on a note that learn or file had written earlier in the same
+  run. The runs used 50 and 49 edits but changed only 31 and 28 files: verify and curate.link rewrite the run's own
+  new notes, and each rewrite used the share again. **Fix:** the cap counts files. A write to a file the run already
+  changed costs nothing; a step's share is in new files; `brain dream status` shows "N edits on M files". **Rule:** a
+  cap counts the unit it protects.
 
 ## 12. Evals that leak or misdate their targets
 

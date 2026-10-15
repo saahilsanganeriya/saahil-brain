@@ -53,7 +53,8 @@ asked for (curate.link, curate.hubs and verify read only this). The answer must 
 
 Applied only when: `action` is `write`; the path is a clean relative `.md` path under `notes/ hubs/ journal/ memory/
 work/` or is `hot.md` / `index.md`; no dot-folder; no symlinked file; the real directory is inside the brain root and
-not under saahil-docs or `~/.claude`; content ≤ 64 KB; the step's share of the 50-edit cap is not full (learn and file
+not under saahil-docs or `~/.claude`; content ≤ 64 KB; the step's share of the 50-edit cap is not full, or the run already changed the file (the cap counts files, so a second
+write to one is free; learn and file
 get what is left; curate.link, curate.hubs, curate.merge, curate.cards and verify each get an equal share of what is
 left with the curation steps after them, so the first cannot starve the rest; an edit over the share is `held`). A
 held edit of curate.merge or curate.cards comes back next run, because these steps rebuild from the whole brain. A held
@@ -77,7 +78,7 @@ contradict a newer one. `curate.merge` finds these notes and changes them with c
 | settle (code) | Keeps only ids of current global notes, each in one group. Keeps the newest note of a group. Sends a `supersede` or `narrow` between equal or missing dates to the owner. Replaces a stale note only with a note of the same or a later date. A note that the plan supersedes takes no further part. At most 20 groups per run. |
 | bodies (`MergeStep`, Opus) | Stage `bodies`, one call for each group, writes the body of the kept note. The body holds every distinct fact of the group, within the cap of the type. A failed call costs only its group, and the ledger keeps each answer on the notes of its group. |
 | units (code) | Group: `update_note` (`replace_body`) and one `supersede` for each other note. Narrow: append "Narrowed <date> by <newer>: <why>" and a `related` link; not again when the line is there. Conflict `supersede` and stale: `supersede`. Owner: a question, no edit. The applier checks the units in dry run. When it refuses one op of a unit, the step drops the full unit. |
-| apply | `ApplyEdits`, as for every step: backups, the 50-edit cap, revert when lint fails. |
+| apply | `ApplyEdits`, as for every step: backups, the 50-edit cap (it counts files), revert when lint fails. |
 | done (`MergeDone`) | Appends the new owner pairs to `.brain/owner-questions.jsonl` (`ids`, `as_of`, `question`, `created`; one line for each pair, never two). Writes the list as the merge left it, so the writes of the merge do not start the next merge. |
 
 The coordinator relays the owner questions. It sets `answered` on a line when it applies the answer of the owner.
@@ -105,7 +106,7 @@ merged PRs.
 |---|---|
 | plan (`CardsPlan`) | Live brain only (in shadow the step is skipped). For each box in `work/`: the newest regular file outside bulk folders (`artifacts/`, `cache*`, `venv/`, dot-folders; `CARD.md` is not work) and the mtime of `CARD.md`. A box is stale when that file is ≥ 1 h newer than its CARD, or when it has files and no CARD. A `done` or `paused` CARD is no exception: new work after it (a resumed campaign) makes it stale, and with no new work it stays. Stalest first: no CARD, then the longest lag. At most 4 boxes for each dream; the others wait. Nothing stale: skipped, `no stale cards`. |
 | refresh (`BackfillCard`, Haiku) | The `card` skill on the box inventory, as in the backfill, one box at a time. The call is keyed to the dream (`curate.cards/<box>`) and paid under the $8 cap of the run, with the spend of the run before it. A refused answer is asked again once. |
-| apply | The CARD comes back as an edit for `ApplyEdits`: backup, lint, revert, the 50-edit cap. CARDs do not go to `verify`, which checks notes. An answer equal to the CARD on disk only touches its mtime, so the box is not picked again until its work changes. |
+| apply | The CARD comes back as an edit for `ApplyEdits`: backup, lint, revert, the 50-edit cap (it counts files). CARDs do not go to `verify`, which checks notes. An answer equal to the CARD on disk only touches its mtime, so the box is not picked again until its work changes. |
 | record | `refreshed`, `unchanged (touched)`, `skipped` (with the reason, for example the cost cap), `failed` and `wait for the next dream`, with box names only (≤ 10 for each list). |
 
 When the cap stops a call, the step skips the boxes that are left, with the reason, and the later LLM steps of the
