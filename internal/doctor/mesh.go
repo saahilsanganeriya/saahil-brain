@@ -125,19 +125,23 @@ func checkSync(ctx context.Context) (Status, string) {
 		Ended    time.Time `json:"ended"`
 		ExitCode int       `json:"exitCode"`
 		Summary  string    `json:"summary"`
+		Agent    string    `json:"agent"` // the laptop's bridge adds it
 	}
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		return Fail, err.Error()
 	}
 	age := time.Since(rec.Ended).Round(time.Minute)
 	detail := fmt.Sprintf("last sync %s ago, exit %d: %s", age, rec.ExitCode, rec.Summary)
-	if rec.ExitCode >= 2 {
-		return Fail, detail
+	if rec.ExitCode < 2 && age <= 70*time.Minute {
+		return OK, detail
 	}
-	if age > 70*time.Minute {
-		return Fail, detail
+	if rec.Agent == "" && config.ThisMachine() == config.Laptop {
+		rec.Agent = rpc.SyncAgentState(ctx)
 	}
-	return OK, detail
+	if rec.Agent != "" {
+		detail += "; " + rec.Agent
+	}
+	return Fail, detail
 }
 
 // checkConflicts counts sync conflict copies left in the brain (Unison's and the cut-over reconcile's).

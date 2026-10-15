@@ -106,7 +106,7 @@ func (h *Handler) Handle(ctx context.Context, req Request) Response {
 		if err != nil {
 			return failf("no sync has run on the %s yet", config.ThisMachine())
 		}
-		return Response{OK: true, Result: raw}
+		return Response{OK: true, Result: withSyncAgent(ctx, raw)}
 	case "job":
 		job, err := h.Steps.Job(req.ID)
 		if err != nil {

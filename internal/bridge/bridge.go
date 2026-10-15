@@ -226,7 +226,7 @@ func copyDevboxIdentity(fetch func(src, dst string) error) (bool, error) {
 	return true, nil
 }
 
-const SyncLabel = "com.saahil.brain-sync"
+const SyncLabel = rpc.SyncAgentLabel
 
 // EnsureUnison installs unison with Homebrew when the laptop lacks it.
 func EnsureUnison() error {
@@ -248,7 +248,7 @@ func EnableSync() error {
 		return fmt.Errorf("the sync agent runs on the laptop")
 	}
 	spec := agentSpec{Label: SyncLabel, Args: []string{filepath.Join(config.BinDir(), "brain"), "sync"}, Throttle: 60,
-		Log: filepath.Join(config.Home(), "Library", "Logs", "brain-sync.log"), Home: config.Home()}
+		Log: rpc.SyncAgentLog(), Home: config.Home()}
 	path := filepath.Join(config.Home(), "Library", "LaunchAgents", SyncLabel+".plist")
 	var buf strings.Builder
 	if err := syncPlist.Execute(&buf, spec); err != nil {
