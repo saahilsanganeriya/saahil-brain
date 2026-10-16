@@ -86,7 +86,9 @@ func (c Claude) Run(ctx context.Context, call Call) (Result, error) {
 	if call.JSONSchema != "" {
 		args = append(args, "--json-schema", call.JSONSchema)
 	}
-	// An empty working directory: the call must never see or touch the brain except through its input.
+	// No built-in tools: --bare still reads the user's permission mode, and with bypassPermissions a call ran Bash
+	// and read any file. An empty working directory: the call must never see or touch the brain except through its input.
+	args = append(args, "--tools", "")
 	dir, err := os.MkdirTemp("", "brain-llm-")
 	if err != nil {
 		return Result{}, err

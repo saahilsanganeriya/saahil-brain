@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -63,6 +65,36 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"ok","total
 	}
 	if _, err := (Claude{Bin: bin, Login: true}).Run(context.Background(), Call{Skill: "S", Input: "in", Model: "m", MaxBudgetUSD: 1}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestCallsHaveNoTools catches a call that keeps Claude Code's built-in tools: under a bypassPermissions default in
+// the user's settings (which --bare still reads) a dream call ran Bash and read the live brain, and reflect calls
+// over short session notes looped to 2.6M input tokens.
+func TestCallsHaveNoTools(t *testing.T) {
+	dir := t.TempDir()
+	bin, argsFile := filepath.Join(dir, "claude"), filepath.Join(dir, "args")
+	script := `#!/bin/sh
+cat >/dev/null
+printf '%s\n' "$@" > "` + argsFile + `"
+echo '{"type":"result","subtype":"success","is_error":false,"result":"ok","total_cost_usd":0.01,"usage":{}}'
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []Claude{{Bin: bin}, {Bin: bin, Login: true}} {
+		if _, err := c.Run(context.Background(), Call{Skill: "S", Input: "in", Model: "m", MaxBudgetUSD: 1, JSONSchema: "{}"}); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(argsFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+		i := slices.Index(args, "--tools")
+		if i < 0 || i+1 >= len(args) || args[i+1] != "" {
+			t.Errorf("login=%v: want --tools \"\" (no built-in tools), args %q", c.Login, args)
+		}
 	}
 }
 

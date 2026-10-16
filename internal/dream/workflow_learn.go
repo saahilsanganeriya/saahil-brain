@@ -18,6 +18,7 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/workflow"
+	"gopkg.in/yaml.v3"
 
 	"saahil.local/brain/internal/backfill"
 	"saahil.local/brain/internal/config"
@@ -315,7 +316,74 @@ func (a *Activities) sessionPayload(in LearnCallInput, step string) (map[string]
 	}
 	f := payloadFile{Path: in.Session, Truncated: len(b) > fileContentCap}
 	f.Content = string(b[:min(len(b), fileContentCap)])
-	return map[string]any{"step": step, "material": []payloadFile{f}, "signals": in.Signals}, nil
+	material := []payloadFile{f}
+	if step == "learn" {
+		material = append(material, a.producedDocs(b)...)
+	}
+	return map[string]any{"step": step, "material": material, "signals": in.Signals}, nil
+}
+
+// learnedFrom gives the notes that already cite a session, whatever their status: a live session is reflected again
+// each dream it grew, and with no tools reflect sees earlier answers only here.
+func (a *Activities) learnedFrom(session string) []Edit {
+	db, err := sql.Open("sqlite", "file:"+a.path(".index", "brain.db")+"?_pragma=busy_timeout(5000)&mode=ro")
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT DISTINCT n.path FROM edge e JOIN node n ON n.id = e.src
+		WHERE e.dst = ? AND e.rel IN ('evidence', 'sources') AND n.path LIKE 'notes/%' ORDER BY n.path`, session)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var notes []Edit
+	total := 0
+	for rows.Next() && total < producedDocCap {
+		var path string
+		if rows.Scan(&path) != nil {
+			continue
+		}
+		b, err := a.readBrainDoc(path)
+		if err != nil {
+			continue
+		}
+		total += len(b)
+		notes = append(notes, Edit{Path: path, Action: "write", Content: string(b)})
+	}
+	return notes
+}
+
+// producedDocCap bounds the documents a session wrote that reflect reads next to its note.
+const producedDocCap = 4 * fileContentCap
+
+// producedDocs reads the markdown and text files a session wrote inside the brain, in the order its note lists them:
+// a call has no tools, so the reports and PR bodies reflect learns from must be in its input.
+func (a *Activities) producedDocs(note []byte) []payloadFile {
+	rest, ok := bytes.CutPrefix(note, []byte("---\n"))
+	head, _, found := bytes.Cut(rest, []byte("\n---\n"))
+	var fm struct {
+		Produced []string `yaml:"produced"`
+	}
+	if !ok || !found || yaml.Unmarshal(head, &fm) != nil {
+		return nil
+	}
+	var docs []payloadFile
+	total := 0
+	for _, path := range fm.Produced {
+		if ext := filepath.Ext(path); ext != ".md" && ext != ".txt" {
+			continue
+		}
+		b, err := a.readBrainDoc(path)
+		if err != nil || total >= producedDocCap {
+			continue
+		}
+		f := payloadFile{Path: path, Truncated: len(b) > fileContentCap}
+		f.Content = string(b[:min(len(b), fileContentCap)])
+		total += len(f.Content)
+		docs = append(docs, f)
+	}
+	return docs
 }
 
 // LearnJudge asks Haiku how the session went and which shown pointers helped or misled. Its answer is delta counter
@@ -423,6 +491,9 @@ func (a *Activities) LearnReflect(ctx context.Context, in LearnCallInput) (Learn
 		return LearnCallResult{}, err
 	}
 	payload["hubs"], payload["outcome"] = hubs, in.Outcome
+	if learned := a.learnedFrom(in.Session); len(learned) > 0 {
+		payload["proposed"] = learned
+	}
 	if fi, err := os.Stat(a.path(in.Session)); err == nil {
 		payload["today"] = fi.ModTime().UTC().Format("2006-01-02")
 	}

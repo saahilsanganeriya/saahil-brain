@@ -248,14 +248,11 @@ func (a *Activities) addEvidence(p *skillPayload, proposed []delta.Note) {
 		}
 		for _, ref := range append(append([]string{}, n.Evidence...), n.Sources...) {
 			path, _, _ := strings.Cut(ref, "#")
-			if seen[path] || filepath.IsAbs(path) || strings.HasPrefix(filepath.Clean(path), "..") {
+			if seen[path] {
 				continue
 			}
 			seen[path] = true
-			b, err := os.ReadFile(filepath.Join(a.Cfg.BrainRoot, path))
-			if rest, ok := strings.CutPrefix(path, "work/"); err != nil && ok && len(a.Cfg.ShadowDocs) > 0 {
-				b, err = os.ReadFile(filepath.Join(a.Cfg.ShadowDocs[0], rest))
-			}
+			b, err := a.readBrainDoc(path)
 			if err != nil || total >= inputContentCap {
 				continue
 			}
@@ -265,6 +262,19 @@ func (a *Activities) addEvidence(p *skillPayload, proposed []delta.Note) {
 			p.Evidence = append(p.Evidence, f)
 		}
 	}
+}
+
+// readBrainDoc reads a brain-relative path, a work/ doc from the shadow's docs when the shadow brain lacks it; an
+// absolute path or one that climbs out of the brain is refused.
+func (a *Activities) readBrainDoc(path string) ([]byte, error) {
+	if filepath.IsAbs(path) || strings.HasPrefix(filepath.Clean(path), "..") {
+		return nil, fs.ErrPermission
+	}
+	b, err := os.ReadFile(filepath.Join(a.Cfg.BrainRoot, path))
+	if rest, ok := strings.CutPrefix(path, "work/"); err != nil && ok && len(a.Cfg.ShadowDocs) > 0 {
+		b, err = os.ReadFile(filepath.Join(a.Cfg.ShadowDocs[0], rest))
+	}
+	return b, err
 }
 
 func anyIn(list []string, set map[string]bool) bool {

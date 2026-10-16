@@ -1,9 +1,11 @@
 package dream
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 
 	"saahil.local/brain/internal/delta"
 	"saahil.local/brain/internal/llm"
+	"saahil.local/brain/internal/store"
 )
 
 const learnSession = "sessions/devbox/2026/10/2026-10-08-%s-sample.md"
@@ -135,5 +138,80 @@ func TestLearnSessionReplay(t *testing.T) {
 	replayer.RegisterWorkflow(LearnSessionWorkflow)
 	if err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, "testdata/learn-history.json"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestReflectReadsTheSessionsProducedDocs catches a reflect that sees only the session note: with no tools the call
+// cannot open the reports and PR bodies a session wrote, and live calls took most of their facts from those.
+func TestReflectReadsTheSessionsProducedDocs(t *testing.T) {
+	acts, fake := newBrain(t, 0.01)
+	brain := acts.Cfg.BrainRoot
+	session := "sessions/devbox/2026/10/2026-10-08-0000abcd-sample.md"
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere.md")
+	write(t, elsewhere, "OUTSIDE\n")
+	write(t, filepath.Join(brain, "..", "outside.md"), "OUTSIDE\n")
+	note := "---\ntype: session\ncorrections: 1\nproduced: [work/box/report.md, work/box/run.sh, " + elsewhere +
+		", ../outside.md, work/box/missing.md, work/box/big.md]\n---\nran tests\n"
+	write(t, filepath.Join(brain, session), note)
+	write(t, filepath.Join(brain, "work/box/report.md"), "FACT-IN-REPORT\n")
+	write(t, filepath.Join(brain, "work/box/run.sh"), "echo SCRIPT\n")
+	write(t, filepath.Join(brain, "work/box/big.md"), strings.Repeat("x", fileContentCap+10))
+	var input string
+	fake.Respond = func(c llm.Call) llm.Result {
+		input = c.Input
+		return llm.Result{JSON: json.RawMessage(`{"ops":[]}`)}
+	}
+	if _, err := acts.LearnReflect(context.Background(), LearnCallInput{Session: session}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct{ Material []payloadFile }
+	if err := json.Unmarshal([]byte(input), &payload); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range payload.Material {
+		got = append(got, f.Path+" "+strconv.FormatBool(f.Truncated)+" "+strconv.Itoa(len(f.Content)))
+	}
+	want := []string{session + " false " + strconv.Itoa(len(note)), "work/box/report.md false 15", "work/box/big.md true " + strconv.Itoa(fileContentCap)}
+	if !slices.Equal(got, want) {
+		t.Fatalf("material %q, want %q", got, want)
+	}
+}
+
+// TestReflectSeesWhatEarlierRunsLearnedFromTheSession catches a reflect that cannot see the notes earlier dreams took
+// from the same live session: with no tools it proposed most of them again under new ids, every dream.
+func TestReflectSeesWhatEarlierRunsLearnedFromTheSession(t *testing.T) {
+	acts, fake := newBrain(t, 0.01)
+	brain := acts.Cfg.BrainRoot
+	session := "sessions/devbox/2026/10/2026-10-08-0000abcd-sample.md"
+	write(t, filepath.Join(brain, session), "---\ntype: session\ncorrections: 1\n---\nran tests\n")
+	learned := "---\nid: lesson-learned\ntype: lesson\nstatus: retired\nsources: [" + session + "]\n---\nalready learned\n"
+	write(t, filepath.Join(brain, "notes/lesson-learned.md"), learned)
+	write(t, filepath.Join(brain, "notes/lesson-other.md"), "---\nid: lesson-other\n---\nfrom another session\n")
+	st, err := store.Open(filepath.Join(brain, ".index", "brain.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO node(id, kind, path, status) VALUES
+		('lesson-learned', 'doc', 'notes/lesson-learned.md', 'retired'), ('lesson-other', 'doc', 'notes/lesson-other.md', 'current');
+		INSERT INTO edge(src, dst, rel, source) VALUES ('lesson-learned', ?, 'sources', 'fm'),
+		('lesson-other', 'sessions/devbox/2026/10/2026-10-08-0000ffff-other.md', 'evidence', 'fm')`, session); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	var input string
+	fake.Respond = func(c llm.Call) llm.Result {
+		input = c.Input
+		return llm.Result{JSON: json.RawMessage(`{"ops":[]}`)}
+	}
+	if _, err := acts.LearnReflect(context.Background(), LearnCallInput{Session: session}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct{ Proposed []Edit }
+	if err := json.Unmarshal([]byte(input), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Proposed) != 1 || payload.Proposed[0].Path != "notes/lesson-learned.md" || payload.Proposed[0].Content != learned {
+		t.Fatalf("proposed %+v, want only notes/lesson-learned.md with its content", payload.Proposed)
 	}
 }

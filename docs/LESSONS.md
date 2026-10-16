@@ -196,6 +196,12 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   new notes, and each rewrite used the share again. **Fix:** the cap counts files. A write to a file the run already
   changed costs nothing; a step's share is in new files; `brain dream status` shows "N edits on M files". **Rule:** a
   cap counts the unit it protects.
+- **Later (2026-10-16): a dream call could use tools.** One dream skipped merge, cards, summarise and verify at the
+  $8 cap: two reflect calls cost $1.39 and $1.73 and read 1.9 M and 2.7 M input tokens for a 6 KB session note.
+  `--bare` still reads the user's permission mode, and it was `bypassPermissions`: a probe call ran Bash and read a
+  file in the live brain. The model opened the reports the session wrote, and the notes earlier runs had learned
+  from it. **Fix:** every call gets `--tools ""`. Reflect's input carries the session's produced documents and the
+  notes that already cite the session. **Rule:** what a model call may use goes in its input; a call has no tools.
 
 ## 12. Evals that leak or misdate their targets
 

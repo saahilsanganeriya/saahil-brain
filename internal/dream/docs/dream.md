@@ -35,7 +35,9 @@ rule only). Lock: `.brain/dream.lock` (pid, start, run id), stale after 3 h.
 
 The skill is `<repo>/skills/<name>.md` (`brain-worker --skills`); a missing file is a recorded skip. It is passed as
 `--append-system-prompt` to `claude --bare -p --model <m> --output-format json --max-budget-usd <x>
---no-session-persistence --json-schema <EditsSchema>`, in an empty working directory, with this JSON on stdin:
+--no-session-persistence --json-schema <EditsSchema> --tools ""`, in an empty working directory, with this JSON on
+stdin. The call has no tools: `--bare` still reads the user's permission mode, so a call with tools can run Bash and
+read or edit any file.
 
 ```json
 {"step": "file",
@@ -45,7 +47,10 @@ The skill is `<repo>/skills/<name>.md` (`brain-worker --skills`); a missing file
 ```
 
 `material` is the area's files (≤ 16 KB each, ≤ 400 KB in all); `proposed` is every edit earlier steps of this run
-asked for (curate.link, curate.hubs and verify read only this). The answer must match `EditsSchema` (`edits.go`):
+asked for (curate.link, curate.hubs and verify read only this). Learn's reflect is one call per session: its
+`material` is the session note, then the `.md` and `.txt` files in the brain that the note lists in `produced` (≤ 16 KB
+each, ≤ 64 KB in all); its `proposed` is the notes that already cite the session in `evidence` or `sources`, of any
+status (a live session is reflected again in each dream after it grows). The answer must match `EditsSchema` (`edits.go`):
 
 ```json
 {"edits": [{"path": "notes/finding-y.md", "action": "write", "content": "<whole file>", "why": "…"}], "notes": "…"}
