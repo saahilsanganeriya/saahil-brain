@@ -31,6 +31,9 @@ func (a *Activities) SkillStep(ctx context.Context, in LLMStepInput) (LLMStepRes
 	if err != nil {
 		return LLMStepResult{}, err
 	}
+	if in.Skill == "verify" {
+		return a.verifyInBatches(ctx, in, string(skill))
+	}
 	input, err := a.skillInput(in)
 	if err != nil {
 		return LLMStepResult{}, err
@@ -40,16 +43,124 @@ func (a *Activities) SkillStep(ctx context.Context, in LLMStepInput) (LLMStepRes
 	if err != nil || out.Status != "ok" {
 		return out, err
 	}
+	d, ok := parseDelta(res)
+	if !ok {
+		// unmark the key at no cost: a cached broken answer would fail every later dream on the same material
+		out.Status, out.Reason = "failed", "answer is not a delta"
+		return out, a.Ledger.Finish(key, llm.Result{}, "failed", time.Now())
+	}
+	return a.applyDelta(ctx, in, out, d, []string{key})
+}
+
+func parseDelta(res llm.Result) (delta.Delta, bool) {
 	raw := res.JSON
 	if len(raw) == 0 {
 		raw = json.RawMessage(res.Text)
 	}
 	var d delta.Delta
-	if err := json.Unmarshal(raw, &d); err != nil {
-		// unmark the key at no cost: a cached broken answer would fail every later dream on the same material
-		out.Status, out.Reason = "failed", "answer is not a delta"
-		return out, a.Ledger.Finish(key, llm.Result{}, "failed", time.Now())
+	return d, json.Unmarshal(raw, &d) == nil
+}
+
+// verifyInBatches judges the run's claims a batch at a time, each batch with only its notes' latest version and the
+// evidence they cite: one call over every claim of a busy dream overran its ceiling and lost all its verdicts. A
+// batch's ceiling is the step budget or what the run cap leaves, whichever is less, so later batches still fit.
+func (a *Activities) verifyInBatches(ctx context.Context, in LLMStepInput, skill string) (LLMStepResult, error) {
+	claims := latestClaims(in.Proposed)
+	if len(claims) == 0 {
+		return LLMStepResult{Status: "skipped", Reason: "no claims to verify"}, nil
 	}
+	var (
+		merged     delta.Delta
+		keys       []string
+		out        = LLMStepResult{Cached: true}
+		spent      = in.RunSpentUSD
+		unverified int
+		why        string
+	)
+	batches := (len(claims) + verifyBatchNotes - 1) / verifyBatchNotes
+	for b := 0; b < batches; b++ {
+		part := claims[b*len(claims)/batches : (b+1)*len(claims)/batches]
+		bin := in
+		bin.Proposed = part
+		input, err := a.skillInput(bin)
+		if err != nil {
+			return LLMStepResult{}, err
+		}
+		key := llm.Key(in.Workflow, in.Step, in.Model, skill, input)
+		bin.RunSpentUSD, bin.BudgetUSD = spent, min(in.BudgetUSD, RunCapUSD-spent)
+		if _, cached, err := a.Ledger.Done(key); err != nil {
+			return LLMStepResult{}, err
+		} else if !cached && bin.BudgetUSD < minVerifyBudgetUSD {
+			unverified += len(claims) - b*len(claims)/batches
+			why, out.StopLLM = fmt.Sprintf("run cap: $%.2f spent leaves $%.2f", spent, RunCapUSD-spent), true
+			break
+		}
+		res, got, err := a.callOnce(ctx, bin, key, skill, input)
+		if err != nil {
+			return LLMStepResult{}, err
+		}
+		out.CostUSD, spent = out.CostUSD+got.CostUSD, spent+got.CostUSD
+		out.Called, out.Cached = out.Called || got.Called, out.Cached && got.Cached
+		d, ok := parseDelta(res)
+		switch {
+		case got.Status != "ok":
+			unverified, why = unverified+len(part), got.Reason
+			if got.StopLLM {
+				unverified += len(claims) - (b+1)*len(claims)/batches
+				out.StopLLM = true
+			}
+		case !ok:
+			unverified, why = unverified+len(part), "answer is not a delta"
+			if err := a.Ledger.Finish(key, llm.Result{}, "failed", time.Now()); err != nil {
+				return LLMStepResult{}, err
+			}
+		default:
+			merged.Ops, merged.Verdicts = append(merged.Ops, d.Ops...), append(merged.Verdicts, d.Verdicts...)
+			keys = append(keys, key)
+		}
+		if out.StopLLM {
+			break
+		}
+	}
+	if len(keys) == 0 {
+		out.Status, out.Cached = "failed", false
+		out.Reason = fmt.Sprintf("%d of %d claims unverified: %s", unverified, len(claims), why)
+		if out.StopLLM {
+			out.Status = "skipped"
+		}
+		return out, nil
+	}
+	out.Status = "ok"
+	res, err := a.applyDelta(ctx, in, out, merged, keys)
+	if unverified > 0 {
+		res.Reason += fmt.Sprintf("; %d of %d claims unverified: %s", unverified, len(claims), why)
+	}
+	return res, err
+}
+
+// latestClaims is each claim note the run wrote, in the order first written, as its last write left it; hub pages,
+// cards and earlier versions are not verify's to judge.
+func latestClaims(proposed []Edit) []Edit {
+	last, order := map[string]Edit{}, []string{}
+	for _, e := range proposed {
+		if _, seen := last[e.Path]; !seen {
+			order = append(order, e.Path)
+		}
+		last[e.Path] = e
+	}
+	var claims []Edit
+	for _, path := range order {
+		e := last[path]
+		if n, err := delta.Parse([]byte(e.Content)); e.Action == "write" && err == nil && claimTypes[n.Type] {
+			claims = append(claims, e)
+		}
+	}
+	return claims
+}
+
+// applyDelta applies a skill's answer in dry run and returns it as whole-file edits for the workflow's ApplyEdits.
+func (a *Activities) applyDelta(ctx context.Context, in LLMStepInput, out LLMStepResult, d delta.Delta,
+	keys []string) (LLMStepResult, error) {
 	work := ""
 	if len(a.Cfg.ShadowDocs) > 0 {
 		work = a.Cfg.ShadowDocs[0]
@@ -74,15 +185,18 @@ func (a *Activities) SkillStep(ctx context.Context, in LLMStepInput) (LLMStepRes
 		if err != nil {
 			return out, err
 		}
-		_, err = stats.AddCounters(key, rep.PendingCounters) // once per answer, however often it is replayed
+		_, err = stats.AddCounters(strings.Join(keys, "+"), rep.PendingCounters) // once per answer, however often it is replayed
 		stats.Close()
 		if err != nil {
 			return out, err
 		}
 	}
-	out.Reason = strings.TrimPrefix(fmt.Sprintf("%s; %d ops, %d files, %d rejected, %d summaries, %d verdicts (answer in "+
-		".data/llm/%s.json)", out.Reason, len(d.Ops), len(rep.Files), len(rep.Rejected), len(d.Summaries),
-		len(d.Verdicts), key), "; ")
+	answer := "answer in .data/llm/" + keys[0] + ".json"
+	if len(keys) > 1 {
+		answer = fmt.Sprintf("%d answers in .data/llm/: %s", len(keys), strings.Join(keys, ", "))
+	}
+	out.Reason = strings.TrimPrefix(fmt.Sprintf("%s; %d ops, %d files, %d rejected, %d summaries, %d verdicts (%s)",
+		out.Reason, len(d.Ops), len(rep.Files), len(rep.Rejected), len(d.Summaries), len(d.Verdicts), answer), "; ")
 	if len(reasons) > 0 {
 		out.Reason += "; first rejection: " + reasons[0]
 	}
@@ -150,6 +264,10 @@ type entry struct {
 const (
 	maxCandidates = 60
 	maxMembers    = 40
+	// verify judges at most this many claims per call; at about $0.05 a claim a batch stays far under its ceiling
+	verifyBatchNotes = 12
+	// a verify batch is not started with less than this left under the run cap: it would overrun and lose its verdicts
+	minVerifyBudgetUSD = 1.0
 )
 
 var claimTypes = map[string]bool{"finding": true, "decision": true, "lesson": true, "anti-pattern": true, "playbook": true}

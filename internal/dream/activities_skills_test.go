@@ -3,6 +3,7 @@ package dream
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,4 +108,92 @@ func TestSkillStepRetriesABrokenAnswer(t *testing.T) {
 	if fake.Calls() != 2 {
 		t.Fatalf("model asked %d times; a broken answer must not be served from the ledger", fake.Calls())
 	}
+}
+
+// TestVerifyJudgesClaimsInBatches catches verify sending every claim of a dream in one call: on 2026-10-17 a dream
+// with 40 changed claims overran that call's $2.50 ceiling and lost every verdict, and one with 57 was skipped
+// because $5.72 spent + $2.50 did not fit the $8 run cap. Each batch holds at most verifyBatchNotes claims (their
+// latest version only, no hub pages) with the evidence they cite, and its ceiling is what the run cap leaves.
+func TestVerifyJudgesClaimsInBatches(t *testing.T) {
+	brain, skills := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(skills, "verify.md"), "# skill verify\n")
+	var proposed []Edit
+	note := func(i int, summary string) Edit {
+		id := fmt.Sprintf("finding-claim-%02d", i)
+		ev := fmt.Sprintf("work/box/reports/r%02d.md", i)
+		return Edit{Path: "notes/" + id + ".md", Action: "write", Content: "---\nid: " + id +
+			"\ntype: finding\nstatus: current\nsummary: " + summary + "\nscope: hub\nhubs: [git]\nevidence: [" + ev +
+			"]\n---\nbody\n"}
+	}
+	for i := 0; i < 25; i++ {
+		write(t, filepath.Join(brain, fmt.Sprintf("work/box/reports/r%02d.md", i)), fmt.Sprintf("report %02d\n", i))
+		proposed = append(proposed, note(i, "first version"))
+	}
+	proposed = append(proposed, note(3, "latest version"),
+		Edit{Path: "hubs/git.md", Action: "write", Content: "---\nid: git\ntype: hub\nstatus: current\nsummary: git\n---\n"})
+
+	var inputs []skillPayload
+	var ceilings []float64
+	fake := &llm.Fake{CostUSD: 0.8, Respond: func(c llm.Call) llm.Result {
+		var p skillPayload
+		if err := json.Unmarshal([]byte(c.Input), &p); err != nil {
+			t.Fatal(err)
+		}
+		inputs, ceilings = append(inputs, p), append(ceilings, c.MaxBudgetUSD)
+		var verdicts []string
+		for _, e := range p.Proposed {
+			verdicts = append(verdicts, `{"id":"`+strings.TrimSuffix(filepath.Base(e.Path), ".md")+`","verdict":"keep"}`)
+		}
+		return llm.Result{JSON: json.RawMessage(`{"ops":[],"verdicts":[` + strings.Join(verdicts, ",") + `]}`)}
+	}}
+	ledger, err := llm.OpenLedger(filepath.Join(brain, ".index", "brain.db"), filepath.Join(brain, ".data", "llm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	acts := &Activities{Cfg: Config{BrainRoot: brain, SkillsDir: skills}, LLM: fake, Ledger: ledger}
+	in := LLMStepInput{Workflow: "dream", Step: "verify", Skill: "verify", Model: "m", BudgetUSD: 2.5,
+		RunSpentUSD: 4.0, Proposed: proposed}
+
+	out, err := acts.SkillStep(context.Background(), in)
+	if err != nil || out.Status != "ok" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if len(inputs) != 3 || !strings.Contains(out.Reason, "25 verdicts") || fmt.Sprintf("%.2f", out.CostUSD) != "2.40" {
+		t.Fatalf("%d calls, cost %.2f, reason %q; want 3 batches of ≤ %d claims, 25 verdicts, $2.40", len(inputs),
+			out.CostUSD, out.Reason, verifyBatchNotes)
+	}
+	for i, p := range inputs {
+		if len(p.Proposed) > verifyBatchNotes || len(p.Evidence) != len(p.Proposed) {
+			t.Errorf("batch %d: %d notes, %d evidence files", i, len(p.Proposed), len(p.Evidence))
+		}
+		for _, e := range p.Proposed {
+			if e.Path == "hubs/git.md" || strings.Contains(e.Content, "first version") && e.Path == "notes/finding-claim-03.md" {
+				t.Errorf("batch %d was sent %s (a hub page or a stale version)", i, e.Path)
+			}
+		}
+	}
+	if want := []float64{2.5, 2.5, 2.4}; fmt.Sprint(roundAll(ceilings)) != fmt.Sprint(want) {
+		t.Errorf("ceilings %v, want %v (the step budget, then what the $8 run cap leaves after $4.00 + 2 × $0.80)",
+			ceilings, want)
+	}
+
+	in.RunSpentUSD = 6.5
+	fake2 := &llm.Fake{CostUSD: 0.8, Respond: fake.Respond}
+	inputs, ceilings, acts.LLM = nil, nil, fake2
+	in.Proposed = nil
+	for i := 0; i < 25; i++ {
+		in.Proposed = append(in.Proposed, note(i, "changed again")) // new keys: nothing comes from the ledger
+	}
+	out, err = acts.SkillStep(context.Background(), in)
+	if err != nil || out.Status != "ok" || !out.StopLLM || !strings.Contains(out.Reason, "17 of 25 claims unverified: run cap") {
+		t.Fatalf("$6.50 spent: %+v %v; want the first batch judged and the rest named as unverified", out, err)
+	}
+}
+
+func roundAll(xs []float64) []float64 {
+	for i, x := range xs {
+		xs[i] = float64(int(x*100+0.5)) / 100
+	}
+	return xs
 }

@@ -202,6 +202,13 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   file in the live brain. The model opened the reports the session wrote, and the notes earlier runs had learned
   from it. **Fix:** every call gets `--tools ""`. Reflect's input carries the session's produced documents and the
   notes that already cite the session. **Rule:** what a model call may use goes in its input; a call has no tools.
+- **Later (2026-10-17): verify could not judge a busy dream.** Learn made more notes per dream (30 sessions each), and
+  verify sent all claims of a run in one call. A dream with 40 changed claims went past the call's $2.50 budget. The
+  call cost $2.74 and gave no verdicts. A dream with 57 claims skipped verify, because $5.72 spent + $2.50 was more
+  than $8. So 2 of 3 dreams wrote 130 edits that verify did not check. **Fix:** verify judges at most 12 claims per
+  call: only claim notes, each as the run last wrote it, with the evidence they cite. The budget of a call is what
+  the $8 cap leaves, up to $2.50. The step reason says how many claims stay unverified. **Rule:** a step whose input
+  grows with the day's work sends its input in parts, so one large day cannot take all of its budget.
 
 ## 12. Evals that leak or misdate their targets
 

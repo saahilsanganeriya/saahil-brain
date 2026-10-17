@@ -50,7 +50,9 @@ read or edit any file.
 asked for (curate.link, curate.hubs and verify read only this). Learn's reflect is one call per session: its
 `material` is the session note, then the `.md` and `.txt` files in the brain that the note lists in `produced` (≤ 16 KB
 each, ≤ 64 KB in all); its `proposed` is the notes that already cite the session in `evidence` or `sources`, of any
-status (a live session is reflected again in each dream after it grows). The answer must match `EditsSchema` (`edits.go`):
+status (a live session is reflected again in each dream after it grows). Verify reads only the claim notes in
+`proposed` (finding, decision, lesson, anti-pattern, playbook), each as the run last wrote it, in batches of at most 12.
+Each batch gets the evidence its own notes cite. The answer must match `EditsSchema` (`edits.go`):
 
 ```json
 {"edits": [{"path": "notes/finding-y.md", "action": "write", "content": "<whole file>", "why": "…"}], "notes": "…"}
@@ -124,7 +126,8 @@ Key = sha256(workflow, step, model, sha(skill), sha(input)) in `llm_calls` (`.in
 answered from `.data/llm/<key>.json` for $0, so a retry or rerun never pays twice. Before a paid call:
 run spent + step budget (Opus $2.50, Haiku $0.50) must be ≤ $8, and today's spend (UTC, failed attempts included)
 + step budget ≤ $100 (owner, 2026-10-08: up to $1,000 is fine; the $8 per-run cap stays); otherwise no more LLM calls this run, with the reason recorded, and the deterministic steps
-finish. The prompt text is never stored or logged — only its hash.
+finish. A verify batch is different: its budget is the step budget or what the $8 cap leaves, whichever is less. It
+does not start with less than $1.00 left. The step reason gives the number of claims that stay unverified, and why. The prompt text is never stored or logged — only its hash.
 
 ## Failure modes
 
