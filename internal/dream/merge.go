@@ -677,7 +677,7 @@ func (r *run) merge(start time.Time) {
 		finish("skipped", gate.Skip)
 		return
 	}
-	if r.stopLLM != "" {
+	if r.capStopped() {
 		finish("skipped", r.stopLLM)
 		return
 	}

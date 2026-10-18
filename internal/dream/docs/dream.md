@@ -116,8 +116,8 @@ merged PRs.
 | apply | The CARD comes back as an edit for `ApplyEdits`: backup, lint, revert, the 50-edit cap (it counts files). CARDs do not go to `verify`, which checks notes. An answer equal to the CARD on disk only touches its mtime, so the box is not picked again until its work changes. |
 | record | `refreshed`, `unchanged (touched)`, `skipped` (with the reason, for example the cost cap), `failed` and `wait for the next dream`, with box names only (≤ 10 for each list). |
 
-When the cap stops a call, the step skips the boxes that are left, with the reason, and the later LLM steps of the
-run stop too. `brain dream cards --dry-run` shows what the plan would pick now: each stale box with the age and status
+When the cap stops a call, the step skips the boxes that are left, with the reason. A later LLM step still asks:
+its own call runs if it fits what the run has left (see Cost and idempotency). `brain dream cards --dry-run` shows what the plan would pick now: each stale box with the age and status
 of its CARD and its newest file. It reads only; it calls no model and writes nothing.
 
 ## Cost and idempotency
@@ -125,8 +125,11 @@ of its CARD and its newest file. It reads only; it calls no model and writes not
 Key = sha256(workflow, step, model, sha(skill), sha(input)) in `llm_calls` (`.index/brain.db`); a `done` key is
 answered from `.data/llm/<key>.json` for $0, so a retry or rerun never pays twice. Before a paid call:
 run spent + step budget (Opus $2.50, Haiku $0.50) must be ≤ $8, and today's spend (UTC, failed attempts included)
-+ step budget ≤ $100 (owner, 2026-10-08: up to $1,000 is fine; the $8 per-run cap stays); otherwise no more LLM calls this run, with the reason recorded, and the deterministic steps
-finish. A verify batch is different: its budget is the step budget or what the $8 cap leaves, whichever is less. It
++ step budget ≤ $100 (owner, 2026-10-08: up to $1,000 is fine; the $8 per-run cap stays); otherwise the call is
+refused, with the reason recorded. A refused call stops the rest of its own step (the boxes, groups, sessions or
+batches that are left), not the later steps: each later step checks its own smallest call against what is left, so
+a $2.50 step that does not fit does not cancel the $0.50 summaries or the verify batches after it. Learn's sessions
+stay unconsumed after a refusal, so the next dream learns them. The deterministic steps always finish. A verify batch is different: its budget is the step budget or what the $8 cap leaves, whichever is less. It
 does not start with less than $1.00 left. The step reason gives the number of claims that stay unverified, and why. The prompt text is never stored or logged — only its hash.
 
 ## Failure modes

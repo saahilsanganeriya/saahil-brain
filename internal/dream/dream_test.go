@@ -1,6 +1,7 @@
 package dream
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"go.temporal.io/sdk/testsuite"
 
 	"saahil.local/brain/internal/llm"
@@ -60,6 +62,27 @@ func runDream(t *testing.T, acts *Activities, in Input, start time.Time) Report 
 		t.Fatalf("workflow: completed=%v err=%v", env.IsWorkflowCompleted(), env.GetWorkflowError())
 	}
 	var rep Report
+	if err := env.GetWorkflowResult(&rep); err != nil {
+		t.Fatal(err)
+	}
+	return rep
+}
+
+// runDreamDeployed runs a forced dream with SkillStep under the LLMStep activity name, as brain-worker registers it.
+func runDreamDeployed(t *testing.T, acts *Activities) Report {
+	t.Helper()
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.SetStartTime(time.Now().UTC())
+	env.RegisterWorkflow(DreamWorkflow)
+	env.RegisterActivity(acts)
+	env.OnActivity(acts.LLMStep, mock.Anything, mock.Anything).Return(
+		func(ctx context.Context, in LLMStepInput) (LLMStepResult, error) { return acts.SkillStep(ctx, in) })
+	env.ExecuteWorkflow(DreamWorkflow, Input{Force: true})
+	var rep Report
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
 	if err := env.GetWorkflowResult(&rep); err != nil {
 		t.Fatal(err)
 	}
@@ -120,8 +143,8 @@ func TestDreamIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestCostCapStopsLLMSteps catches a run that keeps calling the model past $8: once spent + the next step's budget
-// would pass the cap, every later LLM step is skipped with the reason, and the deterministic steps still finish.
+// TestCostCapStopsLLMSteps catches a run that keeps calling the model past $8: a step whose spent + budget
+// would pass the cap is skipped with the reason, and the deterministic steps still finish.
 func TestCostCapStopsLLMSteps(t *testing.T) {
 	// learn has nothing to judge in the sample session; file (haiku) → $3, link (opus) → $6, hubs would need $8.50
 	acts, fake := newBrain(t, 3.0)
@@ -136,6 +159,78 @@ func TestCostCapStopsLLMSteps(t *testing.T) {
 	}
 	if rep.Status != "completed" || step(rep, "commit").Status != "ok" {
 		t.Fatalf("deterministic steps did not finish: %+v", rep)
+	}
+}
+
+// pricedFake charges each skill its own price, so a test can place the run's spend exactly against the cap.
+type pricedFake struct {
+	llm.Fake
+	price map[string]float64
+}
+
+func (f *pricedFake) Run(ctx context.Context, c llm.Call) (llm.Result, error) {
+	res, err := f.Fake.Run(ctx, c)
+	res.CostUSD = f.price[strings.TrimPrefix(strings.SplitN(c.Skill, "\n", 2)[0], "# skill ")]
+	return res, err
+}
+
+// TestCapRefusalSkipsOnlyStepsThatCannotFit catches one step's refusal at the $8 cap skipping every later model step:
+// curate.merge's $2.50 budget did not fit $2.07 left, and verify, whose batches need $1.00, was skipped with it, so a
+// dream's 50 learn edits went unverified. A later step still runs when its smallest call fits what the run has left.
+func TestCapRefusalSkipsOnlyStepsThatCannotFit(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		filePrice   float64 // file and link each cost this; hubs ($2.50) never fits after them
+		verifyRuns  bool
+		wantCostUSD string
+	}{
+		{"$2.00 left fits a verify batch", 3.00, true, "6.40"},
+		{"$0.80 left fits no verify batch", 3.60, false, "7.20"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			brain, skills := t.TempDir(), t.TempDir()
+			write(t, filepath.Join(brain, "memory/feedback-rebase.md"), "rebase before push\n")
+			write(t, filepath.Join(brain, "hubs/index.md"), "---\nid: index\ntype: hub\nstatus: current\nsummary: home\n---\n")
+			write(t, filepath.Join(brain, "hubs/git.md"), "---\nid: git\ntype: hub\nstatus: current\nsummary: git\nbroader: [index]\n---\n")
+			for _, s := range []string{"distil", "file", "link", "hubs", "summarise", "verify"} {
+				write(t, filepath.Join(skills, s+".md"), "# skill "+s+"\n")
+			}
+			fake := &pricedFake{price: map[string]float64{"file": tc.filePrice, "link": tc.filePrice, "verify": 0.40}}
+			fake.Respond = func(c llm.Call) llm.Result {
+				switch {
+				case strings.HasPrefix(c.Skill, "# skill file"):
+					return llm.Result{JSON: json.RawMessage(`{"ops":[{"op":"add_note","note":{"id":"lesson-rebase-before-push",
+ "type":"lesson","status":"current","summary":"rebase before push","scope":"global","hubs":["git"],
+ "evidence":["memory/feedback-rebase.md"],"body":"When pushing → rebase first, because CI ran on a stale base."}}]}`)}
+				case strings.HasPrefix(c.Skill, "# skill verify"):
+					return llm.Result{JSON: json.RawMessage(`{"ops":[],"verdicts":[{"id":"lesson-rebase-before-push","verdict":"keep"}]}`)}
+				}
+				return llm.Result{JSON: json.RawMessage(`{"ops":[]}`)}
+			}
+			ledger, err := llm.OpenLedger(filepath.Join(brain, ".index", "brain.db"), filepath.Join(brain, ".data", "llm"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ledger.Close()
+			acts := &Activities{Cfg: Config{BrainRoot: brain, SkillsDir: skills, BrainBin: filepath.Join(brain, "none")},
+				LLM: fake, Ledger: ledger}
+
+			rep := runDreamDeployed(t, acts)
+
+			if s := step(rep, "curate.hubs"); s.Status != "skipped" || !strings.Contains(s.Reason, "run cap") {
+				t.Fatalf("curate.hubs should be refused at the cap: %+v", s)
+			}
+			v := step(rep, "verify")
+			if ran := v.Status == "ok" && v.Called; ran != tc.verifyRuns {
+				t.Fatalf("verify ran=%v, want %v: %+v", ran, tc.verifyRuns, v)
+			}
+			if !tc.verifyRuns && !strings.Contains(v.Reason, "run cap") {
+				t.Fatalf("verify skipped without naming the cap: %+v", v)
+			}
+			if got := fmt.Sprintf("%.2f", rep.CostUSD); got != tc.wantCostUSD || rep.CostUSD > RunCapUSD {
+				t.Fatalf("run cost $%s, want $%s (never over $%.2f)", got, tc.wantCostUSD, RunCapUSD)
+			}
+		})
 	}
 }
 

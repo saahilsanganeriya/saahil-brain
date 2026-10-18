@@ -188,6 +188,15 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 	return r.commit(start)
 }
 
+// capStopped says whether an earlier refusal at a cap skips a step without asking it. Since cap-stop-per-step every
+// step asks: its activity checks the caps against its own smallest call, so a $2.50 step that did not fit no longer
+// cancels a cheaper one after it (verify's $1.00 batches, $0.50 summaries). The refusal stays in r.stopLLM, which
+// keeps learn's sessions for the next dream.
+func (r *run) capStopped() bool {
+	return r.stopLLM != "" &&
+		workflow.GetVersion(r.ctx, "cap-stop-per-step", workflow.DefaultVersion, 1) == workflow.DefaultVersion
+}
+
 func (r *run) llm(s llmStep, material []Material) {
 	began := workflow.Now(r.ctx)
 	var proposed []Edit
@@ -199,7 +208,7 @@ func (r *run) llm(s llmStep, material []Material) {
 		r.record(StepRecord{Name: s.name, Status: "skipped", Reason: "no input"}, began)
 		return
 	}
-	if r.stopLLM != "" {
+	if r.capStopped() {
 		r.record(StepRecord{Name: s.name, Status: "skipped", Reason: r.stopLLM}, began)
 		return
 	}

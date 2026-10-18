@@ -209,6 +209,14 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   call: only claim notes, each as the run last wrote it, with the evidence they cite. The budget of a call is what
   the $8 cap leaves, up to $2.50. The step reason says how many claims stay unverified. **Rule:** a step whose input
   grows with the day's work sends its input in parts, so one large day cannot take all of its budget.
+- **Later (2026-10-18): one refusal at the cap skipped every later step.** Learn reflected on more sessions (13 to 15
+  calls a dream, from 7 to 10) and cost $3.84 and $3.99 in two dreams. After hubs, $2.07 and $1.75 were left, and
+  curate.merge's $2.50 call did not fit. The refusal stopped every later model step of the run, so cards ($0.02),
+  summarise ($0.02) and verify (batches from $1.00) were skipped too, and 51 and 52 claims stayed unverified. The
+  batches from the day before never got a chance. **Fix:** a refused call stops only its own step; each later step
+  asks, and its activity checks its own smallest call against what is left. A replay of one of the two dreams: verify
+  judged 10 of 51 claims for $1.07, and the run stayed at $7.04. **Rule:** a refusal for a budget stops only the calls
+  that the budget refuses.
 
 ## 12. Evals that leak or misdate their targets
 

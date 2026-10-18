@@ -8,10 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/stretchr/testify/mock"
-	"go.temporal.io/sdk/testsuite"
 
 	"saahil.local/brain/internal/llm"
 )
@@ -50,21 +46,7 @@ func TestSkillStepFilesThroughDeltas(t *testing.T) {
 	acts := &Activities{Cfg: Config{BrainRoot: brain, SkillsDir: skills, BrainBin: filepath.Join(brain, "none")},
 		LLM: fake, Ledger: ledger}
 
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-	env.SetStartTime(time.Now().UTC())
-	env.RegisterWorkflow(DreamWorkflow)
-	env.RegisterActivity(acts)
-	env.OnActivity(acts.LLMStep, mock.Anything, mock.Anything).Return(
-		func(ctx context.Context, in LLMStepInput) (LLMStepResult, error) { return acts.SkillStep(ctx, in) })
-	env.ExecuteWorkflow(DreamWorkflow, Input{Force: true})
-	var rep Report
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatal(err)
-	}
-	if err := env.GetWorkflowResult(&rep); err != nil {
-		t.Fatal(err)
-	}
+	rep := runDreamDeployed(t, acts)
 
 	if !strings.Contains(fileInput, `"hubs":[{"id":"git"`) {
 		t.Errorf("the file skill was not given the hub list: %s", fileInput)

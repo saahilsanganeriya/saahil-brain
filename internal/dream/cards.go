@@ -90,7 +90,7 @@ func (r *run) cards() {
 		finish("skipped", plan.Skip)
 		return
 	}
-	if r.stopLLM != "" {
+	if r.capStopped() {
 		finish("skipped", r.stopLLM)
 		return
 	}
@@ -98,7 +98,7 @@ func (r *run) cards() {
 	var edits []Edit
 	for _, c := range plan.Refresh {
 		name := c.Box.Name
-		if r.stopLLM != "" {
+		if r.capStopped() {
 			skipped = append(skipped, name+" ("+r.stopLLM+")")
 			continue
 		}
