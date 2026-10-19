@@ -249,7 +249,7 @@ func (r *run) llm(s llmStep, material []Material) {
 }
 
 // curationSteps share what learn and file leave of the cap; learn and file consume their input, so they keep first
-// claim. Of the curation steps only merge and cards rebuild their edits from the whole brain each run, so only their
+// claim (a learn session the cap has no room for waits whole, unconsumed). Of the curation steps only merge and cards rebuild their edits from the whole brain each run, so only their
 // held edits return; link, hubs and verify judge this run's proposals, so an edit the cap holds there is lost.
 var curationSteps = []string{linkStep.name, hubsStep.name, mergeStepName, cardsStepName, verifyStep.name}
 
@@ -285,11 +285,16 @@ func changedFiles(applied []Applied) []string {
 }
 
 func (r *run) apply(step string, edits []Edit) int {
+	applied, _ := r.applyUnit(applyInput(r.rep.RunID, step, edits, r.applied))
+	return applied
+}
+
+// applyUnit runs ApplyEdits and records its result; held says the edit cap held at least one edit.
+func (r *run) applyUnit(in ApplyInput) (applied int, held bool) {
 	var res ApplyResult
-	err := workflow.ExecuteActivity(r.det, a.ApplyEdits, applyInput(r.rep.RunID, step, edits, r.applied)).Get(r.ctx, &res)
-	if err != nil {
-		r.rep.Rejected = append(r.rep.Rejected, Rejection{Step: step, Reason: "apply failed: " + err.Error()})
-		return 0
+	if err := workflow.ExecuteActivity(r.det, a.ApplyEdits, in).Get(r.ctx, &res); err != nil {
+		r.rep.Rejected = append(r.rep.Rejected, Rejection{Step: in.Step, Reason: "apply failed: " + err.Error()})
+		return 0, false
 	}
 	r.applied = append(r.applied, res.Applied...)
 	r.rep.Rejected = append(r.rep.Rejected, res.Rejected...)
@@ -297,8 +302,9 @@ func (r *run) apply(step string, edits []Edit) int {
 		if rej.Action == "delete" {
 			r.rep.DeletionsRejected++
 		}
+		held = held || rej.Held
 	}
-	return len(res.Applied)
+	return len(res.Applied), held
 }
 
 func (r *run) brain(step string, command []string, args ...string) StepOutcome {

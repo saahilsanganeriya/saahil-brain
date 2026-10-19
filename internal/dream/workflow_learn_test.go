@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
@@ -213,5 +217,88 @@ func TestReflectSeesWhatEarlierRunsLearnedFromTheSession(t *testing.T) {
 	}
 	if len(payload.Proposed) != 1 || payload.Proposed[0].Path != "notes/lesson-learned.md" || payload.Proposed[0].Content != learned {
 		t.Fatalf("proposed %+v, want only notes/lesson-learned.md with its content", payload.Proposed)
+	}
+}
+
+// TestLearnHoldsASessionWholeWhenTheCapIsFull catches the edit cap cutting through one session's edits: on 2026-10-19T19
+// learn reached the 50 files mid-session, wrote 11 notes that supersede others but not the status edits on the notes
+// they supersede (the doctor's supersession check failed on both machines), lost 31 notes for good, and still paid to
+// reflect on every later session. A session's edits land whole or wait, with every later session, for the next dream.
+func TestLearnHoldsASessionWholeWhenTheCapIsFull(t *testing.T) {
+	corrections := map[string]int{}
+	for i := range 20 {
+		corrections[fmt.Sprintf("0000%04d", i)] = 1
+	}
+	acts, fake := newLearnBrain(t, corrections)
+	brain := acts.Cfg.BrainRoot
+	for short := range corrections {
+		write(t, filepath.Join(brain, "notes", "lesson-old-"+short+".md"), "---\nid: lesson-old-"+short+
+			"\ntype: lesson\nstatus: current\nsummary: an older lesson\nscope: global\nhubs: [ci-depot]\n"+
+			"evidence: [hubs/ci-depot.md]\nas_of: 2026-10-01\n---\nwhen this → do the old thing, because it once worked\n")
+	}
+	judge := fake.Respond
+	var reflected atomic.Int32
+	fake.Respond = func(c llm.Call) llm.Result {
+		if !strings.HasPrefix(c.Skill, "# Skill: distil") {
+			if strings.HasPrefix(c.Skill, "# Skill: judge") {
+				return judge(c)
+			}
+			return llm.Result{JSON: json.RawMessage(`{"ops":[]}`)}
+		}
+		reflected.Add(1)
+		var in struct{ Material []struct{ Path string } }
+		_ = json.Unmarshal([]byte(c.Input), &in)
+		session := in.Material[0].Path
+		short := strings.Split(filepath.Base(session), "-")[3]
+		note := func(id string) map[string]any {
+			return map[string]any{"id": id, "type": "lesson", "status": "current", "summary": "a lesson from " + short,
+				"scope": "global", "hubs": []string{"ci-depot"}, "evidence": []string{session + "#Owner prompts"},
+				"sources": []string{session}, "as_of": "2026-10-08", "body": "when this → do that, because it broke"}
+		}
+		out, _ := json.Marshal(map[string]any{"ops": []any{
+			map[string]any{"op": "add_note", "note": note("lesson-new-" + short)},
+			map[string]any{"op": "supersede", "old": "lesson-old-" + short, "new": "lesson-new-" + short},
+			map[string]any{"op": "add_note", "note": note("lesson-extra-" + short)}}})
+		return llm.Result{JSON: out}
+	}
+	// each session changes 3 files: its 17th would get the cap's last 2
+	whole := func() (landed int) {
+		t.Helper()
+		for short := range corrections {
+			_, errNew := os.Stat(filepath.Join(brain, "notes", "lesson-new-"+short+".md"))
+			_, errExtra := os.Stat(filepath.Join(brain, "notes", "lesson-extra-"+short+".md"))
+			old, _ := os.ReadFile(filepath.Join(brain, "notes", "lesson-old-"+short+".md"))
+			superseded := strings.Contains(string(old), "status: superseded")
+			if (errNew == nil) != superseded || (errNew == nil) != (errExtra == nil) {
+				t.Errorf("session %s landed in part: new=%v extra=%v old superseded=%v", short, errNew == nil,
+					errExtra == nil, superseded)
+			}
+			if errNew == nil {
+				landed++
+			}
+		}
+		return landed
+	}
+
+	t0 := time.Now().UTC()
+	first := runDream(t, acts, Input{Force: true}, t0)
+	landed := whole()
+	if landed != 16 || step(first, "learn").Edits != 48 {
+		t.Fatalf("first dream landed %d sessions in %d edits, want 16 in 48 (the cap's 50 files)", landed,
+			step(first, "learn").Edits)
+	}
+	for _, rej := range first.Rejected {
+		if rej.Step == "learn" && (!rej.Held || rej.Lost || !strings.Contains(rej.Reason, "waits for the next dream")) {
+			t.Errorf("learn's held edit is recorded as %+v, want held, not lost, waiting for the next dream", rej)
+		}
+	}
+	if got := reflected.Load(); got != 17 {
+		t.Errorf("reflected %d sessions, want 17: none after the first that did not fit", got)
+	}
+
+	second := runDream(t, acts, Input{Force: true}, t0.Add(13*time.Hour))
+	if landed := whole(); landed != 20 || second.Material.Sessions != 4 {
+		t.Fatalf("second dream: %d of 20 sessions landed from %d sessions read, want 20 from the 4 that waited",
+			landed, second.Material.Sessions)
 	}
 }

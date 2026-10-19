@@ -217,6 +217,15 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   asks, and its activity checks its own smallest call against what is left. A replay of one of the two dreams: verify
   judged 10 of 51 claims for $1.07, and the run stayed at $7.04. **Rule:** a refusal for a budget stops only the calls
   that the budget refuses.
+- **Later (2026-10-19): the cap cut one session in two.** Learn reached the 50 files in the middle of a session
+  whose answer was 47 edits. Its new notes landed, but the status edits on the 11 notes they supersede did not, so
+  the doctor's supersession check failed on both machines. The 31 held edits were `lost`, because the sessions
+  watermark moved past them. Learn still paid to reflect on the 7 sessions after it, and verify counted their notes
+  as claims. **Fix:** learn applies a session's edits whole. The first session the cap has no room for, and every
+  session after it, wait for the next dream: the watermark stops before it, and learn stops. A session larger than
+  the cap applies what fits. Replays of 12 dreams: lost edits 106 to 43 (learn 47 to 0), split supersessions 11 to 0,
+  $1.79 of reflects not spent, and no change in the 8 dreams that did not reach the cap. **Rule:** a cap applies to
+  the unit that must stay whole, and work it holds stays as input for the next run.
 
 ## 12. Evals that leak or misdate their targets
 

@@ -407,3 +407,21 @@ func TestHeldEditSaysWhetherItReturns(t *testing.T) {
 		}
 	}
 }
+
+// Catches a unit larger than a whole run waiting for ever: held whole, a learn session that changes more files than
+// the cap allows would stop learn at the same session in every dream, and no later session would be learned again.
+func TestWholeUnitLargerThanTheCapAppliesWhatFits(t *testing.T) {
+	acts, _ := newBrain(t, 0)
+	var edits []Edit
+	for i := range MaxEdits + 1 {
+		edits = append(edits, Edit{Path: fmt.Sprintf("notes/finding-%02d.md", i), Action: "write", Content: "x"})
+	}
+	res, err := acts.ApplyEdits(t.Context(), ApplyInput{RunID: "r", Step: "learn", Edits: edits, Remaining: MaxEdits,
+		Whole: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != MaxEdits || len(res.Rejected) != 1 || !res.Rejected[0].Lost {
+		t.Fatalf("applied %d, rejected %+v; want %d applied and the last edit lost", len(res.Applied), res.Rejected, MaxEdits)
+	}
+}

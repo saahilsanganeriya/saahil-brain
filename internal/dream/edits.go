@@ -40,6 +40,7 @@ type ApplyInput struct {
 	Edits     []Edit
 	Remaining int      // new files this step may still change
 	Changed   []string // files the run already changed: changing one again costs nothing
+	Whole     bool     // one unit (a learn session's answer): every edit lands, or every edit waits for the next dream
 }
 
 type ApplyResult struct {
@@ -74,6 +75,15 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 	for _, p := range in.Changed {
 		changed[p] = true
 	}
+	holdAll, needed := false, 0
+	if in.Whole {
+		var err error
+		if needed, err = a.newFilesNeeded(in.Edits, changed); err != nil {
+			return res, err
+		}
+		// a unit larger than a whole run could never land whole: it applies what fits, as any other step
+		holdAll = needed > in.Remaining && needed <= MaxEdits
+	}
 	newFiles := 0
 	for _, e := range in.Edits {
 		reject := func(reason string) {
@@ -85,7 +95,10 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 				limit = fmt.Sprintf("%s's share of the edit cap (%d new files) reached", in.Step, in.Remaining)
 			}
 			fate, lost := "waits for the next dream", !rebuildsEachRun[in.Step]
-			if lost {
+			if holdAll {
+				limit += fmt.Sprintf(" (%d new files needed, %d left)", needed, in.Remaining)
+				fate, lost = "waits for the next dream, whole", false
+			} else if lost {
 				fate = "lost: " + in.Step + " judges only this run's proposals"
 			}
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Held: true,
@@ -113,7 +126,7 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 			res.Noop++
 			continue
 		}
-		if !changed[e.Path] && newFiles >= in.Remaining {
+		if holdAll || (!changed[e.Path] && newFiles >= in.Remaining) {
 			hold()
 			continue
 		}
@@ -135,6 +148,30 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 		}
 	}
 	return res, nil
+}
+
+// newFilesNeeded counts the files the edits would change that the run has not changed yet: refused and unchanged
+// writes cost nothing.
+func (a *Activities) newFilesNeeded(edits []Edit, changed map[string]bool) (int, error) {
+	files := map[string]bool{}
+	for _, e := range edits {
+		if e.Action != "write" || changed[e.Path] || files[e.Path] || len(e.Content) > maxEditBytes {
+			continue
+		}
+		abs, err := a.writablePath(e.Path)
+		if err != nil {
+			continue
+		}
+		old, err := os.ReadFile(abs)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return 0, err
+		}
+		if err == nil && bytes.Equal(old, []byte(e.Content)) {
+			continue
+		}
+		files[e.Path] = true
+	}
+	return len(files), nil
 }
 
 // writablePath resolves a skill-supplied path and refuses anything that could land outside the brain's knowledge

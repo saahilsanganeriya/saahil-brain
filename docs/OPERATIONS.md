@@ -85,7 +85,8 @@ schedule brain-dream-hourly: next 2026-10-09T10:00:00Z, 25 runs so far, paused=f
 | undo a dream | `git -C ~/brain revert <commit>` on the devbox, or copy files back from `.archive/dream/<run-id>/before/` |
 
 A dream never deletes. It changes at most 50 files (a file it writes twice in one run counts once) and spends at most
-$8. A step that fails is recorded and the rest
+$8. When learn has no room for the next session's edits, that session and the sessions after it wait for the next
+dream (the learn step's reason says how many). A step that fails is recorded and the rest
 go on; a lint failure reverts every edit of that run.
 
 ## Temporal UI

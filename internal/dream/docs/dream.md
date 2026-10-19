@@ -65,7 +65,11 @@ write to one is free; learn and file
 get what is left; curate.link, curate.hubs, curate.merge, curate.cards and verify each get an equal share of what is
 left with the curation steps after them, so the first cannot starve the rest; an edit over the share is `held`). A
 held edit of curate.merge or curate.cards comes back next run, because these steps rebuild from the whole brain. A held
-edit of any other step is also `lost`, because that step judges only this run's material and proposals.
+edit of any other step is also `lost`, because that step judges only this run's material and proposals. A learn
+session is one unit (`ApplyInput.Whole`): its edits land together, or all are `held` (not `lost`, "waits for the
+next dream, whole"). Then learn stops, and that session and every later session wait for the next dream: the sessions
+watermark stops before it, and their edits do not go to the later steps. A session that changes more files than the
+cap applies what fits, so it cannot stop learn in every dream.
 Anything else is listed in
 the report's `rejected`; a `delete` is never applied and is counted in `deletions_rejected`. Identical content is a
 no-op, not an edit. Every overwritten file is first copied to `.archive/dream/<run-id>/before/`.

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -156,16 +157,20 @@ func LearnSessionWorkflow(ctx workflow.Context, in LearnInput) (LearnResult, err
 
 // learnSessions is the dream's learn step: one LearnSessionWorkflow per new session, in turn so the $8 cap holds.
 // A session whose child could not run goes to the batched distil call, the path the dream had before.
+// Since learn-holds-whole-session a session's edits land whole: the first session the edit cap has no room for, and
+// every session after it, wait for the next dream (the watermark stops before it), and none of them is reflected on
+// or proposed to the later steps in this run.
 func (r *run) learnSessions(sessions []Material) {
 	began := workflow.Now(r.ctx)
 	if len(sessions) == 0 || r.stopLLM != "" {
 		r.llm(learnStep, sessions)
 		return
 	}
+	whole := workflow.GetVersion(r.ctx, "learn-holds-whole-session", workflow.DefaultVersion, 1) == 1
 	rec := StepRecord{Name: learnStep.name, Status: "ok"}
 	var fallback []Material
-	done := 0
-	for _, m := range sessions {
+	done, waiting := 0, 0
+	for i, m := range sessions {
 		if r.stopLLM != "" {
 			break
 		}
@@ -185,12 +190,29 @@ func (r *run) learnSessions(sessions []Material) {
 		if out.StopLLM {
 			r.stopLLM = out.Reason
 		}
-		if len(out.Edits) > 0 {
+		if len(out.Edits) == 0 {
+			continue
+		}
+		if !whole {
 			r.proposed = append(r.proposed, out.Edits...)
 			rec.Edits += r.apply(learnStep.name, out.Edits)
+			continue
 		}
+		in := applyInput(r.rep.RunID, learnStep.name, out.Edits, r.applied)
+		in.Whole = true
+		applied, held := r.applyUnit(in)
+		if held && applied == 0 {
+			done, waiting = done-1, len(sessions)-i
+			r.gate.Next[learnStep.area] = m.MTime.Add(-time.Nanosecond)
+			break
+		}
+		r.proposed = append(r.proposed, out.Edits...)
+		rec.Edits += applied
 	}
 	rec.Reason = strconv.Itoa(done) + " sessions learned one by one"
+	if waiting > 0 {
+		rec.Reason += fmt.Sprintf("; %d wait for the next dream: the edit cap has no room for the next one whole", waiting)
+	}
 	if r.stopLLM != "" {
 		rec.Status, rec.Reason = "skipped", rec.Reason+"; "+r.stopLLM
 	}
