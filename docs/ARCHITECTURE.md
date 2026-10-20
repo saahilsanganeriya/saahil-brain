@@ -50,7 +50,7 @@ useful in another. Some files are loaded into every session; history files are n
     CARD.md       what the box is, where it stands, its key files (≤ 3 KB, the dream keeps it current)
     STATE.md      where the work stands now (≤ 8 KB, overwritten)
     log/          history of the box (never loaded)
-  sessions/<machine>/YYYY/MM/<date>-<session8>-<slug>.md     one note per Claude Code transcript, ≤ 8 KB; the path never changes
+  sessions/<machine>/YYYY/MM/<date>-<session8>-<slug>.md     one note per Claude Code transcript, ≤ 8 KB, rewritten when it grows; the path never changes
   journal/YYYY/MM/YYYY-MM-DD.md                               one page per day, ≤ 6 KB (the dream)
   inbox/          drop anything here; the dream files it
   .data/          bulk artifacts (hidden from Obsidian)

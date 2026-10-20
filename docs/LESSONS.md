@@ -32,6 +32,7 @@ already in this repository's code or scripts unless the lesson says otherwise; t
 | 24 | [`devbox down` said "already" when AWS failed](#24-devbox-down-said-already-when-aws-failed) | devbox |
 | 25 | [Moving a cited file turned doctor red](#25-moving-a-cited-file-turned-doctor-red) | notes |
 | 26 | [Gaps a fresh install exposed](#26-gaps-a-fresh-install-exposed) | setup |
+| 27 | [Idle sessions were learned again in every dream](#27-idle-sessions-were-learned-again-in-every-dream) | dream |
 
 ---
 
@@ -398,3 +399,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   Makefile's dist path comes from settings, not a fixed home.
 - **Rule.** A step that ran by hand once is a step a new install will miss, and a value that fits one person is a
   bug for the next. Put the step in code with a check, and the value in settings.
+
+## 27. Idle sessions were learned again in every dream
+
+- **Symptom.** On 2026-10-20 the dream ran six times in seven hours, and the day's spend was more than twice the day
+  before. The same finished sessions came back in each dream. One session that ended on 2026-10-12 was learned in
+  every dream for five days and gave 66 new notes, many of them near-copies (eight versions of one anti-pattern).
+- **Cause.** An idle Claude Code process moves its transcript's mtime about once an hour, but writes no byte. The
+  session note compared the transcript's size and mtime, so each move rewrote the note. A rewritten note is new
+  material for the gate: it counted toward the 30 sessions that start a dream early, and learn reflected on it again
+  (an Opus call, because the session had owner corrections).
+- **Fix.** A note is current when the transcript's size and the redactor version are the same. A transcript only
+  grows by appending, so its size shows new content; the mtime is recorded, not compared. A replay of 16 recorded
+  dreams (2026-10-14 to 2026-10-19) gave 11 or 12 dreams, learn spend $20 to $23 in place of $41.49, and no learn on
+  an unchanged transcript (125 before).
+- **Rule.** Find new content by a value that only new content changes (here, the size of an append-only file), not by
+  a time that another process can move. A second pass over the same input is not new knowledge: it makes near-copies.

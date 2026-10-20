@@ -177,8 +177,9 @@ func frontmatterLine(note, key string) string {
 	return ""
 }
 
-// Catches nondeterministic output (map order), a rewrite on every hook run when nothing changed, and a renamed
-// session moving its note: notes cite a session by path, so a moved note leaves every citation dangling.
+// Catches nondeterministic output (map order), a rewrite on every hook run when nothing changed, a rewrite when an idle
+// session's process only moves its transcript's mtime (every rewrite makes the dream learn the session again), and a
+// renamed session moving its note: notes cite a session by path, so a moved note leaves every citation dangling.
 func TestNoteRewrittenOnlyWhenTranscriptChanges(t *testing.T) {
 	transcript, brain := projectsFixture(t), t.TempDir()
 	first, note1 := writeNote(t, transcript, brain)
@@ -189,6 +190,25 @@ func TestNoteRewrittenOnlyWhenTranscriptChanges(t *testing.T) {
 	other, err := Note(transcript, Options{BrainRoot: t.TempDir(), Machine: config.Devbox})
 	if raw, _ := os.ReadFile(other.Path); err != nil || string(raw) != note1 {
 		t.Fatalf("same transcript, different bytes")
+	}
+	info, err := os.Stat(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	touched := info.ModTime().Add(time.Hour)
+	if err := os.Chtimes(transcript, touched, touched); err != nil {
+		t.Fatal(err)
+	}
+	if res, note := writeNote(t, transcript, brain); res.Status != Unchanged || note != note1 {
+		t.Fatalf("mtime moved, no byte appended: %s, identical %v", res.Status, note == note1)
+	}
+	older := strings.Replace(note1, fmt.Sprintf("redact_version: %d\n", RedactVersion),
+		fmt.Sprintf("redact_version: %d\n", RedactVersion-1), 1)
+	if err := os.WriteFile(first.Path, []byte(older), 0o644); err != nil || older == note1 {
+		t.Fatalf("could not age the note's redactor: %v", err)
+	}
+	if res, _ := writeNote(t, transcript, brain); res.Status != Written {
+		t.Fatalf("note from an older redactor: %s, want written", res.Status)
 	}
 
 	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)

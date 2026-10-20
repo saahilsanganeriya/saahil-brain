@@ -49,7 +49,7 @@ type Result struct {
 }
 
 // Note writes (or leaves alone) the session note for a transcript; a subagent transcript means its main one. The note
-// is rewritten only when the transcript's size or mtime changed, so hooks can call it freely.
+// is rewritten only when the transcript grew, so hooks can call it freely.
 func Note(transcript string, opt Options) (Result, error) {
 	transcript, err := filepath.Abs(MainTranscript(transcript))
 	if err != nil {
@@ -71,7 +71,7 @@ func Note(transcript string, opt Options) (Result, error) {
 	existing := existingNotes(dir, id)
 	if !opt.Force {
 		for path, old := range existing {
-			if old == fp {
+			if old.size == fp.size && old.redact == fp.redact {
 				return Result{Path: path, Status: Unchanged}, nil
 			}
 		}
@@ -133,7 +133,9 @@ func newerCopy(transcript string, info os.FileInfo) bool {
 	return false
 }
 
-// fingerprint decides whether a note is current: same transcript (size, mtime) AND written by the current redactor.
+// fingerprint decides whether a note is current: same transcript size AND written by the current redactor. A transcript
+// only grows by appending, so its size is its content; the mtime is recorded but not compared, because an idle
+// session's process moves it every hour without writing a byte.
 type fingerprint struct {
 	size   int64
 	mtime  string
