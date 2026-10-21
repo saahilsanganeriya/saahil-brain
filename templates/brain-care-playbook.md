@@ -10,8 +10,10 @@ A run that finds a better method changes this file in a commit, like any other c
   prompt hook (prompts, p95, abstain rate), use (sessions pulling from the brain, pointers shown, opened, ignored,
   brain tool calls through MCP and the CLI) and the newest eval numbers, each with its change since the previous
   day.
-- The evals, on the devbox: `brain eval navigation`, `brain eval qa`, `brain eval ab`, `brain eval human` (the devbox
-  writes the merged human report; the laptop's rows come from its last run).
+- The evals, on the devbox: `brain eval navigation`, `brain eval qa`, `brain eval ab`; then `brain peer step eval-human
+  --wait 30m` (the laptop's rows), `brain peer step sync --wait 20m`, and `brain eval human` (the devbox writes the
+  merged human report). If its headline says the laptop rows are days old, the laptop step did not run: the human
+  numbers are not today's.
 - History: the last 7 snapshots in `~/brain/.brain/metrics/`, the last reports in `~/brain/work/brain-care/runs/`,
   and `~/brain/work/brain-care/EXPERIMENTS.md` (every experiment so far, kept or not).
 

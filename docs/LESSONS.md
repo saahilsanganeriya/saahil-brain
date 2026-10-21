@@ -415,3 +415,18 @@ a new person showed steps that only ever happened by hand, and values that only 
   an unchanged transcript (125 before).
 - **Rule.** Find new content by a value that only new content changes (here, the size of an append-only file), not by
   a time that another process can move. A second pass over the same input is not new knowledge: it makes near-copies.
+
+## 28. Half of the owner eval was ten days old
+
+- **Symptom.** For ten days the human eval gave the same numbers every day (top-3 15.9%, within 3 calls 46.4%), and
+  each daily check said "unchanged". 43 of its 69 rows are the laptop's. They came from the laptop's report of
+  2026-10-11, because no one ran the laptop's half after that day. The headline and the metrics snapshot showed the
+  old rows as today's result.
+- **Cause.** Each machine runs its own prompts and merges the other machine's latest report. The merge used that
+  report at any age and recorded only its path, in a note under the report.
+- **Fix.** The merged report records how many days old the other machine's rows are (a metric, so the daily snapshot
+  shows it). The headline tells you when they are older than 36 hours. The care playbook runs the laptop's half
+  (`brain peer step eval-human`) and a sync before the devbox's `brain eval human`. With fresh laptop rows, within 3
+  calls was 47.8%, not 46.4%.
+- **Rule.** A merged measurement records the age of each part. A number that does not change for days is a reason to
+  check its inputs, not proof that nothing changed.

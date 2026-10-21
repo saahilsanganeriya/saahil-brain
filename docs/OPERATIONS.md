@@ -122,6 +122,10 @@ brain eval human          # prompts you typed → the file that answered (the he
 brain eval all            # all of them; reports in ~/brain/.brain/evals/
 ```
 
+Each machine runs `brain eval human` on its own prompts and merges the other machine's rows from its latest report.
+The merged report records how many days old those rows are. The headline tells you when they are older than 36 hours:
+run `brain eval human` on the other machine (from the devbox: `brain peer step eval-human`), sync, and run it again.
+
 Use `--split dev` to tune and `--split test` once to judge. Never edit eval sets, targets or marks. Reference marks:
 navigation ≥ 70% top-3 and ≥ 80% within 3 calls; QA recall@3 ≥ 80%. The human eval is the closest measure of whether
 the brain helps you; on the reference setup it was the weakest number (top-3 15.9%, within 3 calls 50.7%), which is

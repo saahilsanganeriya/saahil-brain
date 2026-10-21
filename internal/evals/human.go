@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -662,11 +663,19 @@ func (r HumanRow) cells() []string {
 	return []string{r.ID, r.Machine, r.Split, list(r.Targets), top3, callsCell(r.Calls), callsCell(r.L0Calls), r.Level, list(r.Pointers)}
 }
 
+// OtherRowsAgeMetric names the merged report's record of how long ago the other machine ran its rows; the headline
+// flags rows older than staleOtherRows, one missed daily run.
+const (
+	OtherRowsAgeMetric = "rows merged from the other machine, days since they ran"
+	staleOtherRows     = 36 * time.Hour
+)
+
 type HumanRun struct {
 	Own      Report         // this machine's rows: what the other machine merges
 	Merged   Report         // both machines'
 	Machines map[string]int // rows per machine in Merged
 	Other    string         // the other machine's report merged in, "" when it has none
+	OtherAge time.Duration  // how long before this run the other machine ran its rows
 }
 
 // humanSplit puts an item in DEV or TEST by its answer file (its first target by name), so prompts answered by one file
@@ -686,7 +695,7 @@ func (e *Env) Human(set HumanSet, write bool) (HumanRun, error) {
 		return HumanRun{}, err
 	}
 	run := HumanRun{Own: e.humanReport("human-"+string(machine), rows, nil)}
-	other, file, err := latestHumanRows(e.Index.Root, machine.Other())
+	other, file, otherRan, err := latestHumanRows(e.Index.Root, machine.Other())
 	if err != nil {
 		return run, err
 	}
@@ -700,6 +709,11 @@ func (e *Env) Human(set HumanSet, write bool) (HumanRun, error) {
 	}
 	all := append(slices.Clone(rows), other...)
 	run.Merged = e.humanReport("human", all, []string{note})
+	if file != "" {
+		run.OtherAge = e.Now.Sub(otherRan)
+		run.Merged.Metrics = append(run.Merged.Metrics, Metric{Eval: "human", Name: OtherRowsAgeMetric, Kind: "mean",
+			All: Cell{Value: math.Round(run.OtherAge.Hours()/24*10) / 10, N: len(other)}})
+	}
 	run.Own.SetsBuilt, run.Merged.SetsBuilt = set.Manifest.Built, set.Manifest.Built
 	run.Machines = map[string]int{string(machine): len(rows), string(machine.Other()): len(other)}
 	if write {
@@ -788,26 +802,28 @@ func (e *Env) humanReport(eval string, rows []HumanRow, notes []string) Report {
 	}, notes...))
 }
 
-// latestHumanRows reads the rows of machine m's latest human report, and names its file ("" when there is none).
-func latestHumanRows(root string, m config.Machine) ([]HumanRow, string, error) {
+// latestHumanRows reads the rows of machine m's latest human report, and names its file ("" when there is none) and
+// when it ran.
+func latestHumanRows(root string, m config.Machine) ([]HumanRow, string, time.Time, error) {
 	files, err := filepath.Glob(filepath.Join(Dir(root), "reports", "*", "human-"+string(m)+".json"))
 	if err != nil || len(files) == 0 {
-		return nil, "", err
+		return nil, "", time.Time{}, err
 	}
 	sort.Strings(files) // date folders: the last is the latest
 	file := files[len(files)-1]
 	raw, err := os.ReadFile(file)
 	if err != nil {
-		return nil, "", err
+		return nil, "", time.Time{}, err
 	}
 	var r struct {
+		Ran  time.Time  `json:"ran"`
 		Rows []HumanRow `json:"rows"`
 	}
 	if err := json.Unmarshal(raw, &r); err != nil {
-		return nil, "", fmt.Errorf("%s: %w", file, err)
+		return nil, "", time.Time{}, fmt.Errorf("%s: %w", file, err)
 	}
 	rel, _ := filepath.Rel(root, file)
-	return r.Rows, filepath.ToSlash(rel), nil
+	return r.Rows, filepath.ToSlash(rel), r.Ran, nil
 }
 
 // Headline is the merged result in one line: both rates and how many rows each machine gave.
@@ -826,6 +842,11 @@ func (r HumanRun) Headline() string {
 	for _, m := range []config.Machine{config.Devbox, config.Laptop} {
 		machines = append(machines, fmt.Sprintf("%s %d", m, r.Machines[string(m)]))
 	}
-	return fmt.Sprintf("%-15s owner-typed prompts → the file that answered: top-3 %s · within 3 calls (L0 + L1) %s  (n=%d: %s)",
+	line := fmt.Sprintf("%-15s owner-typed prompts → the file that answered: top-3 %s · within 3 calls (L0 + L1) %s  (n=%d: %s)",
 		"human", cell(0), cell(1), n, strings.Join(machines, ", "))
+	if r.Other != "" && r.OtherAge > staleOtherRows {
+		line += fmt.Sprintf(" · %s rows %.0f days old: run `brain eval human` there", config.ThisMachine().Other(),
+			r.OtherAge.Hours()/24)
+	}
+	return line
 }

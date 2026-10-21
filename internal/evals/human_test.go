@@ -252,6 +252,43 @@ func TestHumanEvalRereadsPromptsAndMergesTheOtherMachine(t *testing.T) {
 	}
 }
 
+// TestHumanEvalSaysHowOldTheOtherMachinesRowsAre catches the 2026-10-11 .. 10-21 blind spot: the laptop's 43 of 69
+// rows came from its 10-11 report for ten days, and every daily headline and metrics snapshot read as a fresh result.
+func TestHumanEvalSaysHowOldTheOtherMachinesRowsAre(t *testing.T) {
+	ix, _ := humanFixture(t)
+	set, err := buildHuman(t, ix, fakeJudge(t, map[string][]string{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	laptop := Report{Eval: "human-laptop", Ran: testNow.Add(-10 * 24 * time.Hour), Rows: []HumanRow{
+		{ID: "human-laptop-bbbb2222-3", Machine: "laptop", Split: "dev", Top3: true, Calls: 1, L0Calls: 1},
+	}}
+	if _, err := laptop.Write(ix.Root); err != nil {
+		t.Fatal(err)
+	}
+	env := NewEnv(ix, Sets{}, testNow)
+	env.Ranker = &recordingRanker{}
+	run, err := env.Human(set, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(run.Headline(), "laptop rows 10 days old") {
+		t.Errorf("headline %q does not say the laptop rows are 10 days old", run.Headline())
+	}
+	i := slices.IndexFunc(run.Merged.Metrics, func(m Metric) bool { return m.Name == OtherRowsAgeMetric })
+	if i < 0 || run.Merged.Metrics[i].All.Value != 10 {
+		t.Fatalf("merged metrics %+v: no %q of 10", run.Merged.Metrics, OtherRowsAgeMetric)
+	}
+
+	laptop.Ran = testNow.Add(-24 * time.Hour)
+	if _, err := laptop.Write(ix.Root); err != nil {
+		t.Fatal(err)
+	}
+	if run, err = env.Human(set, false); err != nil || strings.Contains(run.Headline(), "days old") {
+		t.Errorf("rows from the last daily run flagged as old: %q (%v)", run.Headline(), err)
+	}
+}
+
 // TestOnlyTheDevboxWritesTheMergedHumanReport catches the 2026-10-09 sync conflict: both machines wrote the merged
 // human.json, each from the other's last saved rows, so the sync kept two copies. The laptop writes its own rows only.
 func TestOnlyTheDevboxWritesTheMergedHumanReport(t *testing.T) {
