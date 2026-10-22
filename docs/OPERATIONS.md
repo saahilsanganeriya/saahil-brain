@@ -59,7 +59,7 @@ For the laptop from the devbox: `brain peer step doctor --wait 10m`.
 | `hooks usage` | pull rate = sessions that called a brain tool; open rate = pointers opened per shown. The honest measure of use |
 | `host.*` | each agent host is wired. `skip` = that host is not installed |
 | `mesh.peer` | the other machine answers and runs the same version |
-| `sync.last` | an exit of 1 with "skipped … maxsizethreshold" is normal: files over 2 MB stay on their machine. When the last sync is older than 70 min or failed, the line also gives the state of the laptop's hourly agent: not loaded, running (launchd starts no new run while one run continues) or waiting, with its last exit code and log line |
+| `sync.last` | an exit of 1 with "skipped … maxsizethreshold" is normal: files over 2 MB stay on their machine. When the last sync is older than 70 min or failed, the line also gives the state of the laptop's hourly agent: not loaded, running (launchd starts no new run while one run continues) or waiting, with its last exit code and log line. For one day after the bridge reloads the agent (launchd stopped spawning it), the line is a warning that gives the time of the reload and its record |
 
 ## Dreams
 
@@ -230,7 +230,7 @@ and install steps above. Running sessions pick up a new mod or new hooks at thei
 
 | Symptom | First command | Usual cause and fix |
 |---|---|---|
-| doctor red on `sync.last` | `brain doctor` (the line gives the hourly agent's state) | agent not loaded, or running for hours: `brain peer step sync-enable` (it loads the agent again and stops the run that does not end). Agent waiting: the laptop slept or the tunnel is down: `launchctl kickstart -k gui/$(id -u)/com.saahil.brain-tunnel`, then `brain sync` |
+| doctor red on `sync.last` | `brain doctor` (the line gives the hourly agent's state) | agent not loaded, or running for hours: `brain peer step sync-enable` (it loads the agent again and stops the run that does not end). Agent waiting with last exit 78 (EX_CONFIG): launchd stopped spawning it. The bridge reloads it within 10 minutes and writes launchd's view and log lines to `~/.local/state/brain/sync-agent-reloads.log` on the laptop. Agent waiting with another exit: the laptop slept or the tunnel is down: `launchctl kickstart -k gui/$(id -u)/com.saahil.brain-tunnel`, then `brain sync` |
 | doctor red on `sync.conflicts` | `brain sync --archive-conflicts` | both machines wrote the same file; the newer copy stays live. If only one machine wrote it, look for a second archive on the devbox (`ls -lt ~/.unison/ar*`): a sync that did not run through `brain sync` |
 | `mesh.peer` unreachable | `brain peer status` | the laptop is asleep (a step with `--wait` starts when it answers; notes queue), or the bridge or tunnel stopped: see `~/Library/Logs/brain-bridge.log` and `brain-tunnel.log` |
 | dream step failed | `.brain/dream-runs/<run-id>.json` | a model auth error (sign in to Claude on the devbox), the cost cap, or a bug: the care agent picks it up |

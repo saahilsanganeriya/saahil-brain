@@ -68,6 +68,7 @@ func cmdBridgeServe([]string) int {
 		LogPath: config.StateDir() + "/bridge.log"}
 	_ = os.MkdirAll(config.StateDir(), 0o700)
 	fmt.Fprintf(os.Stderr, "brain bridge %s listening on 127.0.0.1:%d\n", rpc.Version, config.BridgePort)
+	go bridge.WatchSyncAgent(context.Background())
 	return fail("%v", srv.ListenAndServe(config.BridgePort))
 }
 

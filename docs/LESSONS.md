@@ -430,3 +430,17 @@ a new person showed steps that only ever happened by hand, and values that only 
   calls was 47.8%, not 46.4%.
 - **Rule.** A merged measurement records the age of each part. A number that does not change for days is a reason to
   check its inputs, not proof that nothing changed.
+
+## 29. launchd stopped spawning the hourly sync, twice
+
+- **Symptom.** The laptop's hourly sync stopped on 2026-10-12 and again on 10-21. Each time, only a care run's own sync
+  ran, one to three days later. `sync.last` said "waiting (not running), last exit 78: EX_CONFIG".
+- **Cause.** launchd sets exit 78 itself when it cannot spawn a job (`brain` never exits 78). After that it did not run
+  the agent again until `brain peer step sync-enable` reloaded it. The brain did not read launchd's own view, so the
+  reason for the failed spawn is not on record.
+- **Fix.** The bridge, which launchd keeps alive, checks the agent every 10 minutes. When the agent is not running and
+  its last exit is 78, the bridge writes launchd's view and its log lines about the agent to
+  `sync-agent-reloads.log` in the state folder, then reloads the agent (at most once an hour). For one day after a
+  reload, `sync.last` is a warning that names the reload.
+- **Rule.** A scheduled job that can stop without an error gets a watcher in a process that stays alive. The watcher
+  repairs the job and records why it stopped.

@@ -125,21 +125,30 @@ func checkSync(ctx context.Context) (Status, string) {
 		Ended    time.Time `json:"ended"`
 		ExitCode int       `json:"exitCode"`
 		Summary  string    `json:"summary"`
-		Agent    string    `json:"agent"` // the laptop's bridge adds it
+		Agent    string    `json:"agent"`    // the laptop's bridge adds it
+		Reloaded string    `json:"reloaded"` // the same
 	}
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		return Fail, err.Error()
 	}
+	if config.ThisMachine() == config.Laptop {
+		rec.Reloaded = rpc.LastSyncAgentReload(time.Now())
+	}
 	age := time.Since(rec.Ended).Round(time.Minute)
 	detail := fmt.Sprintf("last sync %s ago, exit %d: %s", age, rec.ExitCode, rec.Summary)
 	if rec.ExitCode < 2 && age <= 70*time.Minute {
+		if rec.Reloaded != "" {
+			return Warn, detail + "; " + rec.Reloaded
+		}
 		return OK, detail
 	}
 	if rec.Agent == "" && config.ThisMachine() == config.Laptop {
 		rec.Agent = rpc.SyncAgentState(ctx)
 	}
-	if rec.Agent != "" {
-		detail += "; " + rec.Agent
+	for _, part := range []string{rec.Agent, rec.Reloaded} {
+		if part != "" {
+			detail += "; " + part
+		}
 	}
 	return Fail, detail
 }

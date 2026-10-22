@@ -22,6 +22,66 @@ const SyncAgentLabel = "com.saahil.brain-sync"
 // SyncAgentLog is where the hourly agent's runs print.
 func SyncAgentLog() string { return filepath.Join(config.Home(), "Library", "Logs", "brain-sync.log") }
 
+// SyncAgentReloadLog is where the bridge keeps launchd's view of the hourly agent each time it reloads it.
+func SyncAgentReloadLog() string { return filepath.Join(config.StateDir(), "sync-agent-reloads.log") }
+
+// SyncReloadMark starts each record in SyncAgentReloadLog, followed by its RFC 3339 time.
+const SyncReloadMark = "== "
+
+// LastSyncAgentReload is the newest reload the bridge made in the day before now, or "".
+func LastSyncAgentReload(now time.Time) string {
+	at, _ := newestSyncReload(now)
+	if at.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf("the bridge reloaded the hourly agent at %s after launchd stopped spawning it (record: %s)",
+		at.UTC().Format(time.RFC3339), SyncAgentReloadLog())
+}
+
+// SyncAgentReloadRecord is the newest reload's record (launchd's view and log lines) when it is under a day old.
+func SyncAgentReloadRecord(now time.Time) string {
+	_, record := newestSyncReload(now)
+	return record
+}
+
+// newestSyncReload reads the reload log (at most 1 MB, the bridge rotates it) for its last record under a day old.
+func newestSyncReload(now time.Time) (time.Time, string) {
+	raw, err := os.ReadFile(SyncAgentReloadLog())
+	if err != nil {
+		return time.Time{}, ""
+	}
+	text := string(raw)
+	start := strings.LastIndex("\n"+text, "\n"+SyncReloadMark)
+	if start < 0 {
+		return time.Time{}, ""
+	}
+	record := text[start:]
+	stamp, _, _ := strings.Cut(strings.TrimPrefix(record, SyncReloadMark), " ")
+	at, err := time.Parse(time.RFC3339, stamp)
+	if err != nil || now.Sub(at) > 24*time.Hour {
+		return time.Time{}, ""
+	}
+	return at, record
+}
+
+// SyncAgentSpawnFailed says launchd holds the agent but stopped spawning it: not running, last exit 78 (EX_CONFIG),
+// which launchd sets itself (brain never exits 78).
+func SyncAgentSpawnFailed(view string) bool {
+	agent := parseLaunchctlPrint(view)
+	return agent.loaded && agent.pid == 0 && strings.HasPrefix(agent.lastExit, "78")
+}
+
+// SyncAgentPrint is launchctl's view of the hourly agent (empty off macOS).
+func SyncAgentPrint(ctx context.Context) string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, "launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), SyncAgentLabel)).CombinedOutput()
+	return string(out)
+}
+
 // SyncAgentState says what launchd holds for the hourly sync agent (empty off macOS); tests replace it.
 var SyncAgentState = func(ctx context.Context) string {
 	if runtime.GOOS != "darwin" {
@@ -29,8 +89,7 @@ var SyncAgentState = func(ctx context.Context) string {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, "launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), SyncAgentLabel)).CombinedOutput()
-	agent := parseLaunchctlPrint(string(out))
+	agent := parseLaunchctlPrint(SyncAgentPrint(ctx))
 	var elapsed, children string
 	if agent.pid > 0 {
 		pid := strconv.Itoa(agent.pid)
@@ -52,6 +111,10 @@ func withSyncAgent(ctx context.Context, record []byte) []byte {
 	}
 	agent, _ := json.Marshal(SyncAgentState(ctx))
 	fields["agent"] = agent
+	if reloaded := LastSyncAgentReload(time.Now()); reloaded != "" {
+		fields["reloaded"], _ = json.Marshal(reloaded)
+		fields["reloadRecord"], _ = json.Marshal(SyncAgentReloadRecord(time.Now()))
+	}
 	out, err := json.Marshal(fields)
 	if err != nil {
 		return record

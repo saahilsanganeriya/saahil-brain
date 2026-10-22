@@ -40,3 +40,19 @@ func TestStaleSyncLineSaysWhatTheAgentIsDoing(t *testing.T) {
 		t.Errorf("fresh: %s %q, want ok without the agent", status, detail)
 	}
 }
+
+// TestSyncLineWarnsAfterTheBridgeReloadedTheAgent catches a reload that hides the failure it healed: once the bridge
+// reloads the hourly agent the next sync is fresh, and without a warning no care run would see launchd stop spawning
+// it again, nor read the record of why.
+func TestSyncLineWarnsAfterTheBridgeReloadedTheAgent(t *testing.T) {
+	t.Setenv("BRAIN_HOME", t.TempDir())
+	t.Setenv("BRAIN_MACHINE", "laptop")
+	_ = os.MkdirAll(config.StateDir(), 0o700)
+	rec := fmt.Sprintf(`{"ended":%q,"exitCode":1,"summary":"skipped: one file"}`, time.Now().Add(-5*time.Minute).Format(time.RFC3339))
+	_ = os.WriteFile(filepath.Join(config.StateDir(), "sync-last.json"), []byte(rec), 0o600)
+	reload := rpc.SyncReloadMark + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + " reloaded com.saahil.brain-sync\n"
+	_ = os.WriteFile(rpc.SyncAgentReloadLog(), []byte(reload), 0o600)
+	if status, detail := checkSync(context.Background()); status != Warn || !strings.Contains(detail, "reloaded the hourly agent") {
+		t.Errorf("fresh sync an hour after a reload: %s %q, want warn naming the reload", status, detail)
+	}
+}
