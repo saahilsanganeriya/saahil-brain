@@ -436,8 +436,10 @@ a new person showed steps that only ever happened by hand, and values that only 
 - **Symptom.** The laptop's hourly sync stopped on 2026-10-12 and again on 10-21. Each time, only a care run's own sync
   ran, one to three days later. `sync.last` said "waiting (not running), last exit 78: EX_CONFIG".
 - **Cause.** launchd sets exit 78 itself when it cannot spawn a job (`brain` never exits 78). After that it did not run
-  the agent again until `brain peer step sync-enable` reloaded it. The brain did not read launchd's own view, so the
-  reason for the failed spawn is not on record.
+  the agent again until `brain peer step sync-enable` reloaded it. The first record (2026-10-22) shows `job state =
+  spawn failed` and `needs LWCR update`: the agent is a managed background item, and its launch constraint (LWCR)
+  pins the program's code hash. `brain self-update` swaps the binary, and each build has a new code hash. Loading
+  the agent again makes a new constraint.
 - **Fix.** The bridge, which launchd keeps alive, checks the agent every 10 minutes. When the agent is not running and
   its last exit is 78, the bridge writes launchd's view and its log lines about the agent to
   `sync-agent-reloads.log` in the state folder, then reloads the agent (at most once an hour). For one day after a

@@ -45,7 +45,7 @@ func (w *syncAgentWatch) check(ctx context.Context, now time.Time) {
 		return
 	}
 	w.last = now
-	record := fmt.Sprintf("%s%s reloaded %s: launchd stopped spawning it\n-- launchctl print\n%s\n-- launchd log, last 26 h\n%s\n",
+	record := fmt.Sprintf("%s%s reloaded %s: launchd stopped spawning it\n-- launchctl print\n%s\n-- launchd log, last 2 h\n%s\n",
 		rpc.SyncReloadMark, now.UTC().Format(time.RFC3339), SyncLabel, view, w.launchdLog(ctx))
 	if err := w.reload(); err != nil {
 		record += "-- reload failed: " + err.Error() + "\n"
@@ -68,11 +68,12 @@ func appendSyncReloadRecord(record string) {
 	_, _ = f.WriteString(record)
 }
 
-// launchdLogLines is what the unified log says about the agent over the last day, its first and last 8 KB.
+// launchdLogLines is what the unified log says about the agent over two hourly ticks, its first and last 8 KB
+// (26 h took over 90 s on the laptop).
 func launchdLogLines(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/log", "show", "--last", "26h", "--style", "compact",
+	out, err := exec.CommandContext(ctx, "/usr/bin/log", "show", "--last", "2h", "--style", "compact",
 		"--predicate", fmt.Sprintf("eventMessage CONTAINS %q", SyncLabel)).Output()
 	s := string(out)
 	if len(s) > 2*launchdLogHalf {
