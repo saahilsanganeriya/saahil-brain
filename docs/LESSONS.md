@@ -462,3 +462,16 @@ a new person showed steps that only ever happened by hand, and values that only 
   The copies stay on disk until `brain sync --archive-conflicts` moves them into `.archive/conflicts/`.
 - **Rule.** A file the sync writes as a side effect is not brain content. Every reader that lists brain files by
   name filters it with the same predicate.
+
+## 31. The link skill kept adding a sixth related link
+
+- **Symptom.** On 2026-10-23, `curate.link` stayed `ok` in all 16 dreams, but the applier refused 60 of its link ops
+  ("about and related hold ≤ 5 each"), up to 11 in one dream. One note was refused 15 times, because each dream that
+  rewrote it handed it to the link step again.
+- **Cause.** 58 of the 60 refused ops started at a note in `proposed`, where the skill sees the whole note and its 5
+  `related` links. The skill named the 0–5 range only in its output sketch, with no rule for a note that is full.
+- **Fix.** The link skill counts a note's links first: a note that already holds 5 of a kind gets none of that kind.
+  It links from the other note only when that note is in `proposed` and has room. The cap is `config.LinksPerKindMax`,
+  and a skills test checks that the link skill states the rule. In a replay of 4 dreams' exact inputs, the old skill
+  put 26 of 87 related links over the cap and the new skill 0 of 71, with as many valid links (60 and 63).
+- **Rule.** A skill must state every cap the applier refuses it for, and what to do when the cap is reached.

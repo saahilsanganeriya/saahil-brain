@@ -329,8 +329,8 @@ func Check(n Note, rendered []byte, resolve func(kind, ref string) bool) []strin
 			bad("a %s needs ≥ 1 evidence path", n.Type)
 		}
 	}
-	if len(n.About) > 5 || len(n.Related) > 5 {
-		bad("about and related hold ≤ 5 each")
+	if len(n.About) > config.LinksPerKindMax || len(n.Related) > config.LinksPerKindMax {
+		bad("about and related hold ≤ %d each", config.LinksPerKindMax)
 	}
 	for _, r := range n.Related {
 		if strings.TrimSpace(r.Why) == "" {

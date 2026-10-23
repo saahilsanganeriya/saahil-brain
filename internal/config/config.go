@@ -103,6 +103,7 @@ const (
 	NoteMaxBytes        = 4 * 1024
 	SummaryMaxChars     = 160
 	LessonMaxChars      = 300
+	LinksPerKindMax     = 5 // a note's about and related links, each
 	SectionWarnBytes    = 20 * 1024
 	BigDocBytes         = 50 * 1024
 )

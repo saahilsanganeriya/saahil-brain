@@ -39,11 +39,14 @@ ONE JSON object, nothing else:
 1. Link only to ids in `proposed` or `candidates`, and never a note to itself.
 2. Prefer one precise `about` over several `related`. `related` needs a reason a reader would act on: "same OCR
    budget", "the fix for this symptom" — not "similar topic".
-3. Every proposed note must end with ≥ 1 incoming or outgoing edge besides its hubs. If no candidate fits, say so in
+3. Count the links a note has before you add one: it holds at most 5 `about` and 5 `related`, and the applier refuses
+   a sixth. When a note already holds 5 of a kind, add none of that kind from it. Link from the other note instead
+   only when that note is in `proposed`, has room, and the `why` reads from its side; else leave the link out.
+4. Every proposed note must end with ≥ 1 incoming or outgoing edge besides its hubs. If no candidate fits, say so in
    `notes` instead of forcing a link.
-4. Add a hub only when the note is clearly about that hub's scope and has fewer than 3 hubs.
-5. Add an alias when the note's subject has a common name the note does not use (a tool's short name, an acronym).
-6. Answer with the JSON only.
+5. Add a hub only when the note is clearly about that hub's scope and has fewer than 3 hubs.
+6. Add an alias when the note's subject has a common name the note does not use (a tool's short name, an acronym).
+7. Answer with the JSON only.
 
 ## Examples
 

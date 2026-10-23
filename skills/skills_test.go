@@ -111,6 +111,20 @@ func TestSkillExamplesAndSeedHubsPassLint(t *testing.T) {
 // noteWriters are the skills whose answers write a note's summary or body (hubs edits hub pages, link only aliases).
 var noteWriters = []string{"file", "distil", "verify", "wrap"}
 
+// TestLinkSkillSaysWhatAFullNoteGets catches the link skill naming the per-note link cap only in its output sketch: with
+// no rule for a note that already holds the cap, it proposed a sixth related link on the notes it was handed and the
+// applier refused 60 link ops in 16 dreams of 2026-10-23, one note 15 times.
+func TestLinkSkillSaysWhatAFullNoteGets(t *testing.T) {
+	b, err := fs.ReadFile(FS, "link.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := fmt.Sprintf("already holds %d", config.LinksPerKindMax)
+	if !strings.Contains(string(b), rule) {
+		t.Errorf("link.md has no rule for a note that %s `about` or `related` links", rule)
+	}
+}
+
 // TestNoteWritingSkillsStateTheCaps catches a skill that writes note text without stating the caps the applier
 // refuses it for: verify never named them, and the applier refused 43% of its ops (summaries over 160 chars, lesson
 // bodies over 300) while the step stayed ok.
