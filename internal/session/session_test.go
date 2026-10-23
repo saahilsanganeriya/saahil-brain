@@ -229,6 +229,31 @@ func TestNoteRewrittenOnlyWhenTranscriptChanges(t *testing.T) {
 	}
 }
 
+// Catches the writer taking a sync conflict copy of the note ("<note> (conflict_on_<date>).md", same session_id) for
+// the note: the copy sorts first, so the session was written into the copy and its real path, which notes cite, removed.
+func TestSyncConflictCopyIsNotTheSessionsNote(t *testing.T) {
+	transcript, brain := projectsFixture(t), t.TempDir()
+	first, note1 := writeNote(t, transcript, brain)
+	conflictCopy := strings.TrimSuffix(first.Path, ".md") + " (conflict_on_2026-10-23).md"
+	if err := os.WriteFile(conflictCopy, []byte(note1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(f, `{"type":"assistant","timestamp":"2026-10-08T03:00:00.000Z","message":{"content":[{"type":"text","text":"GREW-AFTER-SYNC"}]}}`+"\n")
+	f.Close()
+
+	grown, note := writeNote(t, transcript, brain)
+	if grown.Path != first.Path || !strings.Contains(note, "GREW-AFTER-SYNC") {
+		t.Fatalf("grown session written to %s, want its own path %s", grown.Path, first.Path)
+	}
+	if raw, err := os.ReadFile(conflictCopy); err != nil || string(raw) != note1 {
+		t.Fatalf("the conflict copy is the sync's to archive, not the writer's to change or remove: %v", err)
+	}
+}
+
 // Catches a session moved to another worktree (same id under two project dirs) flip-flopping its note between the two
 // copies on every run instead of keeping the newer, larger one.
 func TestMovedSessionKeepsOneNote(t *testing.T) {

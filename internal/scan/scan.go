@@ -138,7 +138,8 @@ func (w *walker) dir(abs, presented string, list []os.DirEntry) error {
 			err = w.child(name, childAbs, childPath)
 		case strings.HasPrefix(name, "."):
 			// dotfiles (.env, .DS_Store) are never opened
-		case ClassOf(name) == "":
+		case ClassOf(name) == "", config.IsSyncConflictCopy(name):
+			// a conflict copy is a sync's older loser, kept on disk for the owner, never live content
 			w.stats.Ignored++
 		case !mode.IsRegular():
 			err = w.emit(Entry{Path: childPath, Abs: childAbs, Kind: Skip, Reason: "not-regular"})

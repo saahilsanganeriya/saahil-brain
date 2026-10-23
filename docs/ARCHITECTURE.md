@@ -322,7 +322,7 @@ is kept as a conflict copy, never lost.
 | options | `-batch -auto -times -prefer newer -copyonconflict -maxsizethreshold 2048` (files over 2 MB are skipped and listed); run with `UNISONLOCALHOSTNAME=laptop`, so the archive keeps one name when macOS renames the laptop on a new network |
 | never synced | `.index`, `.data`, `.archive`, `.git`, `*.db*`, locks, the dream's own state (`.brain/dream-state.json`, `.brain/dream-last-skip.json`), `.DS_Store`, and folders named `artifacts`, `.sync-backups`, `ctx`, `target*`, `*.egg-info`, `node_modules`, `__pycache__`, `.venv`, `venv` |
 | under `work/` | text only: `md txt py sh js toml yml yaml` and files with no extension |
-| conflicts | the loser stays as `<file> (conflict…)`; `brain sync --archive-conflicts` moves losers to `.archive/conflicts/<machine>/` |
+| conflicts | the loser stays as `<file> (conflict…)`; `brain sync --archive-conflicts` moves losers to `.archive/conflicts/<machine>/`. The index and the session-note writer never read a conflict copy |
 | half-copies | a Unison temp file (`.unison.*`) older than 2 h is an abandoned transfer; every sync archives it |
 | after a sync | the laptop re-indexes, so its pointers stay fresh |
 

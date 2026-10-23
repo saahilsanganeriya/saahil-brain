@@ -446,3 +446,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   reload, `sync.last` is a warning that names the reload.
 - **Rule.** A scheduled job that can stop without an error gets a watcher in a process that stays alive. The watcher
   repairs the job and records why it stopped.
+
+## 30. A sync conflict copy was read as brain content
+
+- **Symptom.** On 2026-10-23 one sync left 58 conflict copies, most of them older versions of hubs and notes that only
+  the devbox's dream writes. Three minutes later, 8 session notes existed only as `<note> (conflict_on_<date>).md`,
+  and their real paths, which other notes cite, were gone (`graph dangling links`). The prompt hook also showed two
+  conflict copies to agents as pointers.
+- **Cause.** Two readers took a conflict copy for live content. The session-note writer finds a session's note by the
+  glob `*-<id8>-*.md`, which also matches the copy (same `session_id`). It writes to the first path in sort order, and
+  a space sorts before `.`, so it wrote the copy and removed the real note. The index read every `.md` file, so the
+  copy became a ranked node with its own id.
+- **Fix.** The scan never emits a sync conflict copy (`config.IsSyncConflictCopy`), so the index, search, pointers
+  and graph checks never see one. The session-note writer skips conflict copies when it looks for the session's note.
+  The copies stay on disk until `brain sync --archive-conflicts` moves them into `.archive/conflicts/`.
+- **Rule.** A file the sync writes as a side effect is not brain content. Every reader that lists brain files by
+  name filters it with the same predicate.

@@ -142,11 +142,15 @@ type fingerprint struct {
 	redact int
 }
 
-// existingNotes finds this session's notes (any month, any slug) by the session_id in their frontmatter.
+// existingNotes finds this session's notes (any month, any slug) by the session_id in their frontmatter. A sync
+// conflict copy carries the same session_id but is the sync's to archive, never the note.
 func existingNotes(dir, id string) map[string]fingerprint {
 	out := map[string]fingerprint{}
 	matches, _ := filepath.Glob(filepath.Join(dir, "*", "*", "*-"+short(id)+"-*.md"))
 	for _, path := range matches {
+		if config.IsSyncConflictCopy(filepath.Base(path)) {
+			continue
+		}
 		front := readFrontmatter(path)
 		if front["session_id"] != id {
 			continue

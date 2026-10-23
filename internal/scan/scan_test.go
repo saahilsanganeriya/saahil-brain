@@ -57,6 +57,22 @@ func TestScanDoesNotFollowDirLinks(t *testing.T) {
 	}
 }
 
+// TestScanSkipsSyncConflictCopies catches a sync's losing copy ("<file> (conflict_on_<date>).md", an older version)
+// being indexed as live content: it ranked beside the winner and the prompt hook showed it as a pointer.
+func TestScanSkipsSyncConflictCopies(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "notes", "decision-x.md"), []byte("# X\n"))
+	write(t, filepath.Join(root, "notes", "decision-x (conflict_on_2026-10-23).md"), []byte("# X, older\n"))
+
+	got := walkAll(t, Root{Abs: root})
+	if _, ok := got["notes/decision-x.md"]; !ok {
+		t.Fatalf("the winner was not visited: %v", got)
+	}
+	if _, ok := got["notes/decision-x (conflict_on_2026-10-23).md"]; ok {
+		t.Fatalf("a sync conflict copy was emitted: %v", got)
+	}
+}
+
 // TestScanSurvivesOddFiles catches a crash, hang or unbounded read on the odd files a real corpus holds: a binary
 // file named .md, invalid UTF-8, a 214 MB jsonl, an over-cap markdown, a FIFO named .md, and a .env that must never
 // be opened.

@@ -104,7 +104,7 @@ A `prompt` row's `phases` says where its `ms` went: `open`, `names`, `read`, `di
 `stale_names` when the names cache was older than the index (the hook started a rebuild). Other rows leave it empty.
 
 Never ranked: `status ∈ {superseded, retired}`, `canonical_of != ''` (byte copies), `type ∈ {session, day}`, paths
-under `log/` or `.archive/`.
+under `log/` or `.archive/`. Never indexed: sync conflict copies (`<file> (conflict…)`, `config.IsSyncConflictCopy`).
 
 ## Code conventions
 
