@@ -22,6 +22,7 @@ import (
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/llm"
 	"saahil.local/brain/internal/rank"
+	brainscan "saahil.local/brain/internal/scan"
 	"saahil.local/brain/internal/store"
 )
 
@@ -161,7 +162,8 @@ func (a *Activities) Gate(_ context.Context, in GateInput) (GateResult, error) {
 
 type root struct{ abs, relPrefix string }
 
-// scan lists .md files changed after since, oldest first. It never follows links and skips dot-folders below a root.
+// scan lists .md files changed after since, oldest first. It never follows links and skips dot-folders below a root
+// and the folders the index never reads (artifacts/, node_modules/ …), where work/ keeps millions of run outputs.
 func scan(since time.Time, roots ...root) ([]Material, error) {
 	var out []Material
 	for _, r := range roots {
@@ -173,7 +175,7 @@ func scan(since time.Time, roots ...root) ([]Material, error) {
 				return err
 			}
 			if d.IsDir() {
-				if p != r.abs && strings.HasPrefix(d.Name(), ".") {
+				if p != r.abs && (strings.HasPrefix(d.Name(), ".") || brainscan.NeverReadsBelow(d.Name())) {
 					return filepath.SkipDir
 				}
 				return nil

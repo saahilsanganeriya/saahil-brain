@@ -475,3 +475,16 @@ a new person showed steps that only ever happened by hand, and values that only 
   and a skills test checks that the link skill states the rule. In a replay of 4 dreams' exact inputs, the old skill
   put 26 of 87 related links over the cap and the new skill 0 of 71, with as many valid links (60 and 63).
 - **Rule.** A skill must state every cap the applier refuses it for, and what to do when the cap is reached.
+
+## 32. The dream gate walked every run output in work/
+
+- **Symptom.** On 2026-10-24 the dream at 11Z failed: its gate step timed out three times (15 min each), so the dream
+  lost the hour. The gate at 15Z took 26 min. Every dream listed about 64,000 changed docs, and 14,299 big docs waited
+  for a summary. The docs watermark stayed at 2026-09-04.
+- **Cause.** The gate walked all of `work/` and skipped only dot-folders. `work/` held 10 M entries, and 7.6 M of them
+  were below `artifacts/` and other bulk folders. The index never reads those folders, but the gate listed their `.md`
+  run outputs as docs. 8,870 of the waiting big docs were run outputs that no search can show.
+- **Fix.** The gate walk skips the folders that the index never reads (`scan.NeverReadsBelow`). On the live brain the
+  walk read 23,237 docs, not 64,334, and 5,488 big docs, not 14,370. It took 3.2 s, not 14.4 s, with a warm cache.
+- **Rule.** Two readers that select the same content use the same predicate. The dream works only on files that the
+  index can show.

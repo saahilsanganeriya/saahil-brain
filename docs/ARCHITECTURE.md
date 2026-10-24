@@ -212,6 +212,7 @@ parts, and the model can only propose edits; code checks and applies them.
 ```
  hourly Temporal Schedule brain-dream-hourly
    └─ gate: new material? (sessions/, memory/ captures, inbox/, changed docs under work/)      no ─► skip
+            (docs = .md files the index reads: never below artifacts/, node_modules/, cache*/, dot-folders)
             ≥ 12 h since the last dream OR ≥ 30 new sessions?                                  no ─► wait
             lock free (.brain/dream.lock, stale after 3 h)?                                     no ─► wait
    └─ run:

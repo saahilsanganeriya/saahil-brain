@@ -187,6 +187,9 @@ func skippedDir(name string) bool {
 	return skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".data" && name != ".archive")
 }
 
+// NeverReadsBelow reports whether the index reads no file below a folder of this name: skipped, or bulk by name.
+func NeverReadsBelow(name string) bool { return skippedDir(name) || isBulkName(name) }
+
 var repoMarkers = map[string]bool{".git": true, "go.mod": true, "package.json": true, "Cargo.toml": true,
 	"pyproject.toml": true, "setup.py": true}
 
