@@ -98,6 +98,7 @@ const (
 	PointerMaxTokens    = 300
 	HotMaxWords         = 500
 	HubMaxLines         = 200
+	HubLineMaxChars     = 300 // a hub's Start here or Open questions line: a pointer, the facts stay in the note
 	StateMaxBytes       = 8 * 1024
 	CardMaxBytes        = 3 * 1024
 	NoteMaxBytes        = 4 * 1024

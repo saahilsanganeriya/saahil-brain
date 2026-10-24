@@ -12,7 +12,7 @@ hot.md          this week, ≤ 500 words (baseline, overwritten by the dream)
 index.md        the home hub: one line per top hub
 memory/         Claude Code auto memory for EVERY repo (autoMemoryDirectory); MEMORY.md ≤ 200 lines / 25 KB
 notes/          atomic knowledge, flat: <type>-<slug>.md, ≤ 4 KB each
-hubs/           <hub-id>.md, ≤ 200 lines
+hubs/           <hub-id>.md, ≤ 200 lines; a Start here or Open questions line ≤ 300 chars
 work/<box>/     the saahil-docs boxes, unchanged; + CARD.md (≤ 3 KB) and STATE.md (≤ 8 KB) baselines; log/ history
 sessions/<machine>/YYYY/MM/<YYYY-MM-DD>-<session8>-<slug>.md     one per transcript, ≤ 8 KB
 journal/YYYY/MM/YYYY-MM-DD.md                                     one per day, ≤ 6 KB (dream)

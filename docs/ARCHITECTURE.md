@@ -45,7 +45,7 @@ useful in another. Some files are loaded into every session; history files are n
   memory/         Claude Code's auto memory for EVERY repo (autoMemoryDirectory)
     MEMORY.md     the global baseline, ≤ 200 lines and ≤ 24 KiB, loaded in every session
   notes/          small typed notes, flat: <type>-<slug>.md, ≤ 4 KB each
-  hubs/           topic pages: <hub-id>.md, ≤ 200 lines
+  hubs/           topic pages: <hub-id>.md, ≤ 200 lines; a Start here or Open questions line ≤ 300 chars
   work/<box>/     your work: specs, plans, reports, tools, results
     CARD.md       what the box is, where it stands, its key files (≤ 3 KB, the dream keeps it current)
     STATE.md      where the work stands now (≤ 8 KB, overwritten)

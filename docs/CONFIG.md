@@ -142,7 +142,7 @@ steps on the laptop run from an interactive shell with `BRAIN_LLM_LOGIN=1`.
 |---|---|
 | Models | judgment `claude-opus-5-5`, bulk `claude-haiku-5-5` |
 | Cost guards | ≤ $8 per dream run; ≤ $100 per UTC day for all brain model calls; backfill ≤ $80 in total (`--budget`) |
-| Caps | MEMORY.md ≤ 200 lines and ≤ 24 KiB · start digest ≤ 8,000 chars · ≤ 3 pointers, ≤ 300 tokens · hot.md ≤ 500 words · hub ≤ 200 lines · STATE.md ≤ 8 KB · CARD.md ≤ 3 KB · note ≤ 4 KB · lesson ≤ 300 chars · summary ≤ 160 chars |
+| Caps | MEMORY.md ≤ 200 lines and ≤ 24 KiB · start digest ≤ 8,000 chars · ≤ 3 pointers, ≤ 300 tokens · hot.md ≤ 500 words · hub ≤ 200 lines, a hub line ≤ 300 chars · STATE.md ≤ 8 KB · CARD.md ≤ 3 KB · note ≤ 4 KB · lesson ≤ 300 chars · summary ≤ 160 chars |
 | Hook budgets | start ≤ 300 ms; prompt p95 ≤ 150 ms; every hook fails open (no output, exit 0) |
 | Bridge | laptop `127.0.0.1:7722`, Bearer token in `~/.config/brain/bridge.token` (mode 600, ≥ 32 chars) |
 | Temporal | `127.0.0.1:7233`, web UI `127.0.0.1:8233`, namespace `brain`, history kept 30 days |

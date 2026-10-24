@@ -37,19 +37,24 @@ ONE JSON object, nothing else:
 ## Rules
 
 1. **Body layout** (keep this order and these headings): `# Title`, the scope paragraph unchanged, `## Start here`
-   (≤ 7 lines: `- [id](../notes/id.md) — why read it first`), `## Members` (the query sentence, unchanged),
-   `## Child hubs` (only if any), `## Open questions` (≤ 5 lines). The page stays ≤ 200 lines.
+   (≤ 7 lines: `- [id](../notes/id.md) — why read it first`, each line ≤ 300 characters), `## Members` (the query
+   sentence, unchanged), `## Child hubs` (only if any), `## Open questions` (≤ 5 lines, each ≤ 300 characters). The
+   page stays ≤ 200 lines.
 2. **Start here** = the notes a newcomer needs first: current decisions, then the top lessons and playbooks, then
    key findings. Only ids from `members`. Superseded or retired notes never appear.
 3. **Open questions** come from members that say something is unknown, contested or untested. Drop an answered one
    and name the note that answered it in `notes`.
-4. **Propose a hub** only when ≥ 8 live notes from ≥ 2 works share a topic that no hub covers; list them in
+4. **A line is a pointer, not a summary.** It says in one clause why to read the note, or what is unknown. Numbers,
+   dates, names and history stay in the notes, which the reader opens. Never add a fact to a full line: write a new
+   short line or leave it out. When a page you get has a line over 300 characters, write that line short in your
+   update of the page, even if nothing else on the page changes.
+5. **Propose a hub** only when ≥ 8 live notes from ≥ 2 works share a topic that no hub covers; list them in
    `members`, give `broader` (1–2 existing hubs, depth ≤ 3) and a `why`. Never create a live hub yourself.
-5. **Split** a hub above ~50 live members with two clear sub-topics: propose the children (rule 4). **Retire** a hub
+6. **Split** a hub above ~50 live members with two clear sub-topics: propose the children (rule 5). **Retire** a hub
    after 60 days with < 3 live members: `set: {"status": "retired"}`, with the reason in `notes`. Never delete.
-6. Re-home an orphan with a `link` op (`rel: "hubs"`) when a hub clearly fits; a note holds 1–3 hubs.
-7. Change a hub's summary or aliases only when its members show the old ones are wrong or missing.
-8. Answer with the JSON only.
+7. Re-home an orphan with a `link` op (`rel: "hubs"`) when a hub clearly fits; a note holds 1–3 hubs.
+8. Change a hub's summary or aliases only when its members show the old ones are wrong or missing.
+9. Answer with the JSON only.
 
 ## Examples
 

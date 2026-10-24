@@ -125,6 +125,19 @@ func TestLinkSkillSaysWhatAFullNoteGets(t *testing.T) {
 	}
 }
 
+// TestHubsSkillCapsALine catches the hubs skill keeping Start here and Open questions to a count of lines only: each
+// dream rewrote its lines longer, the largest hub reached 46 KB in 34 lines (Start here items up to 7,560 chars), the
+// start digest showed 1 of 7 items, and curate.hubs ran past its $2.50 budget in 3 of 5 dreams on 2026-10-24.
+func TestHubsSkillCapsALine(t *testing.T) {
+	b, err := fs.ReadFile(FS, "hubs.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rule := fmt.Sprintf("≤ %d characters", config.HubLineMaxChars); strings.Count(string(b), rule) < 2 {
+		t.Errorf("hubs.md does not cap each Start here and Open questions line at %q", rule)
+	}
+}
+
 // TestNoteWritingSkillsStateTheCaps catches a skill that writes note text without stating the caps the applier
 // refuses it for: verify never named them, and the applier refused 43% of its ops (summaries over 160 chars, lesson
 // bodies over 300) while the step stayed ok.

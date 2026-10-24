@@ -488,3 +488,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   walk read 23,237 docs, not 64,334, and 5,488 big docs, not 14,370. It took 3.2 s, not 14.4 s, with a warm cache.
 - **Rule.** Two readers that select the same content use the same predicate. The dream works only on files that the
   index can show.
+
+## 33. Hub lines grew until curate.hubs ran out of budget
+
+- **Symptom.** On 2026-10-24 `curate.hubs` failed in 3 of 5 dreams with `error_max_budget_usd` ($2.96 to $3.30 on a
+  $2.50 budget), and its edits were lost. Its output grew from about 23,000 tokens (10-21) to 60,000 to 78,000. The
+  largest hub was 46 KB in 34 lines. One Start here line had 7,560 characters. The start digest has 8,000 characters
+  for all its blocks, so a session saw 1 or 2 of a hub's 7 Start here items.
+- **Cause.** The skill limited Start here and Open questions by a count of lines, not by length. Each dream added
+  facts to existing lines, and each `replace_body` rewrote the whole page. The step's cost grew with each page, and a
+  dream that touched 11 to 13 pages went over the budget.
+- **Fix.** The hubs skill limits each Start here and Open questions line to `config.HubLineMaxChars` (300). A line
+  is a pointer: the facts stay in the note. A page with a longer line is written short in the next update. A skills
+  test checks that the skill states the limit. In a replay of real dream inputs, the input that failed live at $2.96
+  passed at $2.04, and pages went from 3 KB to 46 KB down to 2 KB to 3 KB. The navigation and owner evals, and the
+  pointers shown, did not change.
+- **Rule.** A cap that counts lines also needs a limit on line length when a model writes the lines.
