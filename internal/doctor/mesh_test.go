@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,5 +55,41 @@ func TestSyncLineWarnsAfterTheBridgeReloadedTheAgent(t *testing.T) {
 	_ = os.WriteFile(rpc.SyncAgentReloadLog(), []byte(reload), 0o600)
 	if status, detail := checkSync(context.Background()); status != Warn || !strings.Contains(detail, "reloaded the hourly agent") {
 		t.Errorf("fresh sync an hour after a reload: %s %q, want warn naming the reload", status, detail)
+	}
+}
+
+// TestConflictWalkFansOutWithTheSerialResult catches the devbox's sync.conflicts timing out at 2 min (2026-10-25):
+// one serial walk of work/'s 2.24 M entries outran the check. The walk now reads folders on goroutines; at any width
+// it must list the same copies in the same order as the serial walk, skip what the sync never carries, and count
+// unison's fresh half-copies as in flight.
+func TestConflictWalkFansOutWithTheSerialResult(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{
+		"notes/a (conflict on 2026-10-23).md", "notes/a.md",
+		"work/box-a/plans/b (conflict #1 on 2026-10-23).md", "work/box-a/plans/b.md",
+		"work/box-b/STATE (conflict on 2026-10-22).md", "work/box-b/deep/x/y/z (conflict on 2026-10-22).md",
+		"work/box-b/artifacts/run (conflict on 2026-10-22).md", ".archive/conflicts/old (conflict on 2026-10-01).md",
+		"work/box-c/.unison.tmp-1",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(p)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, p), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"notes/a (conflict on 2026-10-23).md", "work/box-a/plans/b (conflict #1 on 2026-10-23).md",
+		"work/box-b/STATE (conflict on 2026-10-22).md", "work/box-b/deep/x/y/z (conflict on 2026-10-22).md"}
+	defer func(prev func()) { conflictWalkForked = prev }(conflictWalkForked)
+	for _, width := range []int{0, 1, 3, 64} {
+		var forked atomic.Int64
+		conflictWalkForked = func() { forked.Add(1) }
+		found, inFlight := conflictCopies(root, width)
+		if strings.Join(found, "|") != strings.Join(want, "|") || inFlight != 1 {
+			t.Fatalf("width %d: found %q, %d in flight; want %q, 1", width, found, inFlight, want)
+		}
+		if (width == 0) != (forked.Load() == 0) {
+			t.Fatalf("width %d: %d folders read on a goroutine", width, forked.Load())
+		}
 	}
 }
