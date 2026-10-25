@@ -349,16 +349,36 @@ func (a *Activities) gitCommit(ctx context.Context, msg string) (string, error) 
 	return a.git(ctx, "rev-parse", "HEAD")
 }
 
+// gitLockWait pauses before the next try on a held git lock; tests replace it.
+var gitLockWait = func(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
 // git runs with a fixed identity and no hooks or signing: the brain's repo is local history, and the code repo's
 // pre-commit guard (which refuses brain data) must not apply to it.
 func (a *Activities) git(ctx context.Context, args ...string) (string, error) {
 	full := append([]string{"-C", a.Cfg.BrainRoot, "-c", "user.name=brain-dream", "-c", "user.email=dream@brain.local",
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}, args...)
-	out, err := exec.CommandContext(ctx, "git", full...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+	// Any git run under the brain holds these locks too (boxes in work/ sit inside this repo): wait about 1 min.
+	for wait := 2 * time.Second; ; wait *= 2 {
+		out, err := exec.CommandContext(ctx, "git", full...).CombinedOutput()
+		if err == nil {
+			return strings.TrimSpace(string(out)), nil
+		}
+		if !strings.Contains(string(out), ".lock': File exists") || wait > time.Minute {
+			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+		}
+		if werr := gitLockWait(ctx, wait); werr != nil {
+			return "", werr
+		}
 	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func (a *Activities) writeTarball(dst string, dirs ...string) error {

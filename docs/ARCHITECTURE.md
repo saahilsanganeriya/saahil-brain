@@ -330,7 +330,8 @@ is kept as a conflict copy, never lost.
 ## 12. Git history
 
 `~/brain/.git` lives on the devbox only. The dream's snapshot step commits brain text before every run and its
-commit step commits after. Under `work/`, git tracks only `CARD.md`: the boxes hold hundreds of GB of results, and
+commit step commits after. When another git process holds a lock in the repository, the dream's git commands wait and
+try again for about 1 minute. Under `work/`, git tracks only `CARD.md`: the boxes hold hundreds of GB of results, and
 hashing them once filled the disk (see [LESSONS.md](LESSONS.md#2-the-git-snapshot-hashed-all-of-work)). `memory/`
 and `notes/` are also saved as a tarball before each dream. Undo a bad dream with `git revert` of its commit, or copy
 files back from `.archive/dream/<run>/before/`.
