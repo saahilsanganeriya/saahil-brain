@@ -49,7 +49,78 @@ func (a *Activities) SkillStep(ctx context.Context, in LLMStepInput) (LLMStepRes
 		out.Status, out.Reason = "failed", "answer is not a delta"
 		return out, a.Ledger.Finish(key, llm.Result{}, "failed", time.Now())
 	}
-	return a.applyDelta(ctx, in, out, d, []string{key})
+	d, out, keys, unrepaired, err := a.repairRefused(ctx, in, out, string(skill), d, key)
+	if err != nil {
+		return out, err
+	}
+	applied, err := a.applyDelta(ctx, in, out, d, keys)
+	if unrepaired > 0 {
+		applied.Refused += unrepaired
+		applied.Reason += fmt.Sprintf("; %d refused ops left out by the repair", unrepaired)
+	}
+	return applied, err
+}
+
+type refusedOp struct {
+	Op     delta.Op `json:"op"`
+	Reason string   `json:"reason"`
+}
+
+const repairAsk = "The applier refused these ops of your answer, for the reason given with each. Answer with a delta " +
+	"that holds a corrected op for each one, following the skill's rules and keeping every fact (a fact that does " +
+	"not fit one note type goes in another); leave out an op you cannot correct."
+
+// repairRefused asks the skill once more, with only the ops the applier refused and why, and swaps its answer in for
+// them: a refused op was dropped for good, and the file step lost every over-long lesson that way. One round only;
+// what the repair gets wrong is refused as before, and an op it leaves out still counts as refused.
+func (a *Activities) repairRefused(ctx context.Context, in LLMStepInput, out LLMStepResult, skill string,
+	d delta.Delta, key string) (delta.Delta, LLMStepResult, []string, int, error) {
+	rep, err := delta.Apply(ctx, a.Cfg.BrainRoot, d, delta.Options{DryRun: true, Now: time.Now(), WorkRoot: a.shadowRoot()})
+	if err != nil {
+		return d, out, nil, 0, err
+	}
+	refused := map[int]bool{}
+	var ask struct {
+		Ask     string      `json:"ask"`
+		Refused []refusedOp `json:"refused"`
+	}
+	for _, r := range rep.Rejected {
+		if r.Op != "delete" && r.Index < len(d.Ops) && !refused[r.Index] {
+			refused[r.Index] = true
+			ask.Refused = append(ask.Refused, refusedOp{Op: d.Ops[r.Index], Reason: r.Reason})
+		}
+	}
+	if len(refused) == 0 {
+		return d, out, []string{key}, 0, nil
+	}
+	ask.Ask = repairAsk
+	input, err := json.Marshal(ask)
+	if err != nil {
+		return d, out, nil, 0, err
+	}
+	rin := in
+	rin.Step, rin.RunSpentUSD, rin.BudgetUSD = in.Step+".repair", in.RunSpentUSD+out.CostUSD, in.BudgetUSD-out.CostUSD
+	if rin.BudgetUSD <= 0 {
+		return d, out, []string{key}, 0, nil
+	}
+	rkey := llm.Key(rin.Workflow, rin.Step, rin.Model, skill, string(input))
+	res, got, err := a.callOnce(ctx, rin, rkey, skill, string(input))
+	if err != nil {
+		return d, out, nil, 0, err
+	}
+	out.CostUSD, out.Called, out.Cached = out.CostUSD+got.CostUSD, out.Called || got.Called, out.Cached && got.Cached
+	fixed, ok := parseDelta(res)
+	if got.Status != "ok" || !ok {
+		return d, out, []string{key}, 0, nil
+	}
+	kept := delta.Delta{Notes: d.Notes, Verdicts: d.Verdicts, Summaries: d.Summaries}
+	for i, op := range d.Ops {
+		if !refused[i] {
+			kept.Ops = append(kept.Ops, op)
+		}
+	}
+	kept.Ops = append(kept.Ops, fixed.Ops...)
+	return kept, out, []string{key, rkey}, max(0, len(refused)-len(fixed.Ops)), nil
 }
 
 func parseDelta(res llm.Result) (delta.Delta, bool) {

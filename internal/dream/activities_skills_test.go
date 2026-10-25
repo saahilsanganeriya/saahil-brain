@@ -26,7 +26,7 @@ func TestSkillStepFilesThroughDeltas(t *testing.T) {
 	}
 	var fileInput string
 	fake := &llm.Fake{Respond: func(c llm.Call) llm.Result {
-		if !strings.HasPrefix(c.Skill, "# skill file") {
+		if !strings.HasPrefix(c.Skill, "# skill file") || strings.Contains(c.Input, `"refused":`) {
 			return llm.Result{JSON: json.RawMessage(`{"ops":[]}`)}
 		}
 		fileInput = c.Input
@@ -63,6 +63,46 @@ func TestSkillStepFilesThroughDeltas(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(brain, "notes/lesson-rebase-before-push.md"))
 	if err != nil || !strings.Contains(string(b), "hubs: [git]") {
 		t.Fatalf("note not written by the delta: %v\n%s", err, b)
+	}
+}
+
+// TestSkillStepRepairsRefusedOpsOnce catches a skill answer whose refused op is dropped for good: the file step lost
+// 9 lessons between 2026-10-14 and 2026-10-25 (bodies 310–381 chars against the 300 cap) because the captures
+// watermark moved past them. The step asks the same skill once more with only the refused ops and their reasons.
+func TestSkillStepRepairsRefusedOpsOnce(t *testing.T) {
+	brain, skills := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(brain, "memory/feedback-x.md"), "x\n")
+	write(t, filepath.Join(brain, "hubs/git.md"), "---\nid: git\ntype: hub\nstatus: current\nsummary: git\n---\n")
+	write(t, filepath.Join(skills, "file.md"), "# skill file\n")
+	lesson := func(body string) string {
+		return `{"op":"add_note","note":{"id":"lesson-rebase-twice","type":"lesson","status":"current","summary":"rebase twice",
+ "scope":"global","hubs":["git"],"evidence":["memory/feedback-x.md"],"body":"` + body + `"}}`
+	}
+	var repairInput string
+	fake := &llm.Fake{CostUSD: 0.01, Respond: func(c llm.Call) llm.Result {
+		if strings.Contains(c.Input, `"refused":`) {
+			repairInput = c.Input
+			return llm.Result{JSON: json.RawMessage(`{"ops":[` + lesson("When a stack moves, rebase twice.") + `]}`)}
+		}
+		return llm.Result{JSON: json.RawMessage(`{"ops":[` + lesson(strings.Repeat("x", 301)) + `]}`)}
+	}}
+	ledger, err := llm.OpenLedger(filepath.Join(brain, ".index", "brain.db"), filepath.Join(brain, ".data", "llm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	acts := &Activities{Cfg: Config{BrainRoot: brain, SkillsDir: skills}, LLM: fake, Ledger: ledger}
+	in := LLMStepInput{Workflow: "dream", Step: "file", Skill: "file", Model: "m", BudgetUSD: 0.5,
+		Material: []Material{{Rel: "memory/feedback-x.md", Abs: filepath.Join(brain, "memory/feedback-x.md")}}}
+
+	out, err := acts.SkillStep(context.Background(), in)
+	if err != nil || out.Status != "ok" || out.Refused != 0 || len(out.Edits) != 1 ||
+		out.Edits[0].Path != "notes/lesson-rebase-twice.md" {
+		t.Fatalf("the refused lesson was not repaired: %+v %v", out, err)
+	}
+	if !strings.Contains(repairInput, "a lesson body is ≤ 300 chars") || fake.Calls() != 2 || out.CostUSD != 0.02 {
+		t.Fatalf("want one repair call that names the reason, costed: calls %d, cost %.2f, input %s",
+			fake.Calls(), out.CostUSD, repairInput)
 	}
 }
 
