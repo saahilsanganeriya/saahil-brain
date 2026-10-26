@@ -115,6 +115,7 @@ type run struct {
 	gate     GateResult
 	applied  []Applied
 	proposed []Edit
+	held     []heldEdit // edits the cap held from a step that will not propose them again
 	stopLLM  string
 	consumed map[string]bool // material areas whose step ran; only these watermarks advance
 }
@@ -182,6 +183,9 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 		r.cards()
 	}
 	r.llm(summariseStep, r.gate.BigDocs)
+	if workflow.GetVersion(ctx, "land-held", workflow.DefaultVersion, 1) == 1 {
+		r.landHeld()
+	}
 	r.brain("render", []string{"render"})
 	r.check()
 	r.llm(verifyStep, nil)
@@ -250,7 +254,8 @@ func (r *run) llm(s llmStep, material []Material) {
 
 // curationSteps share what learn and file leave of the cap; learn and file consume their input, so they keep first
 // claim (a learn session the cap has no room for waits whole, unconsumed). Of the curation steps only merge and cards rebuild their edits from the whole brain each run, so only their
-// held edits return; link, hubs and verify judge this run's proposals, so an edit the cap holds there is lost.
+// held edits return; link, hubs and verify judge this run's proposals, so an edit the cap holds there is lost unless
+// landHeld finds room for it after summarise.
 var curationSteps = []string{linkStep.name, hubsStep.name, mergeStepName, cardsStepName, verifyStep.name}
 
 var rebuildsEachRun = map[string]bool{mergeStepName: true, cardsStepName: true}
@@ -303,8 +308,77 @@ func (r *run) applyUnit(in ApplyInput) (applied int, held bool) {
 			r.rep.DeletionsRejected++
 		}
 		held = held || rej.Held
+		if rej.Held && rej.Lost {
+			for _, e := range slices.Backward(in.Edits) {
+				if e.Path == rej.Path {
+					r.held = append(r.held, heldEdit{Step: in.Step, Edit: e, After: len(r.applied)})
+					break
+				}
+			}
+		}
 	}
 	return len(res.Applied), held
+}
+
+const heldStepName = "held"
+
+type heldEdit struct {
+	Step  string
+	Edit  Edit
+	After int // len(run.applied) when the cap held it: a write at or after this index makes it stale
+}
+
+// landable is the held edits that can still land: no later write to their file (the edit was made against the file as
+// it was), and for a file held more than once only the last.
+func landable(held []heldEdit, applied []Applied) []heldEdit {
+	var out []heldEdit
+	for i, h := range held {
+		stale := slices.ContainsFunc(applied[min(h.After, len(applied)):], func(ap Applied) bool { return ap.Path == h.Edit.Path })
+		heldAgain := slices.ContainsFunc(held[i+1:], func(later heldEdit) bool { return later.Edit.Path == h.Edit.Path })
+		if !stale && !heldAgain {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// landHeld gives the held edits of steps that judge only this run's proposals a second chance once the steps before
+// verify have run: those landable take an equal share with verify of what the cap left, before check lints them.
+// What still does not fit stays lost.
+func (r *run) landHeld() {
+	candidates := landable(r.held, r.applied)
+	if len(candidates) == 0 {
+		return
+	}
+	began := workflow.Now(r.ctx)
+	changed := changedFiles(r.applied)
+	in := ApplyInput{RunID: r.rep.RunID, Step: heldStepName, Remaining: max(MaxEdits-len(changed)+1, 0) / 2, Changed: changed}
+	for _, h := range candidates {
+		in.Edits = append(in.Edits, h.Edit)
+	}
+	var res ApplyResult
+	if err := workflow.ExecuteActivity(r.det, a.ApplyEdits, in).Get(r.ctx, &res); err != nil {
+		r.record(StepRecord{Name: heldStepName, Status: "failed", Reason: err.Error()}, began)
+		return
+	}
+	r.applied = append(r.applied, res.Applied...)
+	landed := map[string]bool{}
+	for _, ap := range res.Applied {
+		for _, h := range candidates {
+			if h.Edit.Path == ap.Path {
+				landed[h.Step+"\x00"+ap.Path] = true
+			}
+		}
+	}
+	for i := len(r.rep.Rejected) - 1; i >= 0; i-- { // the latest record of a file is the edit that landed
+		rej := &r.rep.Rejected[i]
+		if key := rej.Step + "\x00" + rej.Path; rej.Lost && landed[key] {
+			rej.Lost, rej.Reason = false, rej.Reason+"; landed after summarise in what the cap left"
+			delete(landed, key)
+		}
+	}
+	r.record(StepRecord{Name: heldStepName, Status: "ok", Edits: len(res.Applied), Reason: fmt.Sprintf(
+		"%d of %d held edits landed (share %d new files)", len(res.Applied), len(candidates), in.Remaining)}, began)
 }
 
 func (r *run) brain(step string, command []string, args ...string) StepOutcome {

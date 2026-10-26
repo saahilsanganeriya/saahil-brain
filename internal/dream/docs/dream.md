@@ -5,9 +5,9 @@
 named `dream/<UTC hour>`; `brain dream run --now [--shadow]` starts one directly under the same id.
 
 ```
-gate ─► snapshot ─► reconcile ─► capture ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs ─► curate.merge ─► curate.cards ─► summarise ─► render ─► check ─► verify ─► reindex ─► commit
-det      git+tar     det          brain CLI   distil   det        file    link           hubs        merge             card            summarise    brain CLI  lint      verify    brain CLI   state+report+git
-                                              Opus     (index)    Haiku   Opus           Opus        Opus ×≤2          Haiku ×≤4       Haiku                   (revert)  Opus
+gate ─► snapshot ─► reconcile ─► capture ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs ─► curate.merge ─► curate.cards ─► summarise ─► held ─► render ─► check ─► verify ─► reindex ─► commit
+det      git+tar     det          brain CLI   distil   det        file    link           hubs        merge             card            summarise  det       brain CLI  lint      verify    brain CLI   state+report+git
+                                              Opus     (index)    Haiku   Opus           Opus        Opus ×≤2          Haiku ×≤4       Haiku                           (revert)  Opus
 ```
 
 `demote` sets `node_stats.demoted_at` on a node shown 10 times as a pointer and never opened or followed, and clears
@@ -68,7 +68,10 @@ write to one is free; learn and file
 get what is left; curate.link, curate.hubs, curate.merge, curate.cards and verify each get an equal share of what is
 left with the curation steps after them, so the first cannot starve the rest; an edit over the share is `held`). A
 held edit of curate.merge or curate.cards comes back next run, because these steps rebuild from the whole brain. A held
-edit of any other step is also `lost`, because that step judges only this run's material and proposals. A learn
+edit of any other step is also `lost`, because that step judges only this run's material and proposals. After
+summarise, the `held` step gives these lost edits a second chance: an edit whose file no later step wrote lands in an
+equal share with verify of what is left of the cap (check then lints it, verify judges it on disk), and its record is
+no longer `lost`. A learn
 session is one unit (`ApplyInput.Whole`): its edits land together, or all are `held` (not `lost`, "waits for the
 next dream, whole"). Then learn stops, and that session and every later session wait for the next dream: the sessions
 watermark stops before it, and their edits do not go to the later steps. A session that changes more files than the

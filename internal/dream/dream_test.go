@@ -408,6 +408,54 @@ func TestHeldEditSaysWhetherItReturns(t *testing.T) {
 	}
 }
 
+// Catches curate.hubs edits lost to the cap while the run ends far under it: 83 in the dreams of 2026-10-16..26, 10 at
+// 10-26T10, whose run changed 31 files of 50. A held edit its step will never propose again lands after summarise
+// (before check lints it) in an equal share with verify, when no later step wrote its file.
+func TestHeldEditLandsWhenTheRunEndsWithRoom(t *testing.T) {
+	acts, fake := newBrain(t, 0)
+	fake.Respond = func(c llm.Call) llm.Result {
+		name := strings.TrimPrefix(strings.SplitN(c.Skill, "\n", 2)[0], "# skill ")
+		n := max(map[string]int{"file": 36, "hubs": 7}[name], 1)
+		var edits []Edit
+		for i := range n {
+			id := fmt.Sprintf("finding-%s-%02d", name, i)
+			edits = append(edits, Edit{Path: "notes/" + id + ".md", Action: "write", Content: "---\nid: " + id + "\n---\nx\n"})
+		}
+		out, _ := json.Marshal(map[string]any{"edits": edits})
+		return llm.Result{JSON: out}
+	}
+	rep := runDream(t, acts, Input{Force: true}, time.Now().UTC())
+	// 37 files changed before curate.hubs: its share is ceil(13 / 4) = 4 of its 7; at the end 9 are left, 5 for these
+	var held, lost int
+	for _, rej := range rep.Rejected {
+		if rej.Held {
+			held++
+		}
+		if rej.Lost {
+			lost++
+		}
+	}
+	if held != 3 || lost != 0 || step(rep, "held").Edits != 3 {
+		t.Fatalf("held %d, lost %d, landed late %+v; want 3 held, 0 lost, 3 landed", held, lost, step(rep, "held"))
+	}
+	for i := range 7 {
+		if p := fmt.Sprintf("notes/finding-hubs-%02d.md", i); !slices.Contains(rep.EditedPaths, p) {
+			t.Errorf("%s never landed", p)
+		}
+	}
+}
+
+// Catches a late landing that overwrites a later step's write: the held edit was made against the file as it was, so
+// once another step rewrote the file it is stale and stays lost.
+func TestHeldEditStaysLostOnceALaterStepWroteItsFile(t *testing.T) {
+	held := []heldEdit{{Step: "curate.hubs", Edit: Edit{Path: "hubs/a.md"}, After: 1},
+		{Step: "curate.hubs", Edit: Edit{Path: "hubs/b.md"}, After: 1}}
+	applied := []Applied{{Path: "notes/x.md"}, {Path: "hubs/b.md"}}
+	if got := landable(held, applied); len(got) != 1 || got[0].Edit.Path != "hubs/a.md" {
+		t.Fatalf("landable %+v, want only hubs/a.md", got)
+	}
+}
+
 // Catches a unit larger than a whole run waiting for ever: held whole, a learn session that changes more files than
 // the cap allows would stop learn at the same session in every dream, and no later session would be learned again.
 func TestWholeUnitLargerThanTheCapAppliesWhatFits(t *testing.T) {
