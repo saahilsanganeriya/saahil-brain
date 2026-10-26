@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"saahil.local/brain/internal/config"
@@ -417,4 +418,69 @@ func trimPartialRune(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// ---- sync conflict copies (doctor sync.conflicts, dream reconcile) ----
+
+// ConflictWalkers bounds the folders read at once: one serial walk of work/ (2.24 M entries on the devbox) outran the
+// doctor's 2 minutes.
+const ConflictWalkers = 8
+
+// conflictWalkForked is called when a folder is read on its own goroutine; tests count it.
+var conflictWalkForked = func() {}
+
+// ConflictCopies lists the unhandled sync conflict copies below root in the serial walk's order, reading folders on
+// up to workers goroutines (0: serially), and counts unison's half-copies young enough to be in flight.
+func ConflictCopies(root string, workers int) ([]string, int) {
+	var (
+		mu       sync.Mutex
+		found    []string
+		inFlight int
+		sem      = make(chan struct{}, workers)
+		walk     func(dir string)
+	)
+	walk = func(dir string) {
+		list, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		var wg sync.WaitGroup
+		for _, d := range list {
+			p := filepath.Join(dir, d.Name())
+			if d.IsDir() {
+				// .archive holds the losers already handled (brain sync --archive-conflicts); only live copies are unhandled
+				if d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive" ||
+					config.IsSyncBulkDir(d.Name()) {
+					continue
+				}
+				select {
+				case sem <- struct{}{}:
+					wg.Add(1)
+					go func() {
+						defer func() { <-sem; wg.Done() }()
+						conflictWalkForked()
+						walk(p)
+					}()
+				default:
+					walk(p)
+				}
+				continue
+			}
+			if !config.IsSyncConflictCopy(d.Name()) {
+				continue
+			}
+			mu.Lock()
+			// unison's half-copy of a file it is moving now, or just failed to: the next sync retries and cleans it
+			if info, err := d.Info(); err == nil && strings.HasPrefix(d.Name(), ".unison.") && time.Since(info.ModTime()) < config.UnisonTempGrace {
+				inFlight++
+			} else {
+				found = append(found, strings.TrimPrefix(p, root+"/"))
+			}
+			mu.Unlock()
+		}
+		wg.Wait()
+	}
+	walk(root)
+	slices.SortFunc(found, func(a, b string) int { return slices.Compare(strings.Split(a, "/"), strings.Split(b, "/")) })
+	return found, inFlight
 }

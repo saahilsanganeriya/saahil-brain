@@ -13,6 +13,9 @@ det      git+tar     det          brain CLI   distil   det        file    link  
 `demote` sets `node_stats.demoted_at` on a node shown 10 times as a pointer and never opened or followed, and clears
 it when the node is opened (`rank.Demote`). It is a ranking prior: it changes no file and no status.
 
+`reconcile` counts the sync conflict copies that the doctor's `sync.conflicts` counts, with the same walk
+(`scan.ConflictCopies`: no bulk folder, no `.archive`, 8 goroutines). It changes no file: the owner decides the copies.
+
 ## Gate
 
 Material = `.md` files changed after the area's watermark in `.brain/dream-state.json`:

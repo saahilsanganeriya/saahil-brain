@@ -6,15 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"saahil.local/brain/internal/agents"
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/install"
 	"saahil.local/brain/internal/rpc"
+	"saahil.local/brain/internal/scan"
 )
 
 func init() {
@@ -158,7 +157,7 @@ func checkSync(ctx context.Context) (Status, string) {
 // checkConflicts counts sync conflict copies left in the brain (Unison's and the cut-over reconcile's).
 func checkConflicts(context.Context) (Status, string) {
 	root := config.BrainRoot()
-	found, inFlight := conflictCopies(root, conflictWalkers)
+	found, inFlight := scan.ConflictCopies(root, scan.ConflictWalkers)
 	if len(found) == 0 {
 		detail := "0 unhandled conflict copies in the brain (losers are kept in .archive/conflicts)"
 		if inFlight > 0 {
@@ -167,69 +166,6 @@ func checkConflicts(context.Context) (Status, string) {
 		return OK, detail
 	}
 	return Fail, fmt.Sprintf("%d conflict copies: %s", len(found), strings.Join(found[:min(len(found), 5)], ", "))
-}
-
-// conflictWalkers bounds the folders read at once: one serial walk of work/ (2.24 M entries on the devbox) outran the
-// check's 2 minutes.
-const conflictWalkers = 8
-
-// conflictWalkForked is called when a folder is read on its own goroutine; tests count it.
-var conflictWalkForked = func() {}
-
-// conflictCopies lists the unhandled sync conflict copies below root in the serial walk's order, reading folders on
-// up to workers goroutines (0: serially), and counts unison's half-copies young enough to be in flight.
-func conflictCopies(root string, workers int) ([]string, int) {
-	var (
-		mu       sync.Mutex
-		found    []string
-		inFlight int
-		sem      = make(chan struct{}, workers)
-		walk     func(dir string)
-	)
-	walk = func(dir string) {
-		list, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		var wg sync.WaitGroup
-		for _, d := range list {
-			p := filepath.Join(dir, d.Name())
-			if d.IsDir() {
-				// .archive holds the losers already handled (brain sync --archive-conflicts); only live copies are unhandled
-				if d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive" ||
-					config.IsSyncBulkDir(d.Name()) {
-					continue
-				}
-				select {
-				case sem <- struct{}{}:
-					wg.Add(1)
-					go func() {
-						defer func() { <-sem; wg.Done() }()
-						conflictWalkForked()
-						walk(p)
-					}()
-				default:
-					walk(p)
-				}
-				continue
-			}
-			if !config.IsSyncConflictCopy(d.Name()) {
-				continue
-			}
-			mu.Lock()
-			// unison's half-copy of a file it is moving now, or just failed to: the next sync retries and cleans it
-			if info, err := d.Info(); err == nil && strings.HasPrefix(d.Name(), ".unison.") && time.Since(info.ModTime()) < config.UnisonTempGrace {
-				inFlight++
-			} else {
-				found = append(found, strings.TrimPrefix(p, root+"/"))
-			}
-			mu.Unlock()
-		}
-		wg.Wait()
-	}
-	walk(root)
-	slices.SortFunc(found, func(a, b string) int { return slices.Compare(strings.Split(a, "/"), strings.Split(b, "/")) })
-	return found, inFlight
 }
 
 // checkWorkRoot guards work/'s top level: a .git there makes every git hook treat the brain as a worktree (and link

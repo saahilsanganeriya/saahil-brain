@@ -498,28 +498,18 @@ func (a *Activities) Demote(_ context.Context) (StepOutcome, error) {
 		demoted, restored, rank.DemoteAfterShown)}, nil
 }
 
-// Reconcile reports sync-conflict copies; resolving them is manual until Unison runs (cut-over).
+// Reconcile reports the sync-conflict copies the doctor reports; the owner decides them (brain sync
+// --archive-conflicts keeps the newer file).
 func (a *Activities) Reconcile(_ context.Context) (StepOutcome, error) {
-	n := 0
-	err := filepath.WalkDir(a.Cfg.BrainRoot, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && p != a.Cfg.BrainRoot && strings.HasPrefix(d.Name(), ".") {
-			return filepath.SkipDir
-		}
-		if !d.IsDir() && config.IsSyncConflictCopy(d.Name()) {
-			n++
-		}
-		return nil
-	})
-	if err != nil {
-		return StepOutcome{}, err
+	found, inFlight := brainscan.ConflictCopies(a.Cfg.BrainRoot, brainscan.ConflictWalkers)
+	reason := "no conflict copies"
+	if len(found) > 0 {
+		reason = fmt.Sprintf("%d conflict copies left for the owner", len(found))
 	}
-	if n == 0 {
-		return StepOutcome{Status: "ok", Reason: "no conflict copies"}, nil
+	if inFlight > 0 {
+		reason += fmt.Sprintf("; %d unison half-copy in flight", inFlight)
 	}
-	return StepOutcome{Status: "ok", Reason: fmt.Sprintf("%d conflict copies left for the owner", n)}, nil
+	return StepOutcome{Status: "ok", Reason: reason}, nil
 }
 
 type BrainCommandInput struct {
