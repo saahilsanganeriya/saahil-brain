@@ -314,7 +314,7 @@ type MergeStepInput struct {
 type MergeStepResult struct {
 	Status  string // ok | skipped | failed: whether the find stage answered
 	Reason  string
-	Waiting []string // duplicate groups with no merged body this run: "<keep>: <why>"
+	Waiting []string // duplicate groups and too-full narrowed notes with no body this run: "<id>: <why>"
 	CostUSD float64
 	Calls   int
 	Cached  int
@@ -395,10 +395,62 @@ func (a *Activities) MergeStep(ctx context.Context, in MergeStepInput) (MergeSte
 			}
 		}
 	}
-	units, owner := mergeUnits(out.Plan, bodies, notes, in.Today)
+	shorter, err := a.shorterBodies(ctx, in, string(skill), &out, notes)
+	if err != nil {
+		return out, err
+	}
+	units, owner := mergeUnits(out.Plan, bodies, shorter, notes, in.Today)
 	out.Owner = owner
 	out.Delta, out.Edits, out.Refused, err = a.dryRunUnits(ctx, units)
 	return out, err
+}
+
+// shorterBodies asks the bodies stage, as a group of one, to write each note too full for its narrowing shorter, so
+// the line and its link fit; a note with no usable body waits for the next merge.
+func (a *Activities) shorterBodies(ctx context.Context, in MergeStepInput, skill string, out *MergeStepResult,
+	notes map[string]delta.Note) (map[string]string, error) {
+	shorter := map[string]string{}
+	for _, c := range out.Plan.Conflicts {
+		older := notes[c.Older]
+		if c.Resolution != "narrow" || narrowed(older, c.Newer) {
+			continue
+		}
+		line, link, linkOnly := narrowing(c, in.Today)
+		if bodyHolds(older, line, link) || !tooFull(older, linkOnly) {
+			continue
+		}
+		if out.StopLLM {
+			out.Waiting = append(out.Waiting, c.Older+": no more model calls this run")
+			continue
+		}
+		content, err := os.ReadFile(a.path("notes", c.Older+".md"))
+		if err != nil {
+			return nil, err
+		}
+		gr := MergeGroupInput{Keep: c.Older, Supersede: []string{}, Type: older.Type,
+			CapChars: shorterCap(older, line, link), Notes: []MergeNoteText{{c.Older, string(content)}}}
+		input, err := json.Marshal(map[string]any{"step": mergeStepName, "stage": "bodies", "groups": []MergeGroupInput{gr}})
+		if err != nil {
+			return nil, err
+		}
+		var ans struct {
+			Bodies []MergeBody `json:"bodies"`
+		}
+		step, err := a.mergeCall(ctx, in, skill, mergeStepName+".bodies", string(input), mergeBodiesSchema, &ans, out.CostUSD)
+		out.add(step)
+		if err != nil {
+			return nil, err
+		}
+		if step.Status != "ok" {
+			out.Waiting = append(out.Waiting, c.Older+": "+step.Reason)
+		}
+		for _, b := range ans.Bodies {
+			if b.Keep == c.Older && strings.TrimSpace(b.Body) != "" {
+				shorter[c.Older] = b.Body
+			}
+		}
+	}
+	return shorter, nil
 }
 
 // mergeCall pays for (or reads from the ledger) one stage's answer and decodes it into dst; an answer that does not
@@ -489,29 +541,32 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 
 func dated(n delta.Note) bool { return len(n.AsOf) == len("2006-01-02") }
 
+// MergeGroupInput is one group as the bodies stage reads it: its notes' whole text and the cap the kept body must fit.
+type MergeGroupInput struct {
+	Keep      string          `json:"keep"`
+	Supersede []string        `json:"supersede"`
+	Type      string          `json:"type"`
+	CapChars  int             `json:"cap_chars"`
+	Notes     []MergeNoteText `json:"notes"`
+}
+
+type MergeNoteText struct {
+	ID      string `json:"id"`
+	Content string `json:"content"`
+}
+
 // bodiesInput gives the bodies stage one group's whole notes and the cap the kept body must fit.
 func (a *Activities) bodiesInput(g DuplicateGroup, notes map[string]delta.Note) (string, error) {
-	type noteText struct {
-		ID      string `json:"id"`
-		Content string `json:"content"`
-	}
-	type group struct {
-		Keep      string     `json:"keep"`
-		Supersede []string   `json:"supersede"`
-		Type      string     `json:"type"`
-		CapChars  int        `json:"cap_chars"`
-		Notes     []noteText `json:"notes"`
-	}
 	keep := notes[g.Keep]
-	gr := group{Keep: g.Keep, Supersede: g.Supersede, Type: keep.Type, CapChars: bodyCap(keep, g.Supersede)}
+	gr := MergeGroupInput{Keep: g.Keep, Supersede: g.Supersede, Type: keep.Type, CapChars: bodyCap(keep, g.Supersede)}
 	for _, id := range append([]string{g.Keep}, g.Supersede...) {
 		b, err := os.ReadFile(a.path("notes", id+".md"))
 		if err != nil {
 			return "", err
 		}
-		gr.Notes = append(gr.Notes, noteText{id, string(b)})
+		gr.Notes = append(gr.Notes, MergeNoteText{id, string(b)})
 	}
-	b, err := json.Marshal(map[string]any{"step": mergeStepName, "stage": "bodies", "groups": []group{gr}})
+	b, err := json.Marshal(map[string]any{"step": mergeStepName, "stage": "bodies", "groups": []MergeGroupInput{gr}})
 	return string(b), err
 }
 
@@ -534,8 +589,9 @@ type unit struct {
 }
 
 // mergeUnits turns a settled plan into units, and its owner pairs into questions. A group whose merged body is
-// missing waits for the next merge; a narrow already written (its line names the newer note) is not written again.
-func mergeUnits(p MergePlan, bodies map[string]string, notes map[string]delta.Note, today string) ([]unit, []OwnerQuestion) {
+// missing waits for the next merge, as does a narrow whose note is too full for it and has no shorter body; a narrow
+// already written (its line names the newer note) is not written again.
+func mergeUnits(p MergePlan, bodies, shorter map[string]string, notes map[string]delta.Note, today string) ([]unit, []OwnerQuestion) {
 	var units []unit
 	var owner []OwnerQuestion
 	for _, g := range p.Duplicates {
@@ -560,13 +616,18 @@ func mergeUnits(p MergePlan, bodies map[string]string, notes map[string]delta.No
 			if narrowed(older, c.Newer) {
 				continue
 			}
-			why := oneLine(c.Why, 300)
-			line := "Narrowed " + today + " by " + c.Newer + ": " + why
-			link := delta.Op{Op: "link", Src: c.Older, Rel: "related", Dst: c.Newer, Why: "the newer owner rule that narrows this one"}
-			ops := []delta.Op{{Op: "update_note", ID: c.Older, AppendBody: line}, link}
-			if !bodyHolds(older, line, link) {
-				link.Why = "Narrowed " + today + ": " + why
-				ops = []delta.Op{link}
+			line, link, linkOnly := narrowing(c, today)
+			var ops []delta.Op
+			switch body, ok := shorter[c.Older]; {
+			case bodyHolds(older, line, link):
+				ops = []delta.Op{{Op: "update_note", ID: c.Older, AppendBody: line}, link}
+			case !tooFull(older, linkOnly):
+				ops = []delta.Op{linkOnly}
+			case ok:
+				body = strings.TrimSpace(body) + "\n\n" + line + "\n"
+				ops = []delta.Op{{Op: "update_note", ID: c.Older, ReplaceBody: &body}, link}
+			default:
+				continue
 			}
 			units = append(units, unit{label: c.Newer + " narrows " + c.Older, ops: ops})
 		case "owner":
@@ -593,6 +654,34 @@ func narrowed(older delta.Note, newer string) bool {
 	return slices.ContainsFunc(older.Related, func(r delta.Related) bool {
 		return r.ID == newer && strings.HasPrefix(r.Why, "Narrowed ")
 	})
+}
+
+// narrowing is what a narrow writes into the older note: the line and its link, or, when the body cannot hold the
+// line, the link alone with the line as its why.
+func narrowing(c Conflict, today string) (string, delta.Op, delta.Op) {
+	why := oneLine(c.Why, 300)
+	link := delta.Op{Op: "link", Src: c.Older, Rel: "related", Dst: c.Newer, Why: "the newer owner rule that narrows this one"}
+	linkOnly := link
+	linkOnly.Why = "Narrowed " + today + ": " + why
+	return "Narrowed " + today + " by " + c.Newer + ": " + why, link, linkOnly
+}
+
+// tooFull: a note other than a lesson that cannot take even the link alone within the 4 KB cap; its body is written
+// shorter before the narrow (a lesson's 300-char body leaves its link room).
+func tooFull(n delta.Note, linkOnly delta.Op) bool {
+	if n.Type == "lesson" {
+		return false
+	}
+	n.Related = append(slices.Clone(n.Related), delta.Related{ID: linkOnly.Dst, Why: linkOnly.Why})
+	n.Updated = time.Time{}.Format(time.RFC3339)
+	return len(delta.Render(n)) > config.NoteMaxBytes
+}
+
+// shorterCap is what a too-full note's shorter body may hold so that it, the narrowing line and the link fit the cap.
+func shorterCap(n delta.Note, line string, link delta.Op) int {
+	n.Body, n.Updated = "", time.Time{}.Format(time.RFC3339)
+	n.Related = append(slices.Clone(n.Related), delta.Related{ID: link.Dst, Why: link.Why})
+	return config.NoteMaxBytes - len(delta.Render(n)) - len("\n\n"+line+"\n")
 }
 
 // bodyHolds: the note stays within the applier's caps (a lesson's 300 chars, a note's 4 KB) with the line appended
@@ -725,7 +814,7 @@ func (r MergeStepResult) summary(done MergeDoneResult) string {
 		"%d stale; %d files; %d owner questions queued, %d wait", r.Notes, len(r.Plan.Duplicates), len(r.Plan.Conflicts),
 		superseded, narrow, len(r.Owner), len(r.Plan.Stale), len(r.Edits), done.Queued, done.Waiting)
 	if len(r.Waiting) > 0 {
-		s += fmt.Sprintf("; %d duplicate groups wait, first: %s", len(r.Waiting), r.Waiting[0])
+		s += fmt.Sprintf("; %d bodies wait, first: %s", len(r.Waiting), r.Waiting[0])
 	}
 	if len(r.Refused) > 0 {
 		s += fmt.Sprintf("; %d refused, first: %s", len(r.Refused), r.Refused[0])

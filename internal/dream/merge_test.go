@@ -2,6 +2,7 @@ package dream
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -144,7 +145,7 @@ func TestCurateMergeMergesNarrowsAndAsks(t *testing.T) {
 	rep := runDream(t, acts, Input{Force: true}, mergeT0)
 	if s := step(rep, "curate.merge"); s.Status != "ok" || s.Edits != 5 || s.Refused != 1 {
 		t.Fatalf("curate.merge: %+v", s)
-	} else if !strings.Contains(s.Reason, "1 duplicate groups wait, first: anti-pattern-noisy-new") {
+	} else if !strings.Contains(s.Reason, "1 bodies wait, first: anti-pattern-noisy-new") {
 		t.Fatalf("the group with no usable body is not reported as waiting: %s", s.Reason)
 	}
 	if !strings.Contains(model.findInput, `"project":"work-repo"`) || strings.Contains(model.findInput, "finding-hub-only") {
@@ -209,7 +210,7 @@ func TestNarrowOfAFullLessonGoesInItsLink(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		units, _ := mergeUnits(plan, nil, notes, today)
+		units, _ := mergeUnits(plan, nil, nil, notes, today)
 		_, edits, refused, err := acts.dryRunUnits(t.Context(), units)
 		if err != nil {
 			t.Fatal(err)
@@ -228,6 +229,75 @@ func TestNarrowOfAFullLessonGoesInItsLink(t *testing.T) {
 	}
 	if units, _, _ := narrow("2026-10-09"); len(units) != 0 {
 		t.Fatalf("a narrow already in the link is written again: %+v", units)
+	}
+}
+
+// TestNarrowOfAFullNoteWritesItShorter catches a narrow refused every dream: a note a few bytes under the 4 KB cap
+// holds neither the "Narrowed …" line nor the link with that line as its why (one pair refused in 12 of 39 dreams,
+// 2026-10-22..27). The bodies stage writes that note shorter, every fact kept, code appends the line, and the next
+// merge asks no model about it again.
+func TestNarrowOfAFullNoteWritesItShorter(t *testing.T) {
+	acts, _ := newMergeBrain(t)
+	brain := acts.Cfg.BrainRoot
+	fact := "Rung %d: settle the gap by the design's principles and log a driver ruling for veto."
+	var long, short []string
+	for i := 1; i <= 46; i++ {
+		long = append(long, fmt.Sprintf(fact+" Keep going and do not wait on the owner for it.", i))
+		short = append(short, fmt.Sprintf(fact, i))
+	}
+	head := "---\nid: playbook-full\ntype: playbook\nstatus: current\nsummary: The driver settles design gaps by a ladder\n" +
+		"scope: global\nhubs: [ci-depot]\nevidence: [hubs/ci-depot.md]\nas_of: 2026-09-27\n---\n"
+	for len(head+strings.Join(long, "\n")+"\n") > config.NoteMaxBytes-20 {
+		long = long[:len(long)-1]
+		short = short[:len(short)-1]
+	}
+	write(t, filepath.Join(brain, "notes", "playbook-full.md"), head+strings.Join(long, "\n")+"\n")
+	why := "agents ask the owner and wait while questions are on; the ladder holds when they are off"
+
+	var groups []MergeGroupInput
+	fake := acts.LLM.(*llm.Fake)
+	fake.Respond = func(c llm.Call) llm.Result {
+		var in struct {
+			Stage  string
+			Groups []MergeGroupInput
+		}
+		_ = json.Unmarshal([]byte(c.Input), &in)
+		if in.Stage == "find" {
+			return llm.Result{JSON: json.RawMessage(`{"duplicates": [], "stale": [], "conflicts": [{"newer": ` +
+				`"decision-flakes-only-rerun", "older": "playbook-full", "resolution": "narrow", "why": "` + why + `"}]}`)}
+		}
+		groups = append(groups, in.Groups...)
+		out, _ := json.Marshal(map[string]any{"bodies": []MergeBody{{Keep: "playbook-full", Body: strings.Join(short, "\n")}}})
+		return llm.Result{JSON: out}
+	}
+	merge := func(today string) MergeStepResult {
+		res, err := acts.MergeStep(t.Context(), MergeStepInput{BudgetUSD: 1, CapUSD: 10, Today: today})
+		if err != nil || res.Status != "ok" {
+			t.Fatalf("merge: %+v %v", res, err)
+		}
+		return res
+	}
+
+	res := merge("2026-10-08")
+	if len(res.Refused) > 0 || len(res.Edits) != 1 {
+		t.Fatalf("the narrow of a full note did not land: refused %v, %d edits", res.Refused, len(res.Edits))
+	}
+	if len(groups) != 1 || groups[0].Keep != "playbook-full" || len(groups[0].Supersede) != 0 || groups[0].CapChars <= 0 ||
+		groups[0].CapChars >= len(strings.Join(long, "\n")) {
+		t.Fatalf("the full note was not asked to be written shorter, under a cap that leaves room: %+v", groups)
+	}
+	write(t, filepath.Join(brain, res.Edits[0].Path), res.Edits[0].Content)
+	n := readNote(t, acts, "playbook-full")
+	line := "Narrowed 2026-10-08 by decision-flakes-only-rerun: " + why
+	if !strings.HasPrefix(n.Body, short[0]) || !strings.HasSuffix(strings.TrimSpace(n.Body), line) ||
+		len(n.Related) != 1 || n.Related[0].ID != "decision-flakes-only-rerun" || len(res.Edits[0].Content) > config.NoteMaxBytes {
+		t.Fatalf("not the shorter body with the narrowing line and its link, within the cap: %d bytes, related %+v, body %q",
+			len(res.Edits[0].Content), n.Related, n.Body)
+	}
+
+	if again := merge("2026-10-09"); len(again.Edits) != 0 || len(again.Refused) != 0 || len(groups) != 1 {
+		t.Fatalf("a narrow already written is asked or written again: %d edits, refused %v, %d bodies calls",
+			len(again.Edits), again.Refused, len(groups))
 	}
 }
 

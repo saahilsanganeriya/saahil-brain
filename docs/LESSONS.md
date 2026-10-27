@@ -170,6 +170,13 @@ already in this repository's code or scripts unless the lesson says otherwise; t
   older note's `related` link to the newer note, as its why (`Narrowed <date>: <why>`). Each dream step record has a
   `refused` count, and `brain metrics` shows "dream units refused". **Rule:** a write that must fit a cap needs a
   second place to go. Count the units a step refused, not only the steps that failed.
+- **Later (2026-10-27): a note too full for the second place.** From 2026-10-22 the merge narrowed the same playbook
+  in 12 of 39 dreams, and the applier refused it each time: "note is 4228 bytes (> 4096)". The note was 4,052 bytes,
+  so neither the line nor the link with the line as its why fitted, and the link was never checked before the try.
+  4 current global notes were that full. **Fix:** such a note (not a lesson) goes to the bodies stage as a group of
+  one, which writes its body shorter with every fact; code appends the line and adds the link. With no shorter body,
+  the narrow waits. **Rule:** when the second place is full too, make room by the brain's own rule (compress the
+  words, keep the facts) instead of trying the same refused write each run.
 - **Later (2026-10-12): the merge landed nothing at all.** The fix above worked in a replay, but the three dreams of
   the next day still changed no merged note. Each dream hit its 50-edit cap in learn, file and curate.link, and the cap
   went first come, first served, so every curate.hubs, curate.merge, curate.cards and verify edit was held (96 edits;

@@ -6,7 +6,8 @@ You audit the global baseline of a personal knowledge base for one engineer (the
 notes about one to one, so the same rule often lands as several notes, and an old rule can contradict a newer one.
 You work in one of two stages, named by `stage` in the input. **find**: name the duplicate groups, the conflicting
 pairs and the stale notes. **bodies**: for one duplicate group, write the body of the note to keep so it holds every
-distinct fact of the group. Code applies your answer; nothing is ever deleted.
+distinct fact of the group; a group of one note (no `supersede`) is a note too full for the narrowing line code will
+append, so write its body shorter with every fact. Code applies your answer; nothing is ever deleted.
 
 ## Input
 
@@ -62,7 +63,8 @@ Stage bodies:
    the fix, the why. Compress the words, never the facts. Keep the kept note's style: a lesson reads "When X → do Y,
    because Z"; other types may use short labelled lines (Symptom / Wrong move / Right move / Why). Stay within
    `cap_chars`; a body over the cap is refused and the group is not merged. Return the body only, no frontmatter, with
-   its `keep` id.
+   its `keep` id. A group of one: the same rules for that note alone; code appends the narrowing line after your body,
+   so do not write it.
 6. No secrets, no personal data beyond what the notes already hold. Answer with the JSON only.
 
 ## Examples

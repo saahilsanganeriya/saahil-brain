@@ -243,7 +243,8 @@ an empty temp folder, with no hooks, no MCP servers and no settings: it sees the
 
 **curate.merge** finds duplicate global notes and conflicting rules. It keeps the newest note of a duplicate group
 with every distinct fact, supersedes the others, narrows a conflict when dates settle it (a line at the end of the
-older note, or the why of its `related` link to the newer note when the body has no room, as in most lessons), and
+older note, or the why of its `related` link to the newer note when the body has no room, as in most lessons; a
+note with no room even for that link is first written shorter by the bodies stage, every fact kept), and
 queues a pair it cannot settle in `.brain/owner-questions.jsonl` for you. **curate.cards** refreshes up to 4 CARDs per dream whose box has
 work at least 1 h newer than the CARD.
 
