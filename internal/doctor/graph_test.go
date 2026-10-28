@@ -49,7 +49,7 @@ func TestGraphChecksReportBreaches(t *testing.T) {
 		says string
 	}{
 		"dangling":     {dangling, Warn, "1 links"},
-		"supersession": {supersession, Fail, "1 of 1 supersedes"},
+		"supersession": {supersession, Fail, "1 of 1 supersedes edges point at a note still live or missing; 0 loops (target 0, 0): decision-new → decision-old"},
 		"coverage":     {hubCoverage, OK, "100.0% of 3"},
 		"orphans":      {orphans, OK, "0 of 5"},
 	} {

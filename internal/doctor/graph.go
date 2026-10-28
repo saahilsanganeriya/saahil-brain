@@ -152,6 +152,7 @@ func supersession(db *sql.DB) (Status, string, error) {
 	defer rows.Close()
 	next := map[string][]string{}
 	total, bad := 0, 0
+	var named []string
 	for rows.Next() {
 		var src, dst, status string
 		if err := rows.Scan(&src, &dst, &status); err != nil {
@@ -160,6 +161,9 @@ func supersession(db *sql.DB) (Status, string, error) {
 		total++
 		if status != "superseded" && status != "retired" {
 			bad++
+			if len(named) < 3 {
+				named = append(named, src+" → "+dst)
+			}
 		}
 		next[src] = append(next[src], dst)
 	}
@@ -171,6 +175,9 @@ func supersession(db *sql.DB) (Status, string, error) {
 	}
 	loops := loopCount(next)
 	detail := fmt.Sprintf("%d of %d supersedes edges point at a note still live or missing; %d loops (target 0, 0)", bad, total, loops)
+	if len(named) > 0 {
+		detail += ": " + strings.Join(named, ", ")
+	}
 	return verdict(bad == 0 && loops == 0, Fail), detail, nil
 }
 
