@@ -18,6 +18,7 @@ type Edit struct {
 	Action  string `json:"action"`
 	Content string `json:"content,omitempty"`
 	Why     string `json:"why,omitempty"`
+	Group   string `json:"group,omitempty"` // edits one delta op tied together (delta.File.Group): land whole or wait whole
 }
 
 type Applied struct {
@@ -84,6 +85,21 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 		// a unit larger than a whole run could never land whole: it applies what fits, as any other step
 		holdAll = needed > in.Remaining && needed <= MaxEdits
 	}
+	// a group's new files are reserved when its first edit is reached, so the edits between its files cannot split it
+	groupNeeds, groupFits := map[string]int{}, map[string]bool{}
+	byGroup := map[string][]Edit{}
+	for _, e := range in.Edits {
+		if e.Group != "" {
+			byGroup[e.Group] = append(byGroup[e.Group], e)
+		}
+	}
+	for g, es := range byGroup {
+		n, err := a.newFilesNeeded(es, changed)
+		if err != nil {
+			return res, err
+		}
+		groupNeeds[g] = n
+	}
 	newFiles := 0
 	for _, e := range in.Edits {
 		reject := func(reason string) {
@@ -98,7 +114,10 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 			if holdAll {
 				limit += fmt.Sprintf(" (%d new files needed, %d left)", needed, in.Remaining)
 				fate, lost = "waits for the next dream, whole", false
-			} else if lost {
+			} else if e.Group != "" {
+				limit += fmt.Sprintf(" (held whole with its group %s: %d new files needed)", e.Group, groupNeeds[e.Group])
+			}
+			if !holdAll && lost {
 				fate = "lost: " + in.Step + " judges only this run's proposals"
 			}
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Held: true,
@@ -126,7 +145,20 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 			res.Noop++
 			continue
 		}
-		if holdAll || (!changed[e.Path] && newFiles >= in.Remaining) {
+		if e.Group != "" && !holdAll {
+			fits, decided := groupFits[e.Group]
+			if !decided {
+				fits = newFiles+groupNeeds[e.Group] <= in.Remaining
+				groupFits[e.Group] = fits
+				if fits {
+					newFiles += groupNeeds[e.Group]
+				}
+			}
+			if !fits {
+				hold()
+				continue
+			}
+		} else if holdAll || (!changed[e.Path] && newFiles >= in.Remaining) {
 			hold()
 			continue
 		}
@@ -144,7 +176,9 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 		res.Applied = append(res.Applied, Applied{Path: e.Path, Created: !exists})
 		if !changed[e.Path] {
 			changed[e.Path] = true
-			newFiles++
+			if e.Group == "" {
+				newFiles++
+			}
 		}
 	}
 	return res, nil

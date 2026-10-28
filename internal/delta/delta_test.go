@@ -142,6 +142,37 @@ func TestDeltaNeverDeletes(t *testing.T) {
 	}
 }
 
+// TestOneOpsFilesShareAGroup catches files of one supersede op reported as unrelated: the dream's edit cap then landed
+// the new note (supersedes: [old]) and held the old one, which stayed current.
+func TestOneOpsFilesShareAGroup(t *testing.T) {
+	root := newRoot(t)
+	d := parse(t, `{"ops":[
+ {"op":"add_note","note":{"id":"lesson-rebase-v2","type":"lesson","status":"current","summary":"rebase onto origin/main",
+  "scope":"global","hubs":["git"],"evidence":[".import/laptop/x/rebase.md"],"body":"when behind → rebase onto origin/main."}},
+ {"op":"supersede","old":"lesson-old-rebase","new":"lesson-rebase-v2"},
+ {"op":"add_note","note":{"id":"idea-alone","type":"idea","status":"current","summary":"fine","scope":"hub","hubs":["git"],
+  "body":"a valid idea"}}
+]}`)
+	rep, err := Apply(context.Background(), root, d, Options{DryRun: true, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := map[string]string{}
+	for _, f := range rep.Files {
+		groups[f.Path] = f.Group
+	}
+	want := map[string]string{"notes/idea-alone.md": "", "notes/lesson-old-rebase.md": "notes/lesson-old-rebase.md",
+		"notes/lesson-rebase-v2.md": "notes/lesson-old-rebase.md"}
+	if len(groups) != len(want) {
+		t.Fatalf("files %v, want %v", groups, want)
+	}
+	for path, g := range want {
+		if groups[path] != g {
+			t.Errorf("%s in group %q, want %q (all: %v)", path, groups[path], g, groups)
+		}
+	}
+}
+
 // TestApplyRejectsInvalidOpsOnly catches an applier that writes a note breaking FORMAT.md (over the 4 KB cap, no hub,
 // a lesson over 300 chars, a dangling link) or that throws away the valid ops of the same delta with it.
 func TestApplyRejectsInvalidOpsOnly(t *testing.T) {

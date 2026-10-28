@@ -381,6 +381,49 @@ func TestEditOverTheCapIsMarkedHeld(t *testing.T) {
 	}
 }
 
+// Catches the cap splitting the files of one op: at 2026-10-28T10 curate.merge's share (1 new file) was spent, the kept
+// note (written earlier that run) landed with supersedes: [old], and the old note was held, so it stayed current. A
+// group that fits keeps its files' room, so an edit sorted between them cannot push the step past its share.
+func TestTheCapLandsOrHoldsAGroupWhole(t *testing.T) {
+	keep, old := "notes/lesson-x-do-not-reask.md", "notes/lesson-x-not-reask.md"
+	group := func(first Edit) []Edit {
+		return []Edit{first, {Path: keep, Action: "write", Content: "supersedes: [lesson-x-not-reask]", Group: keep},
+			{Path: "notes/lesson-x-mid.md", Action: "write", Content: "m"},
+			{Path: old, Action: "write", Content: "status: superseded", Group: keep}}
+	}
+	for _, c := range []struct {
+		name          string
+		in            ApplyInput
+		applied, held []string
+	}{
+		{"share spent: held whole", ApplyInput{Edits: group(Edit{Path: "notes/finding-first.md", Action: "write",
+			Content: "f"}), Remaining: 1, Changed: []string{keep}},
+			[]string{"notes/finding-first.md"}, []string{keep, "notes/lesson-x-mid.md", old}},
+		{"room for the group: lands whole", ApplyInput{Edits: group(Edit{Path: keep, Action: "write", Content: "v1"})[1:],
+			Remaining: 2},
+			[]string{keep, old}, []string{"notes/lesson-x-mid.md"}},
+	} {
+		acts, _ := newBrain(t, 0)
+		c.in.RunID, c.in.Step = "r", "curate.merge"
+		res, err := acts.ApplyEdits(t.Context(), c.in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var applied, held []string
+		for _, ap := range res.Applied {
+			applied = append(applied, ap.Path)
+		}
+		for _, rej := range res.Rejected {
+			if rej.Held {
+				held = append(held, rej.Path)
+			}
+		}
+		if !slices.Equal(applied, c.applied) || !slices.Equal(held, c.held) {
+			t.Errorf("%s: applied %v, held %v; want applied %v, held %v", c.name, applied, held, c.applied, c.held)
+		}
+	}
+}
+
 // Catches a held edit's record claiming it returns: on 2026-10-14 both dreams logged curate.link edits as "run edit
 // cap 50 reached; waits for the next dream" while each run left 13-14 edits unused, and curate.link judges only its own
 // run's proposals, so those edits never came back. curate.merge rebuilds from the whole brain, so its held edits do.

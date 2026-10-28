@@ -241,7 +241,7 @@ func (a *Activities) applyDelta(ctx context.Context, in LLMStepInput, out LLMSte
 		return out, err
 	}
 	for _, f := range rep.Files {
-		out.Edits = append(out.Edits, Edit{Path: f.Path, Action: "write", Content: f.Content, Why: in.Step})
+		out.Edits = append(out.Edits, Edit{Path: f.Path, Action: "write", Content: f.Content, Why: in.Step, Group: f.Group})
 	}
 	var reasons []string
 	for _, r := range rep.Rejected {

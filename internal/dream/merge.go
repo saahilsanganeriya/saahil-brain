@@ -732,7 +732,7 @@ func (a *Activities) dryRunUnits(ctx context.Context, units []unit) (delta.Delta
 		if len(drop) == 0 {
 			var edits []Edit
 			for _, f := range rep.Files {
-				edits = append(edits, Edit{Path: f.Path, Action: "write", Content: f.Content, Why: mergeStepName})
+				edits = append(edits, Edit{Path: f.Path, Action: "write", Content: f.Content, Why: mergeStepName, Group: f.Group})
 			}
 			return d, edits, refused, nil
 		}

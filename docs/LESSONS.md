@@ -516,3 +516,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   passed at $2.04, and pages went from 3 KB to 46 KB down to 2 KB to 3 KB. The navigation and owner evals, and the
   pointers shown, did not change.
 - **Rule.** A cap that counts lines also needs a limit on line length when a model writes the lines.
+
+## 34. The cap cut one supersede in two
+
+- **Symptom.** On 2026-10-28 the doctor's supersession check failed on both machines: 1 of 220 supersedes edges
+  pointed at a note still `current`. At 10:00Z `curate.merge` had a share of 1 new file. It landed the kept note of
+  one duplicate group (with `supersedes: [old]`) and held the old note, and in another group it marked the old note
+  `superseded` and held the kept note, so that note's facts no longer ranked and no note claimed to supersede it.
+- **Cause.** A merge unit is an `update_note` plus a `supersede` op, and `delta.Apply` writes both files. The step
+  then sends them to `ApplyEdits` as separate files, and the cap judged each file alone. Rule 11 made learn sessions
+  whole, but the curation steps had no unit to keep whole.
+- **Fix.** `delta.Apply` names the files that one op writes as a group (`File.Group`), and the edits carry it. The
+  cap reserves a group's new files at its first edit: the group lands whole or is held whole. A replay of the merge
+  step of two dreams through the real code (find and bodies answers from the ledger, a shadow brain) matched
+  production with groups cleared, and with groups split 2 to 0 (10-28) and 1 to 0 (10-23), with the same new files
+  used of the share.
+- **Rule.** A cap applies to the unit that must stay whole, at every step that has one.

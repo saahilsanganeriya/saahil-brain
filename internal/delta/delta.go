@@ -89,6 +89,9 @@ type File struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 	Created bool   `json:"created"`
+	// Group ties the files one op wrote together (a supersede writes two): its smallest path, empty for a file alone.
+	// The dream's edit cap lands a group whole or holds it whole.
+	Group string `json:"group,omitempty"`
 }
 
 type Rejection struct {
@@ -123,13 +126,15 @@ type applier struct {
 	adding     map[string]bool   // ids this delta adds, so notes in one batch may cite each other
 	dropped    []PendingLink
 	normalized int
+	touched    []string          // ids the current op wrote
+	tie        map[string]string // union-find over ids written by one op
 }
 
 // Apply checks every op, applies the valid ones in order and writes each changed file atomically. It never deletes:
 // a delete op is refused and counted, and supersede only marks the old note.
 func Apply(ctx context.Context, root string, d Delta, opts Options) (Report, error) {
 	var rep Report
-	a := &applier{root: root, opts: opts, files: map[string]*entry{}, adding: map[string]bool{}}
+	a := &applier{root: root, opts: opts, files: map[string]*entry{}, adding: map[string]bool{}, tie: map[string]string{}}
 	for _, op := range d.Ops {
 		if op.Op == "add_note" && op.Note != nil {
 			a.adding[op.Note.ID] = true
@@ -139,7 +144,13 @@ func Apply(ctx context.Context, root string, d Delta, opts Options) (Report, err
 		if err := ctx.Err(); err != nil {
 			return rep, err
 		}
+		a.touched = a.touched[:0]
 		counter, noop, err := a.apply(op)
+		if err == nil {
+			for _, id := range a.touched {
+				a.union(a.touched[0], id)
+			}
+		}
 		switch {
 		case err != nil:
 			rep.Rejected = append(rep.Rejected, Rejection{Index: i, Op: op.Op, Target: op.target(), Reason: err.Error()})
@@ -175,6 +186,7 @@ func Apply(ctx context.Context, root string, d Delta, opts Options) (Report, err
 			}
 		}
 	}
+	a.groupFiles(rep.Files)
 	if len(rep.DroppedRefs) > 0 && !opts.DryRun {
 		if err := appendPending(root, rep.DroppedRefs); err != nil {
 			return rep, err
@@ -353,7 +365,39 @@ func (a *applier) commit(n Note, orig []byte) error {
 		return errors.New(strings.Join(probs, "; "))
 	}
 	a.files[n.ID] = &entry{note: n, orig: orig}
+	a.touched = append(a.touched, n.ID)
 	return nil
+}
+
+func (a *applier) find(id string) string {
+	for a.tie[id] != "" && a.tie[id] != id {
+		id = a.tie[id]
+	}
+	return id
+}
+
+func (a *applier) union(x, y string) {
+	if rx, ry := a.find(x), a.find(y); rx != ry {
+		a.tie[ry] = rx
+	}
+}
+
+// groupFiles names each set of two or more written files tied by one op after its smallest path.
+func (a *applier) groupFiles(files []File) {
+	smallest, size := map[string]string{}, map[string]int{}
+	root := make([]string, len(files))
+	for i, f := range files {
+		root[i] = a.find(strings.TrimSuffix(filepath.Base(f.Path), ".md"))
+		if s, ok := smallest[root[i]]; !ok || f.Path < s {
+			smallest[root[i]] = f.Path
+		}
+		size[root[i]]++
+	}
+	for i := range files {
+		if size[root[i]] > 1 {
+			files[i].Group = smallest[root[i]]
+		}
+	}
 }
 
 // normalize enforces two mechanical caps on a new note instead of rejecting it: the summary is cut to 160 chars at a
