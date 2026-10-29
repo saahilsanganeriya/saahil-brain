@@ -24,7 +24,7 @@ func init() {
 	register("agents move", "move a laptop session to the devbox (exit it first): <session> <name> [--force]", cmdAgentsMove)
 	register("agents stop", "end a finished agent, transcript kept: <name> [--rm-worktree]", cmdAgentsStop)
 	register("agents box", "copy a work/ box with its bulk to the devbox, never deleting: <box> [--exclude PATH]… [--with-venv]", cmdAgentsBox)
-	register("machine login", "renew the devbox sign-ins: [github|aws|gcloud]… (all three by default)", cmdMachineLogin)
+	register("machine login", "renew the devbox sign-ins: [github|aws|gcloud|tailscale]… (all by default)", cmdMachineLogin)
 	for verb, summary := range map[string]string{
 		"up":     "start the EC2 (~1–2 min) and sync laptop → devbox",
 		"down":   "sync devbox → laptop and stop the EC2 (refuses while agents run; --force)",

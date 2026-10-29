@@ -50,6 +50,30 @@ func TestLaptopVerbsReachTheDevboxScriptUnchanged(t *testing.T) {
 // TestAWSLoginUsesTheIdentitysSession catches every person's AWS sign-in going to the owner's SSO session name, a
 // session name with a space reaching the shell as two words (from the laptop over ssh and on the devbox), or a login
 // with no session set running aws instead of naming the key to set.
+// The tailscale sign-in runs the devbox script, on the devbox and through ssh from the laptop; without its own
+// case it falls through to the gcloud flow.
+func TestTailscaleLoginRunsTheDevboxScript(t *testing.T) {
+	var streamed [][]string
+	stream := func(_ context.Context, name string, args ...string) error {
+		streamed = append(streamed, append([]string{name}, args...))
+		return nil
+	}
+	reachable := func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+	for _, m := range []*Machine{
+		{Here: config.Devbox, Out: &bytes.Buffer{}, Stream: stream},
+		{Here: config.Laptop, Host: squad.Host{Remote: true, Run: reachable}, Out: &bytes.Buffer{}, Stream: stream},
+	} {
+		if err := m.Login(context.Background(), []string{"tailscale"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := devboxBin("devbox-tailscale-login")
+	want := [][]string{{script}, {"ssh", "-t", config.DevboxHost(), script}}
+	if len(streamed) != 2 || !slices.Equal(streamed[0], want[0]) || !slices.Equal(streamed[1], want[1]) {
+		t.Errorf("streamed %q\nwant     %q", streamed, want)
+	}
+}
+
 func TestAWSLoginUsesTheIdentitysSession(t *testing.T) {
 	identitytest.Write(t, `{"aws_sso_session": "Team Session", "devbox_host": "box-test"}`)
 	var streamed [][]string

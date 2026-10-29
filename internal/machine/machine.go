@@ -21,7 +21,7 @@ import (
 	"saahil.local/brain/internal/squad"
 )
 
-var Services = []string{"github", "aws", "gcloud"}
+var Services = []string{"github", "aws", "gcloud", "tailscale"}
 
 type Machine struct {
 	Here   config.Machine
@@ -153,12 +153,12 @@ func roundDuration(d time.Duration) string {
 
 // ---- sign-ins ----
 
-// Login renews the devbox sign-ins (all three when none is named): from the laptop through ssh with the laptop's
+// Login renews the devbox sign-ins (all of them when none is named): from the laptop through ssh with the laptop's
 // browser, on the devbox in this terminal.
 func (m *Machine) Login(ctx context.Context, services []string) error {
 	for _, s := range services {
 		if !slices.Contains(Services, s) {
-			return fmt.Errorf("unknown sign-in %q (github|aws|gcloud)", s)
+			return fmt.Errorf("unknown sign-in %q (github|aws|gcloud|tailscale)", s)
 		}
 	}
 	if len(services) == 0 {
@@ -184,6 +184,10 @@ func (m *Machine) Login(ctx context.Context, services []string) error {
 			err = m.Stream(ctx, "ssh", "-t", config.DevboxHost(), "bash -lc "+squad.Quote(awsLogin()))
 		case service == "aws":
 			err = m.Stream(ctx, "bash", "-lc", awsLogin())
+		case service == "tailscale" && m.Host.Remote:
+			err = m.Stream(ctx, "ssh", "-t", config.DevboxHost(), devboxBin("devbox-tailscale-login"))
+		case service == "tailscale":
+			err = m.Stream(ctx, devboxBin("devbox-tailscale-login"))
 		case m.Host.Remote:
 			err = m.loginGcloud(ctx)
 		default:
