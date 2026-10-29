@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -361,24 +362,53 @@ var gitLockWait = func(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// staleGitLock is the age at which a git lock has lost its process: git never removes the lock of a run that was
+// killed, and every git command on the brain's text finishes in seconds.
+const staleGitLock = 10 * time.Minute
+
+var heldGitLock = regexp.MustCompile(`Unable to create '([^']+\.lock)': File exists`)
+
 // git runs with a fixed identity and no hooks or signing: the brain's repo is local history, and the code repo's
 // pre-commit guard (which refuses brain data) must not apply to it.
 func (a *Activities) git(ctx context.Context, args ...string) (string, error) {
 	full := append([]string{"-C", a.Cfg.BrainRoot, "-c", "user.name=brain-dream", "-c", "user.email=dream@brain.local",
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}, args...)
 	// Any git run under the brain holds these locks too (boxes in work/ sit inside this repo): wait about 1 min.
-	for wait := 2 * time.Second; ; wait *= 2 {
+	wait := 2 * time.Second
+	for {
 		out, err := exec.CommandContext(ctx, "git", full...).CombinedOutput()
 		if err == nil {
 			return strings.TrimSpace(string(out)), nil
 		}
-		if !strings.Contains(string(out), ".lock': File exists") || wait > time.Minute {
+		m := heldGitLock.FindSubmatch(out)
+		if m != nil && a.archiveStaleLock(string(m[1])) {
+			continue
+		}
+		if m == nil || wait > time.Minute {
 			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 		}
 		if werr := gitLockWait(ctx, wait); werr != nil {
 			return "", werr
 		}
+		wait *= 2
 	}
+}
+
+// archiveStaleLock moves a lock older than staleGitLock into .archive/git-locks/ and says whether it did.
+func (a *Activities) archiveStaleLock(lock string) bool {
+	info, err := os.Stat(lock)
+	if err != nil || time.Since(info.ModTime()) < staleGitLock {
+		return false
+	}
+	dst := a.path(".archive", "git-locks", time.Now().UTC().Format("20060102T150405Z")+"-"+filepath.Base(lock))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return false
+	}
+	if err := os.Rename(lock, dst); err != nil {
+		return false
+	}
+	slog.Warn("moved a stale git lock aside", "lock", lock, "age", time.Since(info.ModTime()).Round(time.Second), "kept", dst)
+	return true
 }
 
 func (a *Activities) writeTarball(dst string, dirs ...string) error {
