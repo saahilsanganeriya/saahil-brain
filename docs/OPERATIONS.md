@@ -28,6 +28,7 @@ Run it on either machine. Green means no check failed or warned (exit 0); otherw
 $ brain doctor
 ok    brain.skeleton        /Users/<user>/brain
 ok    brain.work-root       <n> entries in work/, no .git and no link back into the brain
+ok    dream.last            last dream <run-id> completed
 ok    graph caps            <n> of <n> baselines and notes within their caps (target 100%)
 ok    graph dangling links  0 links and refs from notes and hubs resolve to nothing (target 0)
 ok    graph duplicates      0 notes or hubs are byte copies of another (target 0)
@@ -54,6 +55,7 @@ For the laptop from the devbox: `brain peer step doctor --wait 10m`.
 
 | Line | Read it as |
 |---|---|
+| `dream.last` | the newest dream run that is not a shadow. A warning when it failed, red when two or more failed in a row: the line gives the first run that failed and the error of the last one |
 | `graph …` | the note graph's health. Targets: orphans 0, dangling 0, duplicates 0, hub coverage ≥ 90%, caps 100% |
 | `hooks mode` | must say `live`. `shadow` means `~/brain/.brain/live` is missing: hooks log but inject nothing |
 | `hooks usage` | pull rate = sessions that called a brain tool; open rate = pointers opened per shown. The honest measure of use |
@@ -233,7 +235,7 @@ and install steps above. Running sessions pick up a new mod or new hooks at thei
 | doctor red on `sync.last` | `brain doctor` (the line gives the hourly agent's state) | agent not loaded, or running for hours: `brain peer step sync-enable` (it loads the agent again and stops the run that does not end). Agent waiting with last exit 78 (EX_CONFIG): launchd stopped spawning it. The bridge reloads it within 10 minutes and writes launchd's view and log lines to `~/.local/state/brain/sync-agent-reloads.log` on the laptop. Agent waiting with another exit: the laptop slept or the tunnel is down: `launchctl kickstart -k gui/$(id -u)/com.saahil.brain-tunnel`, then `brain sync` |
 | doctor red on `sync.conflicts` | `brain sync --archive-conflicts` | both machines wrote the same file; the newer copy stays live. If only one machine wrote it, look for a second archive on the devbox (`ls -lt ~/.unison/ar*`): a sync that did not run through `brain sync`. A sync cut off before Unison saved its archive (the laptop slept or changed network) has the same result: then each loser is an older version that `git log` on the devbox holds |
 | `mesh.peer` unreachable | `brain peer status` | the laptop is asleep (a step with `--wait` starts when it answers; notes queue), or the bridge or tunnel stopped: see `~/Library/Logs/brain-bridge.log` and `brain-tunnel.log` |
-| dream step failed | `.brain/dream-runs/<run-id>.json` | a model auth error (sign in to Claude on the devbox), the cost cap, or a bug: the care agent picks it up |
+| dream step failed (doctor `dream.last`) | `.brain/dream-runs/<run-id>.json` | a model auth error (sign in to Claude on the devbox), the cost cap, or a bug: the care agent picks it up. A git lock that a killed git process left (`index.lock': File exists`) no longer stops dreams: the dream moves a lock older than 10 minutes to `.archive/git-locks/` |
 | no pointers ever | `brain doctor` (`hooks mode`) | `~/brain/.brain/live` is missing, or `BRAIN_OFF=1` is set |
 | `brain_*` tools answer nothing in Claude Code | `brain doctor` (`host.claude`) | restart the session; check `claude plugin list` shows `saahil-brain` |
 | AWS or GitHub errors in `devbox status` | `brain machine status` | a sign-in expired: `brain machine login aws` / `github` **[HUMAN]** |

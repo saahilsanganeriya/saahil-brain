@@ -532,3 +532,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   production with groups cleared, and with groups split 2 to 0 (10-28) and 1 to 0 (10-23), with the same new files
   used of the share.
 - **Rule.** A cap applies to the unit that must stay whole, at every step that has one.
+
+## 35. A dead process's git lock stopped 14 dreams
+
+- **Symptom.** From 2026-10-29T09:00Z every hourly dream failed at `snapshot`, 14 in a row, with `git add: fatal:
+  Unable to create '…/.git/index.lock': File exists`. No dream ran for 13 hours, and the doctor stayed green on both
+  machines.
+- **Cause.** A git process that ran under `~/brain` (the boxes in `work/` sit inside the brain's repository) was
+  killed at 06:44Z and left an empty `index.lock`. Git does not remove the lock of a run that was killed. The dream
+  waited about 1 minute for each lock (rule from 2026-10-25, for a process that still runs), then failed, and the next
+  hour found the same lock. No doctor check read `.brain/dream-runs/`.
+- **Fix.** The dream moves a git lock older than 10 minutes to `.archive/git-locks/` and tries again at once; a newer
+  lock it waits for as before. A replay of the snapshot step on a copy of the brain's repository with its own lock:
+  main failed after 62 s of waits, the fix committed (110 files) with no wait. Locks a live process holds were waited
+  for and kept. The doctor's `dream.last` check warns on one failed dream and is red on two in a row.
+- **Rule.** A lock with no time limit needs a rule for its dead holder. A repeated failure needs a doctor line.
+
