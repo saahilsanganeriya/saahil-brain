@@ -516,3 +516,77 @@ func TestWholeUnitLargerThanTheCapAppliesWhatFits(t *testing.T) {
 		t.Fatalf("applied %d, rejected %+v; want %d applied and the last edit lost", len(res.Applied), res.Rejected, MaxEdits)
 	}
 }
+
+// Catches the file step losing captures to a full cap: it applied its answer as one batch, the cap held the notes
+// that did not fit as lost, and the captures watermark moved past every capture, so no later dream filed them (one
+// dream lost 35 notes from 33 inbox captures that way, after learn had used 47 of the 50 files).
+func TestFileHoldsACaptureWholeWhenTheCapIsFull(t *testing.T) {
+	acts, fake := newBrain(t, 0)
+	brain := acts.Cfg.BrainRoot
+	t0 := time.Now().UTC()
+	captures := []string{"memory/feedback-sample.md"}
+	for i := range 30 {
+		rel := fmt.Sprintf("inbox/capture-%02d.md", i)
+		write(t, filepath.Join(brain, rel), fmt.Sprintf("a fact worth keeping, number %d\n", i))
+		mtime := t0.Add(-time.Hour + time.Duration(i)*time.Second)
+		if err := os.Chtimes(filepath.Join(brain, rel), mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+		captures = append(captures, rel)
+	}
+	note := func(capture, part string) string {
+		return "notes/finding-" + strings.TrimSuffix(filepath.Base(capture), ".md") + "-" + part + ".md"
+	}
+	respond := fake.Respond
+	fake.Respond = func(c llm.Call) llm.Result {
+		if !strings.HasPrefix(c.Skill, "# skill file\n") {
+			return respond(c)
+		}
+		var in struct{ Material []struct{ Path string } }
+		_ = json.Unmarshal([]byte(c.Input), &in)
+		var edits []Edit
+		for _, m := range in.Material {
+			for _, part := range []string{"a", "b"} {
+				p := note(m.Path, part)
+				edits = append(edits, Edit{Path: p, Action: "write", Content: "---\nid: " +
+					strings.TrimSuffix(filepath.Base(p), ".md") + "\nsources: [" + m.Path + "]\n---\nfiled\n"})
+			}
+		}
+		out, _ := json.Marshal(map[string]any{"edits": edits})
+		return llm.Result{JSON: out}
+	}
+	// 31 captures of 2 notes each: 62 files, more than the 50 the cap allows a whole run
+	filed := func() (whole int) {
+		t.Helper()
+		for _, c := range captures {
+			_, errA := os.Stat(filepath.Join(brain, note(c, "a")))
+			_, errB := os.Stat(filepath.Join(brain, note(c, "b")))
+			if (errA == nil) != (errB == nil) {
+				t.Errorf("capture %s filed in part", c)
+			}
+			if errA == nil && errB == nil {
+				whole++
+			}
+		}
+		return whole
+	}
+
+	first := runDream(t, acts, Input{Force: true}, t0)
+	for _, rej := range first.Rejected {
+		if rej.Step == "file" && (!rej.Held || rej.Lost || !strings.Contains(rej.Reason, "waits for the next dream")) {
+			t.Errorf("file's held edit is recorded as %+v, want held, not lost, waiting for the next dream", rej)
+		}
+	}
+	landed := filed()
+	if landed == 0 || landed == len(captures) || !strings.Contains(step(first, "file").Reason,
+		fmt.Sprintf("%d captures wait for the next dream", len(captures)-landed)) {
+		t.Fatalf("first dream filed %d of %d captures whole, reason %q; want some to wait, and the reason to say how many",
+			landed, len(captures), step(first, "file").Reason)
+	}
+
+	second := runDream(t, acts, Input{Force: true}, t0.Add(13*time.Hour))
+	if got := filed(); got != len(captures) || second.Material.Captures != len(captures)-landed {
+		t.Fatalf("after the second dream %d of %d captures are filed (it read %d captures); want all, the %d that waited",
+			got, len(captures), second.Material.Captures, len(captures)-landed)
+	}
+}

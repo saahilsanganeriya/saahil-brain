@@ -75,7 +75,11 @@ no longer `lost`. A learn
 session is one unit (`ApplyInput.Whole`): its edits land together, or all are `held` (not `lost`, "waits for the
 next dream, whole"). Then learn stops, and that session and every later session wait for the next dream: the sessions
 watermark stops before it, and their edits do not go to the later steps. A session that changes more files than the
-cap applies what fits, so it cannot stop learn in every dream. In every other step, the files that one delta op
+cap applies what fits, so it cannot stop learn in every dream. A capture of the file step is one unit too: an edit
+belongs to the oldest of the run's captures that its `sources` names, and an edit that names none belongs to the
+newest. The file step applies the captures oldest first, each whole. The first capture that the cap has no room for,
+and every capture after it, wait for the next dream: the captures watermark stops before it, and their edits do not go
+to the later steps. The step record says how many captures wait. In every other step, the files that one delta op
 writes (a `supersede` writes the new note and the old one) are a group (`Edit.Group`, set from `delta.File.Group`):
 the cap reserves the new files of the whole group at its first edit, so the group lands whole or is held whole.
 Anything else is listed in

@@ -13,6 +13,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"saahil.local/brain/internal/config"
+	"saahil.local/brain/internal/delta"
 )
 
 const (
@@ -245,17 +246,70 @@ func (r *run) llm(s llmStep, material []Material) {
 	}
 	rec := StepRecord{Name: s.name, Status: out.Status, Reason: out.Reason, CostUSD: out.CostUSD,
 		Called: out.Called, Cached: out.Cached, Refused: out.Refused}
-	if len(out.Edits) > 0 {
+	switch {
+	case len(out.Edits) == 0:
+	case s == fileStep && len(material) > 0 &&
+		workflow.GetVersion(r.ctx, "file-holds-whole-capture", workflow.DefaultVersion, 1) == 1:
+		var waiting int
+		if rec.Edits, waiting = r.fileCaptures(material, out.Edits); waiting > 0 {
+			rec.Reason = strings.TrimPrefix(rec.Reason+fmt.Sprintf(
+				"; %d captures wait for the next dream: the edit cap has no room for the next one whole", waiting), "; ")
+		}
+	default:
 		r.proposed = append(r.proposed, out.Edits...)
 		rec.Edits = r.apply(s.name, out.Edits)
 	}
 	r.record(rec, began)
 }
 
+// fileCaptures applies the file step's answer one capture at a time, oldest first, each whole, as learn applies its
+// sessions: the first capture the cap has no room for, and every later one, wait for the next dream (the watermark
+// stops before it) instead of being lost.
+func (r *run) fileCaptures(captures []Material, edits []Edit) (applied, waiting int) {
+	for i, unit := range captureUnits(captures, edits) {
+		if len(unit) == 0 {
+			continue
+		}
+		in := applyInput(r.rep.RunID, fileStep.name, unit, r.applied)
+		in.Whole = true
+		n, held := r.applyUnit(in)
+		if held && n == 0 {
+			r.gate.Next[fileStep.area] = captures[i].MTime.Add(-time.Nanosecond)
+			return applied, len(captures) - i
+		}
+		r.proposed = append(r.proposed, unit...)
+		applied += n
+	}
+	return applied, 0
+}
+
+// captureUnits splits the file step's edits by the capture they file: the oldest of the run's captures an edit's
+// sources name, so a note filed from two captures lands with the first; an edit that names none goes with the newest.
+func captureUnits(captures []Material, edits []Edit) [][]Edit {
+	index := make(map[string]int, len(captures))
+	for i, c := range captures {
+		index[c.Rel] = i
+	}
+	units := make([][]Edit, len(captures))
+	for _, e := range edits {
+		at := len(captures) - 1
+		if n, err := delta.Parse([]byte(e.Content)); err == nil {
+			for _, src := range n.Sources {
+				if i, ok := index[strings.SplitN(src, "#", 2)[0]]; ok && i < at {
+					at = i
+				}
+			}
+		}
+		units[at] = append(units[at], e)
+	}
+	return units
+}
+
 // curationSteps share what learn and file leave of the cap; learn and file consume their input, so they keep first
-// claim (a learn session the cap has no room for waits whole, unconsumed). Of the curation steps only merge and cards rebuild their edits from the whole brain each run, so only their
-// held edits return; link, hubs and verify judge this run's proposals, so an edit the cap holds there is lost unless
-// landHeld finds room for it after summarise.
+// claim (a learn session or a filed capture the cap has no room for waits whole, unconsumed). Of the curation steps
+// only merge and cards rebuild their edits from the whole brain each run, so only their held edits return; link, hubs
+// and verify judge this run's proposals, so an edit the cap holds there is lost unless landHeld finds room for it
+// after summarise.
 var curationSteps = []string{linkStep.name, hubsStep.name, mergeStepName, cardsStepName, verifyStep.name}
 
 var rebuildsEachRun = map[string]bool{mergeStepName: true, cardsStepName: true}

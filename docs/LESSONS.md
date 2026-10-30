@@ -548,3 +548,17 @@ a new person showed steps that only ever happened by hand, and values that only 
   for and kept. The doctor's `dream.last` check warns on one failed dream and is red on two in a row.
 - **Rule.** A lock with no time limit needs a rule for its dead holder. A repeated failure needs a doctor line.
 
+## 36. The file step lost 35 notes to a full cap
+
+- **Symptom.** On 2026-10-30 at 00:00Z a dream learned 60 sessions (a backlog from 14 failed dreams). learn changed 47
+  of the 50 files. The file step then proposed 35 notes from 33 inbox captures, and the cap held all 35 as `lost`. No
+  later dream filed them, and one landed note linked to a note that never came (a dangling link).
+- **Cause.** learn applies each session whole and keeps its watermark before the first session that waits (rule 11).
+  The file step applied its answer as one batch. Its held edits were `lost`, and its captures watermark moved past
+  every capture, so the captures were never read again. Earlier runs lost 11 notes in the same way (10-17 to 10-19).
+- **Fix.** The file step applies its edits one capture at a time, oldest first, each whole. An edit belongs to the
+  oldest capture that its `sources` names. The first capture that does not fit, and every capture after it, wait for
+  the next dream: the captures watermark stops before it. A replay of 5 real file steps (the answers from the ledger,
+  a shadow brain from each snapshot) matched production on main (lost 35, 1, 3, 6, 1) and lost 0 with the fix; 42
+  captures waited for the next dream.
+- **Rule.** A step that uses up its input must keep the input that the cap did not let it apply.
