@@ -33,6 +33,7 @@ type Rejection struct {
 	Reason string `json:"reason"`
 	Held   bool   `json:"held,omitempty"` // the run's edit cap held it
 	Lost   bool   `json:"lost,omitempty"` // held, and its step judges only this run's proposals: it never returns
+	Base   string `json:"base,omitempty"` // held: fileBase of the file when the cap held it, so a later dream can tell it is unchanged
 }
 
 type ApplyInput struct {
@@ -105,7 +106,7 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 		reject := func(reason string) {
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Reason: reason})
 		}
-		hold := func() {
+		hold := func(base string) {
 			limit := fmt.Sprintf("run edit cap %d reached", MaxEdits)
 			if slices.Contains(curationSteps, in.Step) {
 				limit = fmt.Sprintf("%s's share of the edit cap (%d new files) reached", in.Step, in.Remaining)
@@ -121,7 +122,7 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 				fate = "lost: " + in.Step + " judges only this run's proposals"
 			}
 			res.Rejected = append(res.Rejected, Rejection{Step: in.Step, Path: e.Path, Action: e.Action, Held: true,
-				Lost: lost, Reason: limit + "; " + fate})
+				Lost: lost, Reason: limit + "; " + fate, Base: base})
 		}
 		if e.Action != "write" {
 			reject("refused " + e.Action + ": the dream never deletes; only writes are applied")
@@ -155,11 +156,11 @@ func (a *Activities) ApplyEdits(_ context.Context, in ApplyInput) (ApplyResult, 
 				}
 			}
 			if !fits {
-				hold()
+				hold(fileBase(old, exists))
 				continue
 			}
 		} else if holdAll || (!changed[e.Path] && newFiles >= in.Remaining) {
-			hold()
+			hold(fileBase(old, exists))
 			continue
 		}
 		backup := filepath.Join(a.Cfg.BrainRoot, ".archive", "dream", in.RunID, "before", e.Path)

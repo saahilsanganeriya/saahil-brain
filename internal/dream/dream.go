@@ -110,15 +110,16 @@ var (
 
 // run is one DreamWorkflow execution's in-memory state; every field is rebuilt identically on replay.
 type run struct {
-	ctx      workflow.Context
-	det      workflow.Context
-	rep      *Report
-	gate     GateResult
-	applied  []Applied
-	proposed []Edit
-	held     []heldEdit // edits the cap held from a step that will not propose them again
-	stopLLM  string
-	consumed map[string]bool // material areas whose step ran; only these watermarks advance
+	ctx        workflow.Context
+	det        workflow.Context
+	rep        *Report
+	gate       GateResult
+	applied    []Applied
+	proposed   []Edit
+	held       []heldEdit // edits the cap held from a step that will not propose them again
+	landedLate []heldEdit // held edits the held step landed, this run's and carried ones
+	stopLLM    string
+	consumed   map[string]bool // material areas whose step ran; only these watermarks advance
 }
 
 var a *Activities // activity references only; never called directly in the workflow
@@ -190,6 +191,7 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 	r.brain("render", []string{"render"})
 	r.check()
 	r.llm(verifyStep, nil)
+	r.saveCarried()
 	return r.commit(start)
 }
 
@@ -365,7 +367,7 @@ func (r *run) applyUnit(in ApplyInput) (applied int, held bool) {
 		if rej.Held && rej.Lost {
 			for _, e := range slices.Backward(in.Edits) {
 				if e.Path == rej.Path {
-					r.held = append(r.held, heldEdit{Step: in.Step, Edit: e, After: len(r.applied)})
+					r.held = append(r.held, heldEdit{Step: in.Step, Edit: e, After: len(r.applied), Base: rej.Base})
 					break
 				}
 			}
@@ -379,7 +381,10 @@ const heldStepName = "held"
 type heldEdit struct {
 	Step  string
 	Edit  Edit
-	After int // len(run.applied) when the cap held it: a write at or after this index makes it stale
+	After int    // len(run.applied) when the cap held it: a write at or after this index makes it stale
+	Base  string // fileBase of its file when held
+	From  string // the earlier run that held it, for a carried edit
+	Held  time.Time
 }
 
 // landable is the held edits that can still land: no later write to their file (the edit was made against the file as
@@ -397,9 +402,15 @@ func landable(held []heldEdit, applied []Applied) []heldEdit {
 }
 
 // landHeld gives the held edits of steps that judge only this run's proposals a second chance once the steps before
-// verify have run: those landable take an equal share with verify of what the cap left, before check lints them.
-// What still does not fit stays lost.
+// verify have run: those landable, earlier dreams' carried edits first, take an equal share with verify of what the
+// cap left, before check lints them. What still does not fit waits for the next dream (saveCarried).
 func (r *run) landHeld() {
+	carried := 0
+	if r.carries() {
+		loaded := r.loadCarried()
+		carried = len(loaded)
+		r.held = append(loaded, r.held...) // a newer held edit of the same file replaces a carried one (landable)
+	}
 	candidates := landable(r.held, r.applied)
 	if len(candidates) == 0 {
 		return
@@ -417,10 +428,15 @@ func (r *run) landHeld() {
 	}
 	r.applied = append(r.applied, res.Applied...)
 	landed := map[string]bool{}
+	carriedLanded := 0
 	for _, ap := range res.Applied {
 		for _, h := range candidates {
 			if h.Edit.Path == ap.Path {
 				landed[h.Step+"\x00"+ap.Path] = true
+				r.landedLate = append(r.landedLate, h)
+				if h.From != "" {
+					carriedLanded++
+				}
 			}
 		}
 	}
@@ -431,8 +447,11 @@ func (r *run) landHeld() {
 			delete(landed, key)
 		}
 	}
-	r.record(StepRecord{Name: heldStepName, Status: "ok", Edits: len(res.Applied), Reason: fmt.Sprintf(
-		"%d of %d held edits landed (share %d new files)", len(res.Applied), len(candidates), in.Remaining)}, began)
+	reason := fmt.Sprintf("%d of %d held edits landed (share %d new files)", len(res.Applied), len(candidates), in.Remaining)
+	if carried > 0 {
+		reason += fmt.Sprintf("; %d carried from earlier dreams, %d of them landed", carried, carriedLanded)
+	}
+	r.record(StepRecord{Name: heldStepName, Status: "ok", Edits: len(res.Applied), Reason: reason}, began)
 }
 
 func (r *run) brain(step string, command []string, args ...string) StepOutcome {

@@ -28,7 +28,8 @@ func init() {
 var syncIgnores = append(prefixed("Name ", config.SyncBulkDirs),
 	`Regex work/.*\.[A-Za-z0-9]+`,
 	"Path .index", "Path .data", "Name .git", "Path .archive", "Path .brain/dream.lock",
-	"Path .brain/dream-state.json", "Path .brain/dream-last-skip.json", "Name .consolidate-lock", "Name .DS_Store",
+	"Path .brain/dream-state.json", "Path .brain/dream-last-skip.json", "Path .brain/held-carry.json",
+	"Name .consolidate-lock", "Name .DS_Store",
 	"Name *.tmp", "Name .brain-tmp", "Name *.db", "Name *.db-wal", "Name *.db-shm",
 )
 

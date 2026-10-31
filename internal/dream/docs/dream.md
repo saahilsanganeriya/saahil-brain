@@ -71,7 +71,12 @@ held edit of curate.merge or curate.cards comes back next run, because these ste
 edit of any other step is also `lost`, because that step judges only this run's material and proposals. After
 summarise, the `held` step gives these lost edits a second chance: an edit whose file no later step wrote lands in an
 equal share with verify of what is left of the cap (check then lints it, verify judges it on disk), and its record is
-no longer `lost`. A learn
+no longer `lost`. A lost edit that the `held` step cannot land, and a lost edit of verify, wait for the next dream in
+`.brain/held-carry.json` with a hash of the file as it was when the cap held the edit (the record says "carried to
+the next dream", not `lost`). The next dream's `held` step tries the carried edits first, oldest first, in the same
+share. A carried edit lands only while its file has that hash and for at most 24 hours; a newer held edit of the same
+file replaces it. A carried edit that cannot land any more is recorded `lost` in the run that drops it ("carried from
+<run>: the file changed since" or "waited more than 24h0m0s"). A learn
 session is one unit (`ApplyInput.Whole`): its edits land together, or all are `held` (not `lost`, "waits for the
 next dream, whole"). Then learn stops, and that session and every later session wait for the next dream: the sessions
 watermark stops before it, and their edits do not go to the later steps. A session that changes more files than the

@@ -3,6 +3,7 @@ package dream
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -588,5 +589,90 @@ func TestFileHoldsACaptureWholeWhenTheCapIsFull(t *testing.T) {
 	if got := filed(); got != len(captures) || second.Material.Captures != len(captures)-landed {
 		t.Fatalf("after the second dream %d of %d captures are filed (it read %d captures); want all, the %d that waited",
 			got, len(captures), second.Material.Captures, len(captures)-landed)
+	}
+}
+
+// Catches a held edit lost for good to a full cap: curate.hubs judges only its run's proposals, so a hub edit the cap
+// held was never proposed again (one day lost 38 hub edits in 4 dreams, while 4 later dreams ended 9-20 files under
+// the cap). It waits now and lands in the next dream with room, unless its file changed since or it waited a day.
+func TestALostEditWaitsForTheNextDreamWithRoom(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		gap           time.Duration
+		touch         string // a file changed between the dreams
+		landed, lost  int
+		lostReasonHas string
+	}{
+		{name: "lands", gap: time.Hour, landed: 5},
+		{name: "file changed", gap: time.Hour, touch: "hubs/h-1.md", landed: 4, lost: 1, lostReasonHas: "the file changed since"},
+		{name: "waited a day", gap: 25 * time.Hour, lost: 5, lostReasonHas: "waited more than 24h0m0s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acts, fake := newBrain(t, 0)
+			round := 1
+			fake.Respond = func(c llm.Call) llm.Result {
+				name := strings.TrimPrefix(strings.SplitN(c.Skill, "\n", 2)[0], "# skill ")
+				var edits []Edit
+				add := func(path string) {
+					edits = append(edits, Edit{Path: path, Action: "write", Content: "---\nid: x\n---\n" + path + "\n"})
+				}
+				switch {
+				case round > 1:
+				case name == "file": // the file step fills the cap before curation
+					for i := range MaxEdits {
+						add(fmt.Sprintf("notes/finding-file-%02d.md", i))
+					}
+				case name == "hubs":
+					for i := range 3 {
+						add(fmt.Sprintf("hubs/h-%d.md", i))
+					}
+				default:
+					add("notes/finding-from-" + name + ".md")
+				}
+				out, _ := json.Marshal(map[string]any{"edits": edits})
+				return llm.Result{JSON: out}
+			}
+			t0 := time.Now().UTC()
+			first := runDream(t, acts, Input{Force: true}, t0)
+			carried := 0
+			for _, rej := range first.Rejected {
+				if rej.Lost {
+					t.Errorf("first dream: %s recorded lost: %s", rej.Path, rej.Reason)
+				}
+				if strings.Contains(rej.Reason, "carried to the next dream") {
+					carried++
+				}
+			}
+			if carried != 5 { // curate.link 1, curate.hubs 3, verify 1
+				t.Fatalf("first dream carried %d held edits, want 5: %+v", carried, first.Rejected)
+			}
+			if tc.touch != "" {
+				write(t, filepath.Join(acts.Cfg.BrainRoot, tc.touch), "changed by hand\n")
+			}
+			round = 2
+			later := filepath.Join(acts.Cfg.BrainRoot, "memory/feedback-later.md")
+			write(t, later, "new material for the next dream\n")
+			if err := os.Chtimes(later, time.Now().Add(time.Minute), time.Now().Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			second := runDream(t, acts, Input{Force: true}, t0.Add(tc.gap))
+			var lost []string
+			for _, rej := range second.Rejected {
+				if rej.Lost {
+					lost = append(lost, rej.Reason)
+				}
+			}
+			if got := step(second, "held").Edits; got != tc.landed || len(lost) != tc.lost {
+				t.Fatalf("second dream: %d carried edits landed, lost %q; want %d landed, %d lost", got, lost, tc.landed, tc.lost)
+			}
+			for _, reason := range lost {
+				if !strings.Contains(reason, tc.lostReasonHas) {
+					t.Errorf("lost reason %q, want it to say %q", reason, tc.lostReasonHas)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(acts.Cfg.BrainRoot, ".brain", "held-carry.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("carry list after the second dream: %v, want none left", err)
+			}
+		})
 	}
 }

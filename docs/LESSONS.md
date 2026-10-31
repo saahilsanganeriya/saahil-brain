@@ -562,3 +562,17 @@ a new person showed steps that only ever happened by hand, and values that only 
   a shadow brain from each snapshot) matched production on main (lost 35, 1, 3, 6, 1) and lost 0 with the fix; 42
   captures waited for the next dream.
 - **Rule.** A step that uses up its input must keep the input that the cap did not let it apply.
+
+## 37. curate.hubs lost 38 edits to a full cap in one day
+
+- **Symptom.** On 2026-10-31, 4 of 9 dreams held curate.hubs edits as `lost`: 38 in all (18, 13 and 5 in three of
+  them). One hub's new members were held three times and never moved. 4 later dreams ended 9 to 20 files under the cap.
+- **Cause.** curate.link, curate.hubs and verify judge only this run's proposals, so a held edit of theirs is not
+  proposed again. The `held` step (rule from 2026-10-26) lands them after summarise only in the same run. In a run that
+  learn and file fill (47 to 50 of the 50 files), it has no room.
+- **Fix.** A lost edit that the `held` step cannot land waits for the next dream in `.brain/held-carry.json`, with a
+  hash of its file. The next dream's `held` step tries it first, while the file has that hash, for at most 24 hours.
+  An edit that cannot land any more is recorded `lost` in the run that drops it. A replay of the dream records
+  (main: the `held` step, no carry): 9 dreams of 2026-10-31, lost 42 -> 6 (18 landed later, 16 replaced by a newer
+  edit of the same file, 4 waiting); 52 dreams of 2026-10-20 to 2026-10-30, lost 15 -> 4. No model call is added.
+- **Rule.** A paid edit that cannot land now waits for a run with room. Drop it only when its file changed.
