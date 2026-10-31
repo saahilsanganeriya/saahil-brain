@@ -449,11 +449,24 @@ func links(body string) []Link {
 			out = append(out, l)
 		}
 	}
-	for _, m := range mdLinkRE.FindAllStringSubmatch(body, -1) {
-		add(Link{Target: localTarget(m[1])})
+	var code [][2]int
+	scanned := false
+	inCode := func(at int) bool { // scanned once, and only for a body that has a link
+		if !scanned {
+			code, scanned = codeRanges(body), true
+		}
+		i := sort.Search(len(code), func(i int) bool { return code[i][1] > at })
+		return i < len(code) && code[i][0] <= at
 	}
-	for _, m := range wikiRE.FindAllStringSubmatch(body, -1) {
-		add(Link{Target: strings.TrimSpace(m[1]), Wiki: true})
+	for _, m := range mdLinkRE.FindAllStringSubmatchIndex(body, -1) {
+		if !inCode(m[0]) {
+			add(Link{Target: localTarget(body[m[2]:m[3]])})
+		}
+	}
+	for _, m := range wikiRE.FindAllStringSubmatchIndex(body, -1) {
+		if !inCode(m[0]) {
+			add(Link{Target: strings.TrimSpace(body[m[2]:m[3]]), Wiki: true})
+		}
 	}
 	id := config.CurrentIdentity()
 	for _, home := range slices.Compact([]string{id.LaptopHome + "/", id.DevboxHome + "/"}) {
@@ -469,6 +482,64 @@ func links(body string) []Link {
 		}
 	}
 	return out
+}
+
+// codeRanges is the sorted byte ranges of fenced blocks and inline code spans, where [[x]] and [a](b) are text (a
+// bash test, an example), not links. An inline span opens with a run of backticks and closes at the next run of the same
+// length on its line; a run with no partner is a literal backtick.
+func codeRanges(body string) [][2]int {
+	var out [][2]int
+	fenced := false
+	for pos := 0; pos < len(body); {
+		end := strings.IndexByte(body[pos:], '\n') + pos + 1
+		if end == pos {
+			end = len(body)
+		}
+		line := body[pos:end]
+		trim := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~"):
+			fenced = !fenced
+			out = append(out, [2]int{pos, end})
+		case fenced:
+			out = append(out, [2]int{pos, end})
+		default:
+			for i := 0; i < len(line); {
+				if line[i] != '`' {
+					i++
+					continue
+				}
+				n := backtickRun(line, i)
+				closed := false
+				for j := i + n; j < len(line); {
+					if line[j] != '`' {
+						j++
+						continue
+					}
+					m := backtickRun(line, j)
+					if m == n {
+						out = append(out, [2]int{pos + i, pos + j + m})
+						i, closed = j+m, true
+						break
+					}
+					j += m
+				}
+				if !closed {
+					i += n
+				}
+			}
+		}
+		pos = end
+	}
+	return out
+}
+
+func backtickRun(s string, i int) int {
+	n := 0
+	for i+n < len(s) && s[i+n] == '`' {
+		n++
+	}
+	return n
 }
 
 // localTarget drops external URLs, anchors-only links and placeholders like (url); "" means not a file link.

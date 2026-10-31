@@ -122,3 +122,20 @@ func TestLinksAndPRsFollowTheIdentity(t *testing.T) {
 		t.Errorf("no default_pr_repo: mentions = %v, want none", d.Mentions)
 	}
 }
+
+// TestALinkInsideCodeIsText catches shell and example text counted as links: a note that quoted `[[ -n $f ]]` (a bash
+// test) gave the doctor a dangling link to "-n $f", and example text `![..](..)` linked a note to the brain root. Links
+// outside code still count, and a path inside code is still a reference.
+func TestALinkInsideCodeIsText(t *testing.T) {
+	identitytest.Write(t, `{"laptop_home": "/Users/test-user"}`)
+	body := "See [[note-a]] and [b](notes/b.md).\n" +
+		"Symptom: `f=$(gh api x); [[ -n $f ]]` and ``a `[[c]]` b``; shown as `![..](..)`.\n" +
+		"```sh\n[[ -z $x ]] && cat [d](notes/d.md) /Users/test-user/brain/notes/e.md\n```\n" +
+		"After the fence: [[note-f]]; an unclosed ` keeps [[note-g]].\n"
+	d := Markdown([]byte(body))
+	want := []Link{{Target: "notes/b.md"}, {Target: "note-a", Wiki: true}, {Target: "note-f", Wiki: true},
+		{Target: "note-g", Wiki: true}, {Target: "/Users/test-user/brain/notes/e.md"}}
+	if !reflect.DeepEqual(d.Links, want) {
+		t.Errorf("links = %+v, want %+v", d.Links, want)
+	}
+}
