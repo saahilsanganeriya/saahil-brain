@@ -576,3 +576,16 @@ a new person showed steps that only ever happened by hand, and values that only 
   (main: the `held` step, no carry): 9 dreams of 2026-10-31, lost 42 -> 6 (18 landed later, 16 replaced by a newer
   edit of the same file, 4 waiting); 52 dreams of 2026-10-20 to 2026-10-30, lost 15 -> 4. No model call is added.
 - **Rule.** A paid edit that cannot land now waits for a run with room. Drop it only when its file changed.
+
+## 38. Learn wrote the same lessons again from one long session
+
+- **Symptom.** On 2026-10-31, four dreams learned one long-running coordinator session again as it grew. Each time
+  learn wrote the same lessons under new ids. curate.merge then held 8 duplicate groups for 4 dreams in a row: the
+  cap had no room for them, and learn made more each day.
+- **Cause.** Reflect sees the notes that already cite the session in `proposed`. The query sorted them by path and
+  stopped at 64 KB. A session with 50 to 98 notes passed 64 KB around `finding-c*`, so reflect never saw its
+  `lesson-*` notes, and every duplicate was a lesson.
+- **Fix.** `proposed` lists the notes newest first. Whole files fill 64 KB, then each other note comes as its head
+  (`id`, `type`, `status`, `summary`, `aliases`). A replay of two dreams with real calls on a shadow brain: blind
+  duplicates 1 -> 0 and 3 -> 0, other new notes 4 -> 5 and 2 -> 3, about +$0.05 for each call on such a session.
+- **Rule.** An input cap must not hide the items the model is told not to repeat. Cut the long text, not the list.

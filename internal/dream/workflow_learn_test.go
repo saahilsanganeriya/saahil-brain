@@ -220,6 +220,61 @@ func TestReflectSeesWhatEarlierRunsLearnedFromTheSession(t *testing.T) {
 	}
 }
 
+// TestReflectSeesEveryNoteASessionGaveEarlierRuns catches reflect seeing only the alphabetical start of a long-lived
+// session's notes: past 64 KB (anti-pattern-* to finding-c*) the cut hid every lesson, so on 2026-10-31 four dreams
+// re-learned one coordinator session and wrote the same lessons again under new ids (9 duplicates merge then held).
+func TestReflectSeesEveryNoteASessionGaveEarlierRuns(t *testing.T) {
+	acts, fake := newBrain(t, 0.01)
+	brain := acts.Cfg.BrainRoot
+	session := "sessions/devbox/2026/10/2026-10-08-0000abcd-sample.md"
+	write(t, filepath.Join(brain, session), "---\ntype: session\ncorrections: 1\n---\nran tests\n")
+	st, err := store.Open(filepath.Join(brain, ".index", "brain.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := map[string]string{}
+	for i, id := range []string{"anti-pattern-a", "anti-pattern-b", "anti-pattern-c", "anti-pattern-d", "lesson-late"} {
+		body := strings.Repeat("old body\n", fileContentCap/4)
+		if id == "lesson-late" {
+			body = "the newest lesson\n"
+		}
+		notes[id] = "---\nid: " + id + "\ntype: lesson\nstatus: current\nsummary: summary of " + id +
+			"\nhubs: [ci-depot]\nsources: [" + session + "]\n---\n" + body
+		write(t, filepath.Join(brain, "notes", id+".md"), notes[id])
+		if _, err := st.DB.Exec(`INSERT INTO node(id, kind, path, status, updated) VALUES (?, 'doc', ?, 'current', ?)`,
+			id, "notes/"+id+".md", fmt.Sprintf("2026-10-0%dT00:00:00Z", i+1)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.DB.Exec(`INSERT INTO edge(src, dst, rel, source) VALUES (?, ?, 'sources', 'fm')`, id, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.Close()
+	var input string
+	fake.Respond = func(c llm.Call) llm.Result {
+		input = c.Input
+		return llm.Result{JSON: json.RawMessage(`{"ops":[]}`)}
+	}
+	if _, err := acts.LearnReflect(context.Background(), LearnCallInput{Session: session}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct{ Proposed []Edit }
+	if err := json.Unmarshal([]byte(input), &payload); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, e := range payload.Proposed {
+		got[strings.TrimSuffix(strings.TrimPrefix(e.Path, "notes/"), ".md")] = e.Content
+	}
+	if got["lesson-late"] != notes["lesson-late"] {
+		t.Fatalf("the newest note %q, want its whole file; reflect saw %d of 5 notes", got["lesson-late"], len(got))
+	}
+	head, ok := got["anti-pattern-a"]
+	if !ok || !strings.Contains(head, "summary: summary of anti-pattern-a") || strings.Contains(head, "old body") {
+		t.Fatalf("the oldest note past the cap is %d bytes (shown %v), want its head with the summary and no body", len(head), ok)
+	}
+}
+
 // TestLearnHoldsASessionWholeWhenTheCapIsFull catches the edit cap cutting through one session's edits: on 2026-10-19T19
 // learn reached the 50 files mid-session, wrote 11 notes that supersede others but not the status edits on the notes
 // they supersede (the doctor's supersession check failed on both machines), lost 31 notes for good, and still paid to

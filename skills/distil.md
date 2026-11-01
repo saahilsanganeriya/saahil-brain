@@ -23,7 +23,8 @@ One JSON object on stdin:
 A session note's frontmatter lists `touched`, `produced`, `prs` and `corrections` (how many owner prompts corrected
 the agent). Its body has `## Owner prompts`, `## What it did` and `## Files`. `material` holds the session note, then
 the documents it produced (each up to 16 KB). `proposed` shows notes already written this run and notes earlier runs
-learned from this session, whatever their status: do not add them again; an `update_note` may correct one. You have
+learned from this session, whatever their status, newest first; past 64 KB a note shows only its head (`id`, `type`,
+`status`, `summary`, `aliases`). Do not add any of them again, under any id; an `update_note` may correct one. You have
 no tools: everything you may use is in this input.
 
 ## Output

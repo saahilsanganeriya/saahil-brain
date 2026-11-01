@@ -53,7 +53,8 @@ read or edit any file.
 asked for (curate.link, curate.hubs and verify read only this). Learn's reflect is one call per session: its
 `material` is the session note, then the `.md` and `.txt` files in the brain that the note lists in `produced` (≤ 16 KB
 each, ≤ 64 KB in all); its `proposed` is the notes that already cite the session in `evidence` or `sources`, of any
-status (a live session is reflected again in each dream after it grows). Verify reads only the claim notes in
+status, newest first: whole files up to 64 KB, then each note's head (`id`, `type`, `status`, `summary`, `aliases`)
+up to 64 KB more, so a live session reflected again in each dream after it grows sees every note it gave before. Verify reads only the claim notes in
 `proposed` (finding, decision, lesson, anti-pattern, playbook), each as the run last wrote it, in batches of at most 12.
 Each batch gets the evidence its own notes cite. The answer must match `EditsSchema` (`edits.go`):
 

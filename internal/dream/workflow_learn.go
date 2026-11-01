@@ -345,35 +345,60 @@ func (a *Activities) sessionPayload(in LearnCallInput, step string) (map[string]
 	return map[string]any{"step": step, "material": material, "signals": in.Signals}, nil
 }
 
-// learnedFrom gives the notes that already cite a session, whatever their status: a live session is reflected again
-// each dream it grew, and with no tools reflect sees earlier answers only here.
+// learnedFrom gives the notes that already cite a session, whatever their status, newest first: a live session is
+// reflected again each dream it grew, and with no tools reflect sees earlier answers only here. Past producedDocCap of
+// whole files a note comes as its head, so reflect still knows every note it must not add again.
 func (a *Activities) learnedFrom(session string) []Edit {
 	db, err := sql.Open("sqlite", "file:"+a.path(".index", "brain.db")+"?_pragma=busy_timeout(5000)&mode=ro")
 	if err != nil {
 		return nil
 	}
 	defer db.Close()
-	rows, err := db.Query(`SELECT DISTINCT n.path FROM edge e JOIN node n ON n.id = e.src
-		WHERE e.dst = ? AND e.rel IN ('evidence', 'sources') AND n.path LIKE 'notes/%' ORDER BY n.path`, session)
+	rows, err := db.Query(`SELECT n.path, max(n.updated) AS updated FROM edge e JOIN node n ON n.id = e.src
+		WHERE e.dst = ? AND e.rel IN ('evidence', 'sources') AND n.path LIKE 'notes/%'
+		GROUP BY n.path ORDER BY updated DESC, n.path`, session)
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 	var notes []Edit
-	total := 0
-	for rows.Next() && total < producedDocCap {
-		var path string
-		if rows.Scan(&path) != nil {
+	whole, heads := 0, 0
+	for rows.Next() && heads < producedDocCap {
+		var path, updated string
+		if rows.Scan(&path, &updated) != nil {
 			continue
 		}
 		b, err := a.readBrainDoc(path)
 		if err != nil {
 			continue
 		}
-		total += len(b)
-		notes = append(notes, Edit{Path: path, Action: "write", Content: string(b)})
+		content := string(b)
+		if whole < producedDocCap {
+			whole += len(b)
+		} else {
+			content = noteHead(b)
+			heads += len(content)
+		}
+		notes = append(notes, Edit{Path: path, Action: "write", Content: content})
 	}
 	return notes
+}
+
+// noteHead keeps the frontmatter lines that say what a note is: enough to see it was learned, without its body.
+func noteHead(note []byte) string {
+	lines := strings.Split(string(note), "\n")
+	head := "---\n"
+	for i, line := range lines {
+		if i > 0 && strings.TrimSpace(line) == "---" {
+			break
+		}
+		for _, key := range []string{"id:", "type:", "status:", "summary:", "aliases:"} {
+			if strings.HasPrefix(line, key) {
+				head += line + "\n"
+			}
+		}
+	}
+	return head + "---\n"
 }
 
 // producedDocCap bounds the documents a session wrote that reflect reads next to its note.
