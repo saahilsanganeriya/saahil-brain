@@ -589,3 +589,16 @@ a new person showed steps that only ever happened by hand, and values that only 
   (`id`, `type`, `status`, `summary`, `aliases`). A replay of two dreams with real calls on a shadow brain: blind
   duplicates 1 -> 0 and 3 -> 0, other new notes 4 -> 5 and 2 -> 3, about +$0.05 for each call on such a session.
 - **Rule.** An input cap must not hide the items the model is told not to repeat. Cut the long text, not the list.
+
+## 39. A parser fix reached only the files that changed
+
+- **Symptom.** After the fix "a link inside code is text, not a link", the laptop's doctor still reported 2 dangling
+  links (`.` and `-n $f`) for days. The devbox showed 0 only because a care run had rebuilt its index by hand.
+- **Cause.** An index update reads a file again only when its mtime and size move. No peer step runs a full
+  rebuild, so the rows of an unchanged file stay as the old parser wrote them.
+- **Fix.** `meta.parse_version` holds a hash of the `scan`, `parse` and `graph` sources that built the index. When
+  the running code has another hash, the next update rebuilds the index in full one time. On a shadow of the devbox
+  brain (98,774 paths), this rebuild took 57 s and its edges were equal to `brain index --full`. The next update
+  read 1 file.
+- **Rule.** When derived rows depend on code, record the version of that code next to the rows, and rebuild the
+  rows when the version changes.

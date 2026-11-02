@@ -94,6 +94,10 @@ last_helpful_at, ignored, demoted_at)`, `lookups(time, session, hook, candidates
 prompt text, `llm_calls(key, workflow, step, model, cost_usd, tokens_in, tokens_out, started, ended, status)`
 (idempotency key unique), `meta(key, value)`.
 
+An update reads only the files whose mtime and size changed. `meta.parse_version` names the code that built the
+index (a hash of the `scan`, `parse` and `graph` sources). When it is not the running code's, the next update
+rebuilds the index in full one time. Thus a parser fix reaches every file, not only the files that change.
+
 The usage funnel. The hooks write `shown` (prompt), `opened` and `followed` (post), and `ignored` (end and compact).
 Each counts once per session. A read is Read, Grep or Glob, a Bash read (cat, sed without -i, head, tail, less, rg,
 grep) or brain show/sections. The learn step's judge writes `helpful` and `harmful` through the delta `counter` op.

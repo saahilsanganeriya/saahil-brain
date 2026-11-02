@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"saahil.local/brain/internal/graph"
 	"saahil.local/brain/internal/index"
 	"saahil.local/brain/internal/store"
 )
@@ -68,6 +69,9 @@ func cmdIndex(args []string) int {
 		}
 		fmt.Printf("indexed %d paths: %d changed, %d deleted, %d other files ignored; pagerank %d iterations; %s\n",
 			st.Walked, st.Changed, st.Deleted, st.Ignored, st.PageRankIters, st.Took.Round(time.Millisecond))
+		if st.Reparsed && !*full {
+			fmt.Printf("every file reparsed: the index was built by other parse code (now %s)\n", graph.ParseVersion())
+		}
 		if *stats {
 			return printStats(ix)
 		}

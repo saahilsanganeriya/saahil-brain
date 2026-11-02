@@ -148,3 +148,45 @@ func TestCopyOfCollapses(t *testing.T) {
 		t.Fatalf("copy_of edges = %d, want 3", edges)
 	}
 }
+
+// TestParserChangeReparsesUnchangedFiles catches a parser change that reaches only the files that change: after a
+// parse fix (a link inside code is text, not a link) the laptop's index kept 2 dangling links for days, because an
+// incremental update skips a file whose mtime and size did not move. It also catches the reverse cost: with the
+// parser unchanged, an incremental update reparses nothing.
+func TestParserChangeReparsesUnchangedFiles(t *testing.T) {
+	brain := t.TempDir()
+	put(t, brain, "notes/lesson-x.md", "---\nid: lesson-x\ntype: lesson\nstatus: current\nhubs: [brain]\n---\nRun `[a](b)` first.\n")
+	roots := []scan.Root{{Abs: brain}}
+	st, err := store.Open(filepath.Join(t.TempDir(), "b.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	update := func() Stats {
+		t.Helper()
+		s, err := Update(context.Background(), st.DB, roots, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	update()
+	// what an older parser left for the unchanged note: a link it read inside code, and its own version
+	for _, q := range []string{`INSERT INTO edge(src, dst, rel, why, source) VALUES ('lesson-x', 'b', 'links_to', '', 'lesson-x')`,
+		`INSERT OR REPLACE INTO meta(key, value) VALUES ('parse_version', 'an-older-parser')`} {
+		if _, err := st.DB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s := update(); s.Changed != 1 || !s.Reparsed {
+		t.Fatalf("after a parser change: changed %d, reparsed %v; want 1, true", s.Changed, s.Reparsed)
+	}
+	var stale int
+	_ = st.DB.QueryRow(`SELECT count(*) FROM edge WHERE src = 'lesson-x' AND dst = 'b'`).Scan(&stale)
+	if stale != 0 {
+		t.Fatalf("the older parser's link is still indexed (%d edge)", stale)
+	}
+	if s := update(); s.Changed != 0 || s.Reparsed {
+		t.Fatalf("parser unchanged: changed %d, reparsed %v; want 0, false", s.Changed, s.Reparsed)
+	}
+}

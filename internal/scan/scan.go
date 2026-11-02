@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"embed"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -22,6 +23,11 @@ import (
 
 	"saahil.local/brain/internal/config"
 )
+
+// Source is this package's code; the index reparses every file when it changes (graph.ParseVersion).
+//
+//go:embed *.go
+var Source embed.FS
 
 const (
 	MaxDocBytes     = 2_500_000 // markdown/html read cap; the rest of a bigger file is not indexed

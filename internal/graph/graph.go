@@ -1,11 +1,16 @@
 // Package graph turns scanned files into index rows: nodes, sections, full-text rows and the derived edges
 // (part_of, section_of, copy_of, version_of, links_to, mentions) plus the authored ones from frontmatter.
-// Updates are incremental by (mtime, size), then sha256; an incremental run must equal a full rebuild.
+// Updates are incremental by (mtime, size), then sha256; an incremental run must equal a full rebuild. An index built
+// by other parse code (ParseVersion) is rebuilt in full once, or a parser fix reaches only the files that change.
 package graph
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"embed"
+	"encoding/hex"
+	"fmt"
 	"path"
 	"regexp"
 	"runtime"
@@ -23,12 +28,36 @@ import (
 
 const ftsBodyMax = 32 << 10
 
+//go:embed *.go
+var source embed.FS
+
+// ParseVersion names the code that turns a file into rows (scan, parse, graph; tests excluded). meta.parse_version
+// holds the one that built the index. Lazy, so a hook that never updates the index never hashes.
+var ParseVersion = sync.OnceValue(func() string { return sourceHash(scan.Source, parse.Source, source) })
+
+func sourceHash(packages ...embed.FS) string {
+	h := sha256.New()
+	for i, src := range packages {
+		files, _ := src.ReadDir(".")
+		for _, f := range files {
+			if strings.HasSuffix(f.Name(), "_test.go") {
+				continue
+			}
+			b, _ := src.ReadFile(f.Name())
+			fmt.Fprintf(h, "%d %s %d\n", i, f.Name(), len(b))
+			h.Write(b)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
 // fileKinds are the node kinds that come from one walked path; the rest are derived by the global passes.
 const fileKinds = `('doc', 'artifact', 'link', 'skip')`
 
 type Stats struct {
 	Walked, Changed, Deleted, Ignored int
 	GraphChanged                      bool // a node, edge or mtime was written; false means derived data still holds
+	Reparsed                          bool // the index was built by other parse code, so every file was read again
 	Took                              time.Duration
 }
 
@@ -73,6 +102,12 @@ func Update(ctx context.Context, db *sql.DB, roots []scan.Root, full bool) (Stat
 		return st, err
 	}
 	defer tx.Rollback()
+	if !full {
+		var built string
+		_ = tx.QueryRow(`SELECT value FROM meta WHERE key = 'parse_version'`).Scan(&built)
+		full = built != ParseVersion()
+		st.Reparsed = full
+	}
 	if full {
 		for _, q := range []string{`DELETE FROM node`, `DELETE FROM edge`, `DELETE FROM section`, `DROP TABLE fts`, store.FTSSchema} {
 			if _, err := tx.Exec(q); err != nil {
@@ -157,8 +192,8 @@ func Update(ctx context.Context, db *sql.DB, roots []scan.Root, full bool) (Stat
 		}
 	}
 	st.Took = time.Since(start)
-	if _, err := tx.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES ('run.updated_at', ?)`,
-		time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES ('run.updated_at', ?), ('parse_version', ?)`,
+		time.Now().UTC().Format(time.RFC3339), ParseVersion()); err != nil {
 		return st, err
 	}
 	return st, tx.Commit()

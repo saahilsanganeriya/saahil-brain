@@ -3,6 +3,7 @@
 package parse
 
 import (
+	"embed"
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"html"
@@ -19,6 +20,11 @@ import (
 )
 
 const SummaryMax = 160
+
+// Source is this package's code; the index reparses every file when it changes (graph.ParseVersion).
+//
+//go:embed *.go
+var Source embed.FS
 
 // AuthoredRels are the only relations a note may write (FORMAT.md); everything else is derived.
 var AuthoredRels = []string{"hubs", "about", "evidence", "supersedes", "sources", "related", "broader"}
