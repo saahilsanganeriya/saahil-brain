@@ -217,9 +217,10 @@ parts, and the model can only propose edits; code checks and applies them.
             lock free (.brain/dream.lock, stale after 3 h)?                                     no ─► wait
    └─ run:
       snapshot ─► reconcile ─► capture ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs
-      git + tar   sync copies   missed      Opus    ranking   Haiku   Opus           Opus
-                  arrivals      session              prior
-                                notes
+      git + tar   sync copies,  missed      Opus    ranking   Haiku   Opus           Opus
+                  archives its  session
+                  half-copies   notes
+                  arrivals
         ─► curate.merge ─► curate.cards ─► summarise ─► held ─► render ─► check ─► verify ─► reindex ─► commit
            Opus            Haiku ×≤ 4      Haiku        lost     MEMORY.md  lint     Opus      brain      git + report
            duplicates,     stale CARDs     big docs     edits    hot.md     fails →  re-reads  index
@@ -325,7 +326,7 @@ is kept as a conflict copy, never lost.
 | never synced | `.index`, `.data`, `.archive`, `.git`, `*.db*`, locks, the dream's own state (`.brain/dream-state.json`, `.brain/dream-last-skip.json`, `.brain/held-carry.json`), `.DS_Store`, and folders named `artifacts`, `.sync-backups`, `ctx`, `target*`, `*.egg-info`, `node_modules`, `__pycache__`, `.venv`, `venv` |
 | under `work/` | text only: `md txt py sh js toml yml yaml` and files with no extension |
 | conflicts | the loser stays as `<file> (conflict…)`; `brain sync --archive-conflicts` moves losers to `.archive/conflicts/<machine>/`. The index and the session-note writer never read a conflict copy |
-| half-copies | a Unison temp file (`.unison.*`) older than 2 h is an abandoned transfer; every sync archives it |
+| half-copies | a Unison temp file (`.unison.*`) older than 2 h is an abandoned transfer; every sync archives it on the laptop, and the dream's reconcile step archives it on the devbox (unison's remote, where no sync runs), files and folders |
 | after a sync | the laptop re-indexes, so its pointers stay fresh |
 
 ## 12. Git history

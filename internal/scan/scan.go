@@ -428,6 +428,11 @@ func trimPartialRune(b []byte) []byte {
 
 // ---- sync conflict copies (doctor sync.conflicts, dream reconcile) ----
 
+// neverSynced names a folder the sync never carries, so nothing below it can be sync debris.
+func neverSynced(name string) bool {
+	return name == ".git" || name == ".index" || name == ".data" || name == ".archive" || config.IsSyncBulkDir(name)
+}
+
 // ConflictWalkers bounds the folders read at once: one serial walk of work/ (2.24 M entries on the devbox) outran the
 // doctor's 2 minutes.
 const ConflictWalkers = 8
@@ -455,8 +460,7 @@ func ConflictCopies(root string, workers int) ([]string, int) {
 			p := filepath.Join(dir, d.Name())
 			if d.IsDir() {
 				// .archive holds the losers already handled (brain sync --archive-conflicts); only live copies are unhandled
-				if d.Name() == ".git" || d.Name() == ".index" || d.Name() == ".data" || d.Name() == ".archive" ||
-					config.IsSyncBulkDir(d.Name()) {
+				if neverSynced(d.Name()) {
 					continue
 				}
 				select {
@@ -489,4 +493,103 @@ func ConflictCopies(root string, workers int) ([]string, int) {
 	walk(root)
 	slices.SortFunc(found, func(a, b string) int { return slices.Compare(strings.Split(a, "/"), strings.Split(b, "/")) })
 	return found, inFlight
+}
+
+// ArchiveStaleTemps moves unison's abandoned half-copies (.unison.<name>.<hash>.unison.tmp, files and folders) past
+// config.UnisonTempGrace into .archive/conflicts/<machine>/, and appends what moved to its log.tsv. brain sync does
+// this for its client side; this serves the remote side, where no sync command runs.
+func ArchiveStaleTemps(root string, now time.Time) (int, error) {
+	dest := filepath.Join(root, ".archive", "conflicts", string(config.ThisMachine()))
+	var (
+		mu    sync.Mutex
+		moves [][2]string
+		sem   = make(chan struct{}, ConflictWalkers)
+		wgAll sync.WaitGroup
+	)
+	claim := func() bool {
+		select {
+		case sem <- struct{}{}:
+			wgAll.Add(1)
+			return true
+		default:
+			return false
+		}
+	}
+	var scan func(dir string)
+	scan = func(dir string) {
+		list, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, d := range list {
+			p := filepath.Join(dir, d.Name())
+			if d.IsDir() {
+				if neverSynced(d.Name()) {
+					continue
+				}
+				// an abandoned half-copy folder moves whole; a live transfer's folder keeps moving
+				if strings.HasPrefix(d.Name(), ".unison.") && halfCopyStale(d, now) {
+					mu.Lock()
+					moves = append(moves, [2]string{p, filepath.Join(dest, relTo(root, p))})
+					mu.Unlock()
+					continue
+				}
+				if claim() {
+					go func() { defer wgAll.Done(); defer func() { <-sem }(); scan(p) }()
+				} else {
+					scan(p)
+				}
+				continue
+			}
+			if !strings.HasPrefix(d.Name(), ".unison.") || !halfCopyStale(d, now) {
+				continue
+			}
+			mu.Lock()
+			moves = append(moves, [2]string{p, filepath.Join(dest, relTo(root, p))})
+			mu.Unlock()
+		}
+	}
+	wgAll.Add(1)
+	go func() { defer wgAll.Done(); scan(root) }()
+	wgAll.Wait()
+	slices.SortFunc(moves, func(a, b [2]string) int { return strings.Compare(a[0], b[0]) })
+	return moveEntries(dest, root, moves, now)
+}
+
+// halfCopyStale reports a half-copy old enough that no transfer is still writing it.
+func halfCopyStale(d os.DirEntry, now time.Time) bool {
+	info, err := d.Info()
+	return err == nil && now.Sub(info.ModTime()) > config.UnisonTempGrace
+}
+
+func relTo(root, p string) string {
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return p
+	}
+	return rel
+}
+
+// moveEntries renames each path into the archive (same disk) and appends what moved to its log.tsv. The entries are
+// brain-relative, so the archive mirrors the live tree.
+func moveEntries(dest, root string, moves [][2]string, now time.Time) (int, error) {
+	var log strings.Builder
+	for _, m := range moves {
+		if err := os.MkdirAll(filepath.Dir(m[1]), 0o755); err != nil {
+			return 0, err
+		}
+		if err := os.Rename(m[0], m[1]); err != nil {
+			return 0, err
+		}
+		fmt.Fprintf(&log, "%s\t%s\n", now.UTC().Format(time.RFC3339), relTo(root, m[0]))
+	}
+	if len(moves) > 0 {
+		f, err := os.OpenFile(filepath.Join(dest, "log.tsv"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return len(moves), err
+		}
+		defer f.Close()
+		_, _ = f.WriteString(log.String())
+	}
+	return len(moves), nil
 }

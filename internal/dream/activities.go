@@ -529,8 +529,13 @@ func (a *Activities) Demote(_ context.Context) (StepOutcome, error) {
 }
 
 // Reconcile reports the sync-conflict copies the doctor reports; the owner decides them (brain sync
-// --archive-conflicts keeps the newer file).
+// --archive-conflicts keeps the newer file). Abandoned unison half-copies it archives itself: brain sync already
+// moves them on its client side, and this step is the remote side's only sweep.
 func (a *Activities) Reconcile(_ context.Context) (StepOutcome, error) {
+	archived, err := brainscan.ArchiveStaleTemps(a.Cfg.BrainRoot, time.Now())
+	if err != nil {
+		return StepOutcome{Status: "failed", Reason: err.Error()}, err
+	}
 	found, inFlight := brainscan.ConflictCopies(a.Cfg.BrainRoot, brainscan.ConflictWalkers)
 	reason := "no conflict copies"
 	if len(found) > 0 {
@@ -539,7 +544,17 @@ func (a *Activities) Reconcile(_ context.Context) (StepOutcome, error) {
 	if inFlight > 0 {
 		reason += fmt.Sprintf("; %d unison half-copy in flight", inFlight)
 	}
+	if archived > 0 {
+		reason += fmt.Sprintf("; archived %d abandoned unison half-cop%s", archived, pluralY(archived))
+	}
 	return StepOutcome{Status: "ok", Reason: reason}, nil
+}
+
+func pluralY(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 type BrainCommandInput struct {

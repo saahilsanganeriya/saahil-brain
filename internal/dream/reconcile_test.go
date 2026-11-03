@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"saahil.local/brain/internal/config"
 )
 
 // TestReconcileSkipsWhatTheSyncNeverCarries catches the reconcile step timing out (2026-10-26 02Z: three 15-minute
@@ -38,7 +40,15 @@ func TestReconcileSkipsWhatTheSyncNeverCarries(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(brain, "work/box-b/.unison.GOAL.md.0123.unison.tmp"), old, old); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ = acts.Reconcile(context.Background()); out.Reason != "3 conflict copies left for the owner" {
-		t.Fatalf("an abandoned half-copy is the owner's too: %+v", out)
+	out, err = acts.Reconcile(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "ok" || out.Reason != "2 conflict copies left for the owner; archived 1 abandoned unison half-copy" {
+		t.Fatalf("an abandoned half-copy is sync debris, not an owner decision: %+v", out)
+	}
+	if _, err := os.Stat(filepath.Join(brain, ".archive/conflicts", string(config.ThisMachine()),
+		"work/box-b/.unison.GOAL.md.0123.unison.tmp")); err != nil {
+		t.Fatalf("the half-copy must be in the archive: %v", err)
 	}
 }
