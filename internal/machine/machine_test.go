@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"saahil.local/brain/internal/config"
 	"saahil.local/brain/internal/config/identitytest"
@@ -100,5 +101,48 @@ func TestAWSLoginUsesTheIdentitysSession(t *testing.T) {
 	_ = (&Machine{Here: config.Devbox, Out: out, Stream: stream}).Login(context.Background(), []string{"aws"})
 	if len(streamed) != 2 || !strings.Contains(out.String(), "aws_sso_session") {
 		t.Errorf("no session: streamed %q, said %q", streamed[2:], out)
+	}
+}
+
+// TestGithubLoginForwardsOnItsOwnConnection catches the GitHub sign-in's port-8250 forward joining the shared
+// ControlMaster: there it outlives the step and the laptop's own Vault sign-in fails with "address already in use".
+func TestGithubLoginForwardsOnItsOwnConnection(t *testing.T) {
+	var argv []string
+	stream := func(_ context.Context, name string, args ...string) error {
+		argv = append([]string{name}, args...)
+		return nil
+	}
+	reachable := func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+	m := &Machine{Here: config.Laptop, Host: squad.Host{Remote: true, Run: reachable}, Out: &bytes.Buffer{}, Stream: stream}
+	if err := m.Login(context.Background(), []string{"github"}); err != nil {
+		t.Fatal(err)
+	}
+	host, own := slices.Index(argv, config.DevboxHost()), slices.Index(argv, "ControlPath=none")
+	if own < 1 || argv[own-1] != "-o" || own > host {
+		t.Errorf("github sign-in ran %q, want ssh -o ControlPath=none before the host", argv)
+	}
+}
+
+// TestGcloudLoginAlwaysAsksForASignIn catches a devbox gcloud login that names the account without --force, where
+// gcloud re-uses stored credentials and prints no sign-in link, or that keeps GOOGLE_APPLICATION_CREDENTIALS, where
+// gcloud stops at a Y/n question before it writes ADC.
+func TestGcloudLoginAlwaysAsksForASignIn(t *testing.T) {
+	var started string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		command := args[len(args)-1]
+		switch {
+		case strings.Contains(command, "config get-value account"):
+			return []byte("user@example.com\n"), nil
+		case strings.Contains(command, "tmux new-session"):
+			started = command
+		}
+		return nil, nil
+	}
+	m := &Machine{Here: config.Laptop, Host: squad.Host{Run: run}, Out: &bytes.Buffer{}, Sleep: func(time.Duration) {}}
+	_ = m.loginGcloud(context.Background())
+	for _, want := range []string{"env -u GOOGLE_APPLICATION_CREDENTIALS gcloud auth login --force", "user@example.com"} {
+		if !strings.Contains(started, want) {
+			t.Errorf("devbox gcloud login %q lacks %q", started, want)
+		}
 	}
 }

@@ -175,7 +175,10 @@ func (m *Machine) Login(ctx context.Context, services []string) error {
 		var err error
 		switch {
 		case service == "github" && m.Host.Remote:
-			err = m.Stream(ctx, "ssh", "-t", "-L", "8250:127.0.0.1:8250", config.DevboxHost(), devboxBin("devbox-github-login"), "--tunnel")
+			// Own connection: a forward added through the shared ControlMaster outlives this step and holds the laptop's
+			// port 8250, so the laptop's own Vault sign-in then fails with "address already in use".
+			err = m.Stream(ctx, "ssh", "-o", "ControlPath=none", "-t", "-L", "8250:127.0.0.1:8250", config.DevboxHost(),
+				devboxBin("devbox-github-login"), "--tunnel")
 		case service == "github":
 			err = m.Stream(ctx, devboxBin("devbox-github-login"))
 		case service == "aws" && config.CurrentIdentity().AWSSSOSession == "":
@@ -205,10 +208,13 @@ func (m *Machine) Login(ctx context.Context, services []string) error {
 func (m *Machine) loginGcloud(ctx context.Context) error {
 	account, _ := m.Host.Shell(ctx, "gcloud config get-value account 2>/dev/null")
 	account = strings.TrimSpace(account)
-	flow := "gcloud auth login " + squad.Quote(account) + " --update-adc --no-browser; echo LOGIN-EXIT=\\$?; sleep 120"
-	if account == "" {
-		flow = "gcloud auth login --update-adc --no-browser; echo LOGIN-EXIT=\\$?; sleep 120"
+	// --force: with an account named, gcloud re-uses stored credentials and shows no sign-in link. Without
+	// GOOGLE_APPLICATION_CREDENTIALS, gcloud asks no Y/n question before it writes ADC to its default place.
+	login := "env -u GOOGLE_APPLICATION_CREDENTIALS gcloud auth login --force --update-adc --no-browser"
+	if account != "" {
+		login += " " + squad.Quote(account)
 	}
+	flow := login + "; echo LOGIN-EXIT=\\$?; sleep 120"
 	_, _ = m.Host.Shell(ctx, "tmux kill-session -t gcloud-login 2>/dev/null; tmux new-session -d -s gcloud-login -x 400 -y 50 "+
 		squad.Quote(`bash -lc "`+flow+`"`))
 	pane := func() string {
@@ -247,12 +253,7 @@ func (m *Machine) loginGcloud(ctx context.Context) error {
 	}
 	for range 30 {
 		m.Sleep(2 * time.Second)
-		text = pane()
-		_, tail, _ := cutLast(text, "Enter the output")
-		if strings.Contains(tail, "Do you want to continue (Y/n)?") && !strings.Contains(text, "LOGIN-EXIT=") {
-			_, _ = m.Host.Shell(ctx, "tmux send-keys -t gcloud-login: Y Enter") // GOOGLE_APPLICATION_CREDENTIALS is set; write ADC anyway
-		}
-		if strings.Contains(text, "LOGIN-EXIT=") {
+		if text = pane(); strings.Contains(text, "LOGIN-EXIT=") {
 			break
 		}
 	}
@@ -263,13 +264,6 @@ func (m *Machine) loginGcloud(ctx context.Context) error {
 		m.printf("gcloud: ok (gcloud + ADC renewed)\n")
 	}
 	return nil
-}
-
-func cutLast(s, sep string) (string, string, bool) {
-	if i := strings.LastIndex(s, sep); i >= 0 {
-		return s[:i], s[i+len(sep):], true
-	}
-	return "", s, false
 }
 
 func lastBytes(s string, n int) string {
