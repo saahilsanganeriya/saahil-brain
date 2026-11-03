@@ -1,6 +1,6 @@
 #!/bin/bash
-# publish.sh <dist> — install bin/brain-linux-amd64 as the devbox's brain and stage the darwin build, bootstrap-laptop.sh
-# and what it fetches (setup-laptop.sh, the laptop's devbox helper).
+# publish.sh <dist> — install bin/brain-linux-amd64 as the devbox's brain, with the devbox-tailscale-login it runs,
+# and stage the darwin build, bootstrap-laptop.sh and what it fetches (setup-laptop.sh, the laptop's devbox helper).
 set -euo pipefail
 dist=$1
 mkdir -p "$dist" "$HOME/.local/bin"
@@ -9,6 +9,8 @@ if [ -f bin/brain-worker-linux-amd64 ]; then
   install -m 755 bin/brain-worker-linux-amd64 "$HOME/.local/bin/.brain-worker.new" && mv -f "$HOME/.local/bin/.brain-worker.new" "$HOME/.local/bin/brain-worker"
   systemctl --user try-restart brain-worker.service 2>/dev/null || true   # Temporal resumes any running workflow
 fi
+install -m 755 scripts/devbox-tailscale-login "$HOME/.local/bin/.devbox-tailscale-login.new" &&
+  mv -f "$HOME/.local/bin/.devbox-tailscale-login.new" "$HOME/.local/bin/devbox-tailscale-login"
 install -m 755 bin/brain-darwin-arm64 "$dist/.brain-darwin-arm64.new"
 (cd "$dist" && mv -f .brain-darwin-arm64.new brain-darwin-arm64 && sha256sum brain-darwin-arm64 > brain-darwin-arm64.sha256)
 install -m 644 scripts/bootstrap-laptop.sh "$dist/bootstrap-laptop.sh"

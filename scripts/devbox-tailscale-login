@@ -1,0 +1,24 @@
+#!/bin/sh
+# devbox-tailscale-login — sign this devbox in to Tailscale again on each run, keeping its current settings.
+# A plain `tailscale up` renews only a key that has already expired and keeps the old expiry without a word, so each
+# run uses --force-reauth: it prints a sign-in link to approve in the browser. It takes the devbox off Tailscale until
+# the link is approved, so run it over ssh to the public address, never over Tailscale.
+# `tailscale up` refuses to change a setting it is not told about, so the current hostname, DNS and route choices are
+# passed back unchanged.
+set -eu
+prefs=$(tailscale debug prefs)
+pref() { printf '%s' "$prefs" | python3 -c "import json,sys; v=json.load(sys.stdin).get('$1'); print(str(v).lower() if isinstance(v, bool) else (v or ''))"; }
+set -- --accept-dns="$(pref CorpDNS)" --accept-routes="$(pref RouteAll)"
+host=$(pref Hostname)
+[ -n "$host" ] && set -- "$@" --hostname="$host"
+echo "tailscale: renewing the sign-in: open the link below and approve it (waits up to 5 min)"
+if ! sudo tailscale up --force-reauth --timeout=5m "$@"; then
+  echo "tailscale: not approved; the devbox stays off Tailscale until 'devbox-agent login tailscale' is approved" >&2
+  exit 1
+fi
+tailscale status --json | python3 -c "
+import json, sys
+s = json.load(sys.stdin)['Self']
+e = s.get('KeyExpiry')
+print('tailscale: signed in as %s (%s), %s' % (s.get('HostName'), (s.get('TailscaleIPs') or ['-'])[0],
+      'key expires %s UTC' % e[:16].replace('T', ' ') if e else 'key never expires'))"
