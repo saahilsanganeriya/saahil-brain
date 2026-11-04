@@ -662,7 +662,7 @@ func TestALostEditWaitsForTheNextDreamWithRoom(t *testing.T) {
 					lost = append(lost, rej.Reason)
 				}
 			}
-			if got := step(second, "held").Edits; got != tc.landed || len(lost) != tc.lost {
+			if got := step(second, "carried").Edits + step(second, "held").Edits; got != tc.landed || len(lost) != tc.lost {
 				t.Fatalf("second dream: %d carried edits landed, lost %q; want %d landed, %d lost", got, lost, tc.landed, tc.lost)
 			}
 			for _, reason := range lost {
@@ -672,6 +672,90 @@ func TestALostEditWaitsForTheNextDreamWithRoom(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(acts.Cfg.BrainRoot, ".brain", "held-carry.json")); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("carry list after the second dream: %v, want none left", err)
+			}
+		})
+	}
+}
+
+// Catches carried edits that never land while every dream is full: the held step ran after learn and file had used the
+// whole cap, so its share was 0 and the carried edits waited until they expired (2026-11-04: 4 dreams at 50 files, 0 of
+// 28 carried edits landed). They land first now, before learn and file, in half the cap; file waits instead. Carried
+// edits beyond that share stay held: the held step lands them or they wait again, none is dropped.
+func TestCarriedEditsLandBeforeLearnAndFileFillTheCap(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		hubEdits      int
+		carriedLanded int // carried = curate.link 1 + curate.hubs hubEdits + verify 1
+	}{
+		{name: "all fit", hubEdits: 3, carriedLanded: 5},
+		{name: "more than half the cap", hubEdits: 30, carriedLanded: (MaxEdits + 1) / 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acts, fake := newBrain(t, 0)
+			round := 1
+			fake.Respond = func(c llm.Call) llm.Result {
+				name := strings.TrimPrefix(strings.SplitN(c.Skill, "\n", 2)[0], "# skill ")
+				var edits []Edit
+				add := func(path string) {
+					edits = append(edits, Edit{Path: path, Action: "write", Content: "---\nid: x\n---\n" + path + "\n"})
+				}
+				switch {
+				case name == "file": // every round the file step alone could fill the cap
+					for i := range MaxEdits {
+						add(fmt.Sprintf("notes/finding-file-%d-%02d.md", round, i))
+					}
+				case round > 1:
+				case name == "hubs":
+					for i := range tc.hubEdits {
+						add(fmt.Sprintf("hubs/h-%d.md", i))
+					}
+				default:
+					add("notes/finding-from-" + name + ".md")
+				}
+				out, _ := json.Marshal(map[string]any{"edits": edits})
+				return llm.Result{JSON: out}
+			}
+			t0 := time.Now().UTC()
+			first := runDream(t, acts, Input{Force: true}, t0)
+			round = 2
+			later := filepath.Join(acts.Cfg.BrainRoot, "memory/feedback-later.md")
+			write(t, later, "new material for the next dream\n")
+			if err := os.Chtimes(later, time.Now().Add(time.Minute), time.Now().Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			second := runDream(t, acts, Input{Force: true}, t0.Add(time.Hour))
+			if got := step(second, "carried").Edits; got != tc.carriedLanded {
+				t.Fatalf("second dream landed %d carried edits before learn and file (held: %q); want %d", got,
+					step(second, "held").Reason, tc.carriedLanded)
+			}
+			hub, err := os.ReadFile(filepath.Join(acts.Cfg.BrainRoot, "hubs/h-0.md"))
+			if err != nil || !strings.Contains(string(hub), "hubs/h-0.md") {
+				t.Errorf("hubs/h-0.md after the second dream: %q, %v; want the carried hub edit", hub, err)
+			}
+			for _, rej := range second.Rejected {
+				if rej.Lost {
+					t.Errorf("second dream: %s recorded lost: %s", rej.Path, rej.Reason)
+				}
+			}
+			var still []CarriedEdit
+			if b, err := os.ReadFile(filepath.Join(acts.Cfg.BrainRoot, ".brain", "held-carry.json")); err == nil {
+				if err := json.Unmarshal(b, &still); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waiting := 0
+			for _, c := range still {
+				if c.Run == first.RunID {
+					waiting++
+				}
+			}
+			carried := tc.hubEdits + 2
+			if landed := step(second, "carried").Edits + step(second, "held").Edits; landed+waiting != carried {
+				t.Errorf("of %d carried edits %d landed and %d wait again; want every one to land or wait", carried,
+					landed, waiting)
+			}
+			if r := step(second, "file").Reason; !strings.Contains(r, "wait for the next dream") {
+				t.Errorf("file step reason %q; want the captures the cap had no room for to wait", r)
 			}
 		})
 	}

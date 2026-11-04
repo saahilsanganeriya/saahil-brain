@@ -5,8 +5,8 @@
 named `dream/<UTC hour>`; `brain dream run --now [--shadow]` starts one directly under the same id.
 
 ```
-gate ─► snapshot ─► reconcile ─► capture ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs ─► curate.merge ─► curate.cards ─► summarise ─► held ─► render ─► check ─► verify ─► reindex ─► commit
-det      git+tar     det          brain CLI   distil   det        file    link           hubs        merge             card            summarise  det       brain CLI  lint      verify    brain CLI   state+report+git
+gate ─► snapshot ─► reconcile ─► capture ─► carried ─► learn ─► demote ─► file ─► curate.link ─► curate.hubs ─► curate.merge ─► curate.cards ─► summarise ─► held ─► render ─► check ─► verify ─► reindex ─► commit
+det      git+tar     det          brain CLI   det        distil   det        file    link           hubs        merge             card            summarise  det       brain CLI  lint      verify    brain CLI   state+report+git
                                               Opus     (index)    Haiku   Opus           Opus        Opus ×≤2          Haiku ×≤4       Haiku                           (revert)  Opus
 ```
 
@@ -74,8 +74,9 @@ summarise, the `held` step gives these lost edits a second chance: an edit whose
 equal share with verify of what is left of the cap (check then lints it, verify judges it on disk), and its record is
 no longer `lost`. A lost edit that the `held` step cannot land, and a lost edit of verify, wait for the next dream in
 `.brain/held-carry.json` with a hash of the file as it was when the cap held the edit (the record says "carried to
-the next dream", not `lost`). The next dream's `held` step tries the carried edits first, oldest first, in the same
-share. A carried edit lands only while its file has that hash and for at most 24 hours; a newer held edit of the same
+the next dream", not `lost`). The next dream's `carried` step lands the carried edits first, oldest first, before
+learn and file, in half of the cap (25 files): they were paid for and they expire, but a session or a capture waits
+whole and is never lost. The carried edits that do not fit go to the `held` step, before the run's own held edits. A carried edit lands only while its file has that hash and for at most 24 hours; a newer held edit of the same
 file replaces it. A carried edit that cannot land any more is recorded `lost` in the run that drops it ("carried from
 <run>: the file changed since" or "waited more than 24h0m0s"). A learn
 session is one unit (`ApplyInput.Whole`): its edits land together, or all are `held` (not `lost`, "waits for the

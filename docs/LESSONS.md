@@ -602,3 +602,17 @@ a new person showed steps that only ever happened by hand, and values that only 
   read 1 file.
 - **Rule.** When derived rows depend on code, record the version of that code next to the rows, and rebuild the
   rows when the version changes.
+
+## 40. Carried edits waited for a dream with room that never came
+
+- **Symptom.** On 2026-11-04, 4 dreams in a row changed 50 of the 50 files. The `held` step landed 0 of 19, 20, 27
+  and 28 held edits; 27 of them were carried from earlier dreams, and 0 of those landed. curate.hubs paid about $2 a
+  dream for hub edits that waited and were replaced by the next dream's answer for the same hub.
+- **Cause.** The `held` step runs after summarise. Its share is half of what learn, file and curation leave, and on a
+  busy day learn and file fill the cap first. A carried edit expires after 24 hours; a session or a capture that waits
+  is never lost.
+- **Fix.** A `carried` step lands the carried edits before learn, in half of the cap, while each file is the file
+  that the edit was made against. A replay of the dream records (44 dreams, 2026-10-25 to 2026-11-03): carried edits
+  landed 40 -> 65, lost for good 12 -> 0, learn and file units waited 29 file-dreams more, none at the end. The 4
+  dreams of 2026-11-04: carried landed 0 -> 43, 10 hub edits landed free on files the carried step had changed.
+- **Rule.** Work that expires goes before work that waits safely, in a bounded share.

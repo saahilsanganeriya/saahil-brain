@@ -117,7 +117,8 @@ type run struct {
 	applied    []Applied
 	proposed   []Edit
 	held       []heldEdit // edits the cap held from a step that will not propose them again
-	landedLate []heldEdit // held edits the held step landed, this run's and carried ones
+	landedLate []heldEdit // held edits the carried and held steps landed, this run's and carried ones
+	carryRead  bool       // the carried step read .brain/held-carry.json; landHeld must not read it again
 	stopLLM    string
 	consumed   map[string]bool // material areas whose step ran; only these watermarks advance
 }
@@ -164,6 +165,9 @@ func DreamWorkflow(ctx workflow.Context, in Input) (Report, error) {
 
 	r.outcome("reconcile", workflow.ExecuteActivity(r.det, a.Reconcile))
 	r.brain("capture", []string{"session", "backfill"}, "--machine", "devbox")
+	if workflow.GetVersion(ctx, "carried-first", workflow.DefaultVersion, 1) == 1 {
+		r.landCarried()
+	}
 	// histories recorded before per-session learning replay the batched call
 	if workflow.GetVersion(ctx, "learn-per-session", workflow.DefaultVersion, 1) == workflow.DefaultVersion {
 		r.llm(learnStep, r.gate.Sessions)
@@ -376,7 +380,10 @@ func (r *run) applyUnit(in ApplyInput) (applied int, held bool) {
 	return len(res.Applied), held
 }
 
-const heldStepName = "held"
+const (
+	heldStepName    = "held"
+	carriedStepName = "carried"
+)
 
 type heldEdit struct {
 	Step  string
@@ -401,12 +408,44 @@ func landable(held []heldEdit, applied []Applied) []heldEdit {
 	return out
 }
 
+// landCarried lands the earlier dreams' carried edits first, before learn and file, in half the cap: they were paid
+// for and expire after carryMaxAge, while a session or capture the cap has no room for waits whole and is never lost.
+// Those that do not fit stay held for landHeld, which drops one whose file a later step of this run writes.
+func (r *run) landCarried() {
+	if !r.carries() {
+		return
+	}
+	r.carryRead = true
+	loaded := r.loadCarried()
+	candidates := landable(loaded, r.applied)
+	if len(candidates) == 0 {
+		return
+	}
+	began := workflow.Now(r.ctx)
+	landed, share, err := r.landEdits(carriedStepName, candidates)
+	if err != nil {
+		r.held = append(loaded, r.held...)
+		r.record(StepRecord{Name: carriedStepName, Status: "failed", Reason: err.Error()}, began)
+		return
+	}
+	r.held = append(slices.DeleteFunc(loaded, func(h heldEdit) bool { return slices.Contains(landed, h) }), r.held...)
+	r.record(StepRecord{Name: carriedStepName, Status: "ok", Edits: len(landed), Reason: fmt.Sprintf(
+		"%d of %d carried edits landed before learn (share %d new files)", len(landed), len(candidates), share)}, began)
+}
+
 // landHeld gives the held edits of steps that judge only this run's proposals a second chance once the steps before
 // verify have run: those landable, earlier dreams' carried edits first, take an equal share with verify of what the
 // cap left, before check lints them. What still does not fit waits for the next dream (saveCarried).
 func (r *run) landHeld() {
 	carried := 0
-	if r.carries() {
+	switch {
+	case r.carryRead: // the carried step read them; those it could not land are in r.held
+		for _, h := range r.held {
+			if h.From != "" {
+				carried++
+			}
+		}
+	case r.carries():
 		loaded := r.loadCarried()
 		carried = len(loaded)
 		r.held = append(loaded, r.held...) // a newer held edit of the same file replaces a carried one (landable)
@@ -416,28 +455,17 @@ func (r *run) landHeld() {
 		return
 	}
 	began := workflow.Now(r.ctx)
-	changed := changedFiles(r.applied)
-	in := ApplyInput{RunID: r.rep.RunID, Step: heldStepName, Remaining: max(MaxEdits-len(changed)+1, 0) / 2, Changed: changed}
-	for _, h := range candidates {
-		in.Edits = append(in.Edits, h.Edit)
-	}
-	var res ApplyResult
-	if err := workflow.ExecuteActivity(r.det, a.ApplyEdits, in).Get(r.ctx, &res); err != nil {
+	landedEdits, share, err := r.landEdits(heldStepName, candidates)
+	if err != nil {
 		r.record(StepRecord{Name: heldStepName, Status: "failed", Reason: err.Error()}, began)
 		return
 	}
-	r.applied = append(r.applied, res.Applied...)
 	landed := map[string]bool{}
 	carriedLanded := 0
-	for _, ap := range res.Applied {
-		for _, h := range candidates {
-			if h.Edit.Path == ap.Path {
-				landed[h.Step+"\x00"+ap.Path] = true
-				r.landedLate = append(r.landedLate, h)
-				if h.From != "" {
-					carriedLanded++
-				}
-			}
+	for _, h := range landedEdits {
+		landed[h.Step+"\x00"+h.Edit.Path] = true
+		if h.From != "" {
+			carriedLanded++
 		}
 	}
 	for i := len(r.rep.Rejected) - 1; i >= 0; i-- { // the latest record of a file is the edit that landed
@@ -447,11 +475,36 @@ func (r *run) landHeld() {
 			delete(landed, key)
 		}
 	}
-	reason := fmt.Sprintf("%d of %d held edits landed (share %d new files)", len(res.Applied), len(candidates), in.Remaining)
+	reason := fmt.Sprintf("%d of %d held edits landed (share %d new files)", len(landedEdits), len(candidates), share)
 	if carried > 0 {
 		reason += fmt.Sprintf("; %d carried from earlier dreams, %d of them landed", carried, carriedLanded)
 	}
-	r.record(StepRecord{Name: heldStepName, Status: "ok", Edits: len(res.Applied), Reason: reason}, began)
+	r.record(StepRecord{Name: heldStepName, Status: "ok", Edits: len(landedEdits), Reason: reason}, began)
+}
+
+// landEdits applies held edits in an equal share of what the cap leaves (half, rounded up, with verify or with the
+// steps after it) and returns those that landed and the share.
+func (r *run) landEdits(step string, candidates []heldEdit) ([]heldEdit, int, error) {
+	changed := changedFiles(r.applied)
+	in := ApplyInput{RunID: r.rep.RunID, Step: step, Remaining: max(MaxEdits-len(changed)+1, 0) / 2, Changed: changed}
+	for _, h := range candidates {
+		in.Edits = append(in.Edits, h.Edit)
+	}
+	var res ApplyResult
+	if err := workflow.ExecuteActivity(r.det, a.ApplyEdits, in).Get(r.ctx, &res); err != nil {
+		return nil, in.Remaining, err
+	}
+	r.applied = append(r.applied, res.Applied...)
+	var landed []heldEdit
+	for _, ap := range res.Applied {
+		for _, h := range candidates {
+			if h.Edit.Path == ap.Path {
+				landed = append(landed, h)
+			}
+		}
+	}
+	r.landedLate = append(r.landedLate, landed...)
+	return landed, in.Remaining, nil
 }
 
 func (r *run) brain(step string, command []string, args ...string) StepOutcome {

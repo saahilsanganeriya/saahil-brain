@@ -81,7 +81,7 @@ schedule brain-dream-hourly: next 2026-10-09T10:00:00Z, 25 runs so far, paused=f
 | read a run's report | `~/brain/.brain/dream-runs/<run-id>.json` (steps, edits, rejected, cost); the last skip: `.brain/dream-last-skip.json` |
 | what curate.merge would do | `brain dream merge` (dry run: never applies) |
 | which CARDs it would refresh | `brain dream cards --dry-run` |
-| held edits that wait for the next dream | `~/brain/.brain/held-carry.json` (run, time, step, edit, file hash); the next dream's `held` step reason says how many landed |
+| held edits that wait for the next dream | `~/brain/.brain/held-carry.json` (run, time, step, edit, file hash); the next dream's `carried` step (before learn) and `held` step reasons say how many landed |
 | recreate the schedule | `brain dream schedule` |
 | pause or unpause | `temporal schedule toggle --schedule-id brain-dream-hourly --pause --reason <why> -n brain --address 127.0.0.1:7233` (`--unpause` to resume) |
 | services | `systemctl --user status brain-temporal brain-worker` |
