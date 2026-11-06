@@ -117,20 +117,38 @@ func cmdPeerStep(args []string) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	for job.State == "running" && time.Now().Before(deadline) {
-		time.Sleep(2 * time.Second)
-		if resp, err := peer.Call(context.Background(), rpc.Request{Op: "job", ID: job.ID}); err == nil {
+	job, code := finishStep(context.Background(), peer, job, *wait, deadline, time.Now, time.Sleep)
+	out, _ := json.MarshalIndent(job, "", "  ")
+	fmt.Println(string(out))
+	if code == stepUnfinished {
+		fmt.Fprintf(os.Stderr, "brain: %s still running on %s when the %s wait ended (it may have gone to sleep): brain peer job %s\n",
+			job.Step, peer.Name(), *wait, job.ID)
+	}
+	return code
+}
+
+// stepUnfinished is the exit code of a step asked to finish within --wait that did not: "running" is not a result.
+const stepUnfinished = 3
+
+// finishStep polls the job until it ends or the deadline passes, and gives the exit code: 1 failed, stepUnfinished
+// still running after a wait, else 0. A poll the other machine does not answer keeps the last state it reported.
+func finishStep(ctx context.Context, peer rpc.Peer, job rpc.Job, wait time.Duration, deadline time.Time,
+	now func() time.Time, sleep func(time.Duration)) (rpc.Job, int) {
+	for job.State == "running" && now().Before(deadline) {
+		sleep(2 * time.Second)
+		if resp, err := peer.Call(ctx, rpc.Request{Op: "job", ID: job.ID}); err == nil {
 			if j, err := rpc.Decode[rpc.Job](resp); err == nil {
 				job = j
 			}
 		}
 	}
-	out, _ := json.MarshalIndent(job, "", "  ")
-	fmt.Println(string(out))
-	if job.State == "failed" {
-		return 1
+	switch {
+	case job.State == "failed":
+		return job, 1
+	case job.State == "running" && wait > 0:
+		return job, stepUnfinished
 	}
-	return 0
+	return job, 0
 }
 
 const peerRetry = 10 * time.Second

@@ -198,7 +198,7 @@ edit in `~/brain` or let the dream do it. Obsidian is a viewer only: the brain w
 | resume a saved devbox conversation | `brain agents resume <name> <session>` |
 | stop a finished agent (transcript kept) | `brain agents stop <name> [--rm-worktree]` |
 | copy a box with its bulk to the devbox (never deletes) | `brain agents box <box>` |
-| run an allowed step on the other machine | `brain peer step <name> [--wait 10m]` (the wait also covers a laptop that is asleep or between networks: the step starts once, when it answers), `brain peer job <id>`, `brain peer status` |
+| run an allowed step on the other machine | `brain peer step <name> [--wait 10m]` (the wait also covers a laptop that is asleep or between networks: the step starts once, when it answers; exit 0 done, 1 failed, 3 still running when the wait ends, for example because the laptop slept again), `brain peer job <id>`, `brain peer status` |
 
 Name a session with `/rename <name>` inside it; that name is its address.
 

@@ -66,3 +66,39 @@ func TestPeerStepGivesUpAtTheDeadline(t *testing.T) {
 		t.Errorf("calls %v: only status probes, one per %s, until the deadline", peer.calls, peerRetry)
 	}
 }
+
+// sleepingAfterStart is a laptop that starts the step and then stops answering, as one that goes back to sleep.
+type sleepingAfterStart struct{ polls int }
+
+func (p *sleepingAfterStart) Name() string { return "laptop" }
+
+func (p *sleepingAfterStart) Call(_ context.Context, req rpc.Request) (rpc.Response, error) {
+	if req.Op == "job" {
+		p.polls++
+		return rpc.Response{}, fmt.Errorf("%w: tunnel down", rpc.ErrUnreachable)
+	}
+	return rpc.Response{OK: true, Result: json.RawMessage(`{"id":"j-1","step":"doctor","state":"running"}`)}, nil
+}
+
+// TestPeerStepUnfinishedAtTheDeadlineIsNotSuccess catches the 2026-11-06 care run's false greens: the laptop woke,
+// started its doctor and sync, slept again, and `brain peer step doctor --wait 10m` exited 0 with the job still
+// running. A step asked to finish within the wait that did not finish exits stepUnfinished; one started without a
+// wait still exits 0.
+func TestPeerStepUnfinishedAtTheDeadlineIsNotSuccess(t *testing.T) {
+	peer := &sleepingAfterStart{}
+	clock := &fakeClock{t: time.Date(2026, 11, 6, 23, 0, 0, 0, time.UTC)}
+	job, err := startStep(context.Background(), peer, "doctor", clock.t.Add(10*time.Minute), clock.now, clock.sleep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, code := finishStep(context.Background(), peer, job, 10*time.Minute, clock.t.Add(10*time.Minute), clock.now, clock.sleep)
+	if code != stepUnfinished || job.State != "running" {
+		t.Errorf("exit %d, state %q; want %d for a step still running when the 10m wait ends", code, job.State, stepUnfinished)
+	}
+	if peer.polls == 0 {
+		t.Errorf("no job polls: the wait must keep asking until the deadline")
+	}
+	if _, code := finishStep(context.Background(), peer, job, 0, clock.t, clock.now, clock.sleep); code != 0 {
+		t.Errorf("exit %d without --wait; want 0: the step was started, which is all that was asked", code)
+	}
+}
