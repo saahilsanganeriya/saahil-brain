@@ -454,6 +454,8 @@ func query(db *sql.DB, terms []string, hide func(string) bool) ([]cand, error) {
 }
 
 // namedRelevance scores the named nodes with the same BM25 as the text query, even when they rank below its cut.
+// The unary + keeps the rowid test out of FTS5: given to it, FTS5 runs the match once per rowid (4× slower); kept
+// here, one scan tests each match against the named rowids before it looks up the node.
 func namedRelevance(db *sql.DB, named []cand, terms []string) error {
 	if len(terms) == 0 || len(named) == 0 {
 		return nil
@@ -465,7 +467,8 @@ func namedRelevance(db *sql.DB, named []cand, terms []string) error {
 		at[c.id] = i
 	}
 	rows, err := db.Query(`SELECT n.id, bm25(fts, 0.0, 10.0, 8.0, 4.0, 0.0) FROM fts JOIN node n ON n.rowid = fts.rowid
-		WHERE fts MATCH ? AND n.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(named)), ",")+`)`, args...)
+		WHERE fts MATCH ? AND +fts.rowid IN (SELECT rowid FROM node WHERE id IN (`+
+		strings.TrimSuffix(strings.Repeat("?,", len(named)), ",")+`))`, args...)
 	if err != nil {
 		return err
 	}
