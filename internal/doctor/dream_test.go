@@ -12,15 +12,53 @@ import (
 
 func writeDreamRun(t *testing.T, root, id, status, errText string) {
 	t.Helper()
-	rep := dream.Report{RunID: id, Status: status, Error: errText,
-		Steps: []dream.StepRecord{{Name: "gate", Status: "ok"}, {Name: "snapshot", Status: status}}}
+	writeDreamReport(t, root, dream.Report{RunID: id, Status: status, Error: errText,
+		Steps: []dream.StepRecord{{Name: "gate", Status: "ok"}, {Name: "snapshot", Status: status}}})
+}
+
+func writeDreamReport(t *testing.T, root string, rep dream.Report) {
+	t.Helper()
 	b, _ := json.Marshal(rep)
 	dir := filepath.Join(root, ".brain", "dream-runs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, id+".json"), b, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, rep.RunID+".json"), b, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestDreamsCompletedWithFailedStepsTurnTheDoctorRed catches five dreams in a row that each "completed" with learn,
+// merge, cards and summarise failed (every model call hung to its activity timeout: the model endpoint was
+// unreachable) while dream.last said ok on both machines for two and a half days.
+func TestDreamsCompletedWithFailedStepsTurnTheDoctorRed(t *testing.T) {
+	root := t.TempDir()
+	timeout := "activity error (type: LLMStep, scheduledEventID: 79, startedEventID: 80, identity: ): " +
+		"activity StartToClose timeout (type: StartToClose)"
+	hung := func(id string) dream.Report {
+		return dream.Report{RunID: id, Status: "completed", Steps: []dream.StepRecord{
+			{Name: "gate", Status: "ok"}, {Name: "learn.batched", Status: "failed", Reason: timeout},
+			{Name: "curate.hubs", Status: "skipped", Reason: "no input"},
+			{Name: "curate.merge", Status: "failed", Reason: timeout}, {Name: "commit", Status: "ok"}}}
+	}
+	writeDreamRun(t, root, "2026-11-06T220000Z-a", "completed", "")
+	writeDreamReport(t, root, hung("2026-11-07T110000Z-b"))
+	status, detail := dreamRuns(root)
+	if status != Warn {
+		t.Fatalf("one dream with failed steps: status %s (%s), want warn", status, detail)
+	}
+	writeDreamReport(t, root, hung("2026-11-07T230000Z-c"))
+	status, detail = dreamRuns(root)
+	if status != Fail {
+		t.Fatalf("two dreams in a row with failed steps: status %s (%s), want fail", status, detail)
+	}
+	for _, want := range []string{"2 in a row", "2026-11-07T110000Z-b", "learn.batched, curate.merge", "StartToClose timeout"} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("detail %q does not name %q", detail, want)
+		}
+	}
+	if strings.Contains(detail, "scheduledEventID") || strings.Contains(detail, "curate.hubs") {
+		t.Fatalf("detail %q keeps the activity wrapper or names a skipped step", detail)
 	}
 }
 

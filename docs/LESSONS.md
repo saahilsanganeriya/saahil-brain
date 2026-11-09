@@ -616,3 +616,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   landed 40 -> 65, lost for good 12 -> 0, learn and file units waited 29 file-dreams more, none at the end. The 4
   dreams of 2026-11-04: carried landed 0 -> 43, 10 hub edits landed free on files the carried step had changed.
 - **Rule.** Work that expires goes before work that waits safely, in a bounded share.
+
+## 41. Dreams completed with every model step failed, and the doctor said ok
+
+- **Symptom.** From 2026-11-07 to 2026-11-09, 5 dreams in a row completed with 0 edits. In each one, learn, merge,
+  cards and summarise failed with `activity StartToClose timeout`. The doctor's `dream.last` said "last dream
+  <run-id> completed" on both machines. Two daily care runs stopped on "API Error: Connection refused".
+- **Cause.** The model endpoint refused connections. The `claude` CLI retried with no output, and the worker killed
+  it at the 20-minute activity limit, two times for each step. A step that fails does not fail its run, and
+  `dream.last` read only the run's status.
+- **Fix.** `dream.last` counts a completed run with failed steps the same as a failed run: a warning for one, red for
+  two in a row, and the line names the failed steps and the first reason. A replay over the 142 dreams from
+  2026-10-09 to 2026-11-09: the old rule gave ok 124, warn 5, red 13; the new rule gives ok 109, warn 13, red 20. Each
+  new warning is a run with one or more failed steps; the 7 new red results are the 10-24 curate.hubs hang two times
+  in a row, a 10-29 run that completed with 4 failed steps after a failed run, and this outage, red from its second
+  dream. No session was lost: the sessions watermark stays until learn completes.
+- **Rule.** A run that completes is not a run that worked. A health check reads the parts that do the work.
