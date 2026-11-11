@@ -632,3 +632,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   in a row, a 10-29 run that completed with 4 failed steps after a failed run, and this outage, red from its second
   dream. No session was lost: the sessions watermark stays until learn completes.
 - **Rule.** A run that completes is not a run that worked. A health check reads the parts that do the work.
+
+## 42. A run id's clock read as a secret
+
+- **Symptom.** The dream's `check` step recorded `brain lint: exit 1` in 6 of 30 dreams. Each time it was a
+  `maybe-secret` warning on a token that is not a secret. In the 3 newest, the token was a workflow run id such as
+  `batch-reverse_20261111T144847Z_9abc123d4e5f`; in the other 3, a long Go test name. Session notes replaced the run
+  ids with `REDACTED-token`, so a search for a run id found nothing.
+- **Cause.** The secret rule asks for upper case, lower case and digits. In a run id, the only upper-case letters are
+  the `T` and the `Z` of its compact UTC clock.
+- **Fix.** The rule judges a token with its compact clocks removed. The 32-character floor still applies to the whole
+  token, so a random token that carries a clock is still a secret. On the brain's 4,760 notes and hubs, flagged
+  tokens fell from 35 to 23: the 12 that went are run ids, and the other 23 are the same. Written again from their
+  transcripts, 11 redacted session notes got back 6 run ids and nothing else. Existing notes keep their markers
+  until their transcripts grow, because the rule now redacts less, not more. Long Go test names still warn.
+- **Rule.** A warning that fires on every run of a normal shape teaches people to skip it. Find the shape, then
+  narrow the rule so that a real secret still matches.

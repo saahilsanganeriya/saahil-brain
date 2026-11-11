@@ -33,6 +33,8 @@ var suspiciousBlob = regexp.MustCompile(`(?i)(?:\b|_)(?:key|secret|token|signatu
 // beside it (a laptop MCP token reached a session note that way, 2026-09-29).
 var bareToken = regexp.MustCompile(`[A-Za-z0-9_+/=-]{32,}`)
 
+var compactClock = regexp.MustCompile(`(?:19|20)\d{6}T\d{4,6}Z?`)
+
 // RedactVersion changes when the rules change, so notes written by an older redactor are rewritten.
 const RedactVersion = 2
 
@@ -78,10 +80,12 @@ func looksRandom(s string) bool {
 // dashes, and the character class (upper, lower, digit, other) changes on ≥ 25% of characters. A sha in hex (~3.9
 // bits, one case), a UUID, a run id like name_20260804ABC, a kebab-case name or a path does not qualify; random ids
 // (a Drive document id) do, which is fine where it is used: session notes over-redact on purpose, lint only warns.
+// A compact UTC clock (20261111T144847Z) is judged out of the token: its T and Z are not randomness.
 func IsLikelySecret(s string) bool {
 	if len(s) < 32 || strings.Contains(s, "/") || strings.Count(s, "-")*8 > len(s) {
 		return false
 	}
+	s = compactClock.ReplaceAllString(s, "")
 	class := func(c rune) int {
 		switch {
 		case c >= 'A' && c <= 'Z':

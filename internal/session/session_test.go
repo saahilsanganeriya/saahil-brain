@@ -347,3 +347,17 @@ func TestRedactsBareHighEntropyToken(t *testing.T) {
 		}
 	}
 }
+
+// Catches a workflow run id read as a secret because its compact UTC clock (20261111T144847Z) adds the upper case:
+// session notes lost run ids to REDACTED-token, and lint warned maybe-secret on run ids in 3 of 30 dreams
+// (2026-11-11). A random token that merely carries such a clock must still be redacted.
+func TestCompactTimestampIsNotRandomness(t *testing.T) {
+	runID := "batch-reverse_20261111T144847Z_9abc123d4e5f" // synthetic: name, clock, short hex
+	if IsLikelySecret(runID) {
+		t.Errorf("run id judged a secret: %q", runID)
+	}
+	secret := "job_20261111T144847Z_Qx7Lm2Np9Rt4Vw8Yz3Ab6Cd1" // synthetic: random mixed case after the clock
+	if !IsLikelySecret(secret) {
+		t.Errorf("secret carrying a clock not judged a secret: %q", secret)
+	}
+}
