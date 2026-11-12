@@ -648,3 +648,21 @@ a new person showed steps that only ever happened by hand, and values that only 
   until their transcripts grow, because the rule now redacts less, not more. Long Go test names still warn.
 - **Rule.** A warning that fires on every run of a normal shape teaches people to skip it. Find the shape, then
   narrow the rule so that a real secret still matches.
+
+## 43. One badly written field reverted a whole dream
+
+- **Symptom.** Two dreams failed their `check` step with `brain lint: exit 2` and reverted every edit of the run: 44
+  edits on 2026-10-30 and 23 edits on 2026-11-12. Each time, lint found 1 error in 1 file. The step record kept only
+  the exit code; the worker log kept the last line (`23 files: 1 errors`).
+- **Cause.** The note writer (`delta.yamlScalar`) wrote two kinds of value badly. (1) A value that holds a `'` goes
+  out as a JSON string, and `json.Marshal` writes `<`, `>` and `&` as escapes. A summary that quoted a placeholder,
+  `'password: <value>'`, reached the file with the `<` escaped, and the lint secret rule read the escape text as a
+  password. (2) A value that passes the plain-value rules but that YAML reads differently: an evidence item that
+  cites a heading ending in `?` (`doc.md#Is it fast?`) broke the flow list, so the note did not parse.
+  `delta.Check` does not parse what `Render` wrote, so both reached lint.
+- **Fix.** JSON strings go out without HTML escapes. A value stays plain only when YAML reads it back unchanged in a
+  flow list and in a flow map; otherwise it is quoted. On the brain's 4,982 notes and hubs, escaped frontmatter fell
+  from 64 files to 0, and only those 64 files render differently. Of 34,167 section headings cited as evidence,
+  58 rendered to frontmatter that does not parse; now 0. Replayed, both failed dreams lint clean.
+- **Rule.** A writer must write only what its reader reads back the same. Test a rendered value by reading it back,
+  not by a list of characters that are safe.

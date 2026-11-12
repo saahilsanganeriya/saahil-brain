@@ -287,3 +287,32 @@ func TestRenamedSessionCitationIsRepointed(t *testing.T) {
 		t.Fatalf("evidence %v, sources %v; want both on %s", got.Evidence, got.Sources, want)
 	}
 }
+
+// TestRenderKeepsAngleBracketsLiteral catches a quoted summary written with HTML escapes: 'password: <value>' became
+// a backslash-u003c escape, which the lint secret rule reads as a password value, so the check step reverted the run.
+func TestRenderKeepsAngleBracketsLiteral(t *testing.T) {
+	n := Note{ID: "lesson-x", Type: "lesson", Status: "current", Hubs: []string{"git"},
+		Summary: "guard refuses text like 'password: <value>' & co"}
+	out := string(Render(n))
+	if escape := string(rune(92)) + "u00"; strings.Contains(out, escape) {
+		t.Fatalf("summary written with an HTML escape:\n%s", out)
+	}
+	back, err := Parse([]byte(out))
+	if err != nil || back.Summary != n.Summary {
+		t.Fatalf("summary reads back as %q (%v)", back.Summary, err)
+	}
+}
+
+// TestRenderedFlowItemReadsBack catches a plain flow-list item YAML cannot read: evidence citing a heading that ends
+// in '?' broke the note's frontmatter, so lint failed and the check step reverted every edit of the run.
+func TestRenderedFlowItemReadsBack(t *testing.T) {
+	n := Note{ID: "finding-x", Type: "finding", Status: "current", Summary: "s", Hubs: []string{"git"},
+		Evidence: []string{"work/x/review.md#Is it fast? Yes", "work/x/review.md#Why?"}, Aliases: []string{"a?b", "ok"}}
+	back, err := Parse(Render(n))
+	if err != nil {
+		t.Fatalf("rendered note does not parse: %v\n%s", err, Render(n))
+	}
+	if strings.Join(back.Evidence, "|") != strings.Join(n.Evidence, "|") || strings.Join(back.Aliases, "|") != strings.Join(n.Aliases, "|") {
+		t.Fatalf("read back %q %q", back.Evidence, back.Aliases)
+	}
+}

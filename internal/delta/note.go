@@ -236,8 +236,7 @@ func Render(n Note) []byte {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		v, _ := json.Marshal(n.Extra[k]) // JSON is valid flow YAML
-		line(k, string(v))
+		line(k, jsonText(n.Extra[k]))
 	}
 	b.WriteString("---\n")
 	body := strings.TrimLeft(n.Body, "\n")
@@ -263,7 +262,7 @@ func flowList(items []string) string {
 func yamlScalar(s string) string {
 	plain := s != "" && strings.TrimSpace(s) == s && !strings.ContainsAny(s, ",[]{}\"'\n\t\\") &&
 		!strings.ContainsAny(s[:1], "-?:#&*!|>%@`") && !strings.Contains(s, ": ") && !strings.Contains(s, " #") &&
-		!strings.HasSuffix(s, ":")
+		!strings.HasSuffix(s, ":") && (!strings.ContainsAny(s, "?:#&*!|>%@`") || readsBackPlain(s))
 	switch strings.ToLower(s) {
 	case "true", "false", "yes", "no", "null", "~", "on", "off":
 		plain = false
@@ -274,8 +273,28 @@ func yamlScalar(s string) string {
 	if !strings.ContainsAny(s, "'\n\t") { // single quotes escape nothing, so a reader that only strips quotes reads it right
 		return "'" + s + "'"
 	}
-	q, _ := json.Marshal(s)
-	return string(q)
+	return jsonText(s)
+}
+
+// readsBackPlain reports whether YAML reads s, written bare, back unchanged in a flow list and a flow map: the rules
+// above miss cases such as a '?' just before ',' or ']'. Only a value holding an indicator character needs it.
+func readsBackPlain(s string) bool {
+	var v struct {
+		L []string          `yaml:"l"`
+		M map[string]string `yaml:"m"`
+	}
+	err := yaml.Unmarshal([]byte("l: ["+s+"]\nm: {w: "+s+"}\n"), &v)
+	return err == nil && len(v.L) == 1 && v.L[0] == s && v.M["w"] == s
+}
+
+// jsonText writes v as JSON, a valid flow YAML value, without HTML escapes: lint and readers see the raw bytes, and
+// an escaped '<' hid a placeholder from the secret rule.
+func jsonText(v any) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // Check lists every FORMAT.md rule the note breaks; resolve reports whether a referenced id or path exists.
