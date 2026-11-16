@@ -1,0 +1,9 @@
+# brain-failed@<unit>: tell the owner that a brain unit failed. Every brain unit names it: OnFailure=brain-failed@%n.service
+# Install: setup-devbox.sh renders it with the others; brain-unit-failed goes to ~/.local/bin.
+[Unit]
+Description=brain: tell the owner that %i failed
+
+[Service]
+Type=oneshot
+Environment=PATH=@DEVBOX_HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@DEVBOX_HOME@/.local/bin/brain-unit-failed %i

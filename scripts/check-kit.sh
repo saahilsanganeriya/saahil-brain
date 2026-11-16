@@ -24,12 +24,12 @@ before=$problems
 for f in README.md SETUP.md SHA256SUMS identity.example.json go.mod Makefile \
   docs/ARCHITECTURE.md docs/DEVBOX-AND-ORCA.md docs/BACKFILL.md docs/OPERATIONS.md docs/LESSONS.md docs/CONFIG.md \
   deploy/systemd/brain-temporal.service deploy/systemd/brain-worker.service deploy/systemd/brain-care.service \
-  deploy/systemd/brain-care.timer deploy/systemd/orca-serve.service \
+  deploy/systemd/brain-care.timer deploy/systemd/orca-serve.service deploy/systemd/brain-failed@.service \
   templates/brain-care-goal.md templates/brain-care-playbook.md; do
   [ -f "$kit/$f" ] || bad "missing $f"
 done
 for f in bin/brain-darwin-arm64 bin/brain-linux-amd64 bin/brain-worker-linux-amd64 \
-  scripts/setup-devbox.sh scripts/setup-laptop.sh scripts/devbox scripts/brain-care; do
+  scripts/setup-devbox.sh scripts/setup-laptop.sh scripts/devbox scripts/brain-care scripts/brain-unit-failed; do
   if [ ! -f "$kit/$f" ]; then bad "missing $f"; elif [ ! -x "$kit/$f" ]; then bad "not executable: $f"; fi
 done
 for d in notes hubs memory sessions journal inbox work .brain .index .data .archive .import; do

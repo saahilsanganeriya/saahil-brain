@@ -91,7 +91,7 @@ enable_unit() { # $1 = unit, $2 = 1 when it changed, $3 = restart|never
 if [ "$dry" != 1 ] && [ "$(uname -s)" != Linux ]; then die "run this ON the devbox (Linux), or pass --dry-run"; fi
 if [ "$dry" = 1 ]; then say "DRY RUN: nothing below is changed (HOME=$HOME)"; fi
 for f in SHA256SUMS bin/brain-linux-amd64 bin/brain-worker-linux-amd64 bin/brain-darwin-arm64 scripts/setup-laptop.sh \
-  scripts/devbox scripts/brain-care deploy/systemd/brain-temporal.service; do
+  scripts/devbox scripts/brain-care scripts/brain-unit-failed deploy/systemd/brain-temporal.service; do
   [ -e "$KIT/$f" ] || die "$KIT/$f is missing: run this from an unzipped release (make dist builds one in dist/)"
 done
 
@@ -204,6 +204,8 @@ fi
 
 step "systemd --user units (rendered from deploy/systemd: @LAPTOP_HOME@ @DEVBOX_HOME@ @USER@)"
 units=$HOME/.config/systemd/user
+# every brain unit names brain-failed@.service in OnFailure=; it runs this script
+install_file "$KIT/scripts/brain-unit-failed" "$HOME/.local/bin/brain-unit-failed" 755
 any_changed=0 temporal_changed=0 orca_changed=0 care_changed=0
 for tpl in "$KIT"/deploy/systemd/*.service "$KIT"/deploy/systemd/*.timer; do
   unit=${tpl##*/}

@@ -1,0 +1,23 @@
+#!/bin/bash
+# brain-unit-failed <unit> — tell the owner in one line that a brain systemd unit failed (brain-failed@.service, the
+# OnFailure= of every brain unit). The line holds the unit's result and its own last log line. At most one line per
+# unit an hour, so a restart loop cannot flood the phone; without a notifier the line goes to the journal only.
+set -uo pipefail
+unit=${1:?usage: brain-unit-failed <unit>}
+state=${XDG_STATE_HOME:-$HOME/.local/state}/brain/unit-failed
+mkdir -p "$state"
+result=$(systemctl --user show -p Result --value "$unit" 2>/dev/null || true)
+last=$(journalctl --user "_SYSTEMD_USER_UNIT=$unit" -n 1 -o cat --no-pager 2>/dev/null | head -c 200 || true)
+line="$unit failed (${result:-unknown})${last:+: $last} · journalctl --user -u $unit"
+echo "$line" >&2
+stamp=$state/$unit
+if [ -n "$(find "$stamp" -mmin -60 2>/dev/null)" ]; then
+  echo "already told within the hour" >&2
+  exit 0
+fi
+touch "$stamp"
+if ! command -v happier >/dev/null; then
+  echo "no notifier installed" >&2
+  exit 0
+fi
+happier notify -t brain -p "$line"

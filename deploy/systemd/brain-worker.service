@@ -1,6 +1,7 @@
 # The brain's Temporal worker: DreamWorkflow and its activities (claude --bare -p per LLM step).
 [Unit]
 Description=brain: Temporal worker (dream)
+OnFailure=brain-failed@%n.service
 After=brain-temporal.service
 Requires=brain-temporal.service
 

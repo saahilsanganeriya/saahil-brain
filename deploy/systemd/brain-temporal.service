@@ -4,6 +4,7 @@
 #          systemctl --user enable --now brain-temporal brain-worker
 [Unit]
 Description=brain: local Temporal dev server (127.0.0.1:7233, UI :8233, namespace brain)
+OnFailure=brain-failed@%n.service
 
 [Service]
 ExecStartPre=/usr/bin/mkdir -p @DEVBOX_HOME@/.local/state/brain

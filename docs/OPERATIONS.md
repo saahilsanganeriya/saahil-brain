@@ -145,7 +145,8 @@ improvement and keeps it only if the numbers say so, ships it to both machines, 
    └─ ~/.local/bin/brain-care
         ├─ brain agents new brain-care-<day> --repo <brain_repo> --base origin/main   (Orca worktree + Claude Code)
         ├─ brain agents goal brain-care-<day> ~/brain/work/brain-care/runs/<day>/GOAL.md
-        └─ backstop: brain agents stop after 2.5 h
+        ├─ backstop: brain agents stop after 2.5 h
+        └─ on failure: brain-failed@brain-care.service → brain-unit-failed → one notification line
    the agent: HEALTH  doctor both · dream failures · services · sync
               IMPROVE metrics + evals → check yesterday's change (revert if it did not help)
                       → one general change on a shadow copy (DEV to tune, TEST once) → keep only if it passes
@@ -161,6 +162,11 @@ improvement and keeps it only if the numbers say so, ships it to both machines, 
 | its reports | `~/brain/work/brain-care/runs/<day>/REPORT.md` |
 | the experiment ledger | `~/brain/work/brain-care/EXPERIMENTS.md`: every experiment, kept or not, with DEV and TEST numbers and the verdict. The agent reads it before it chooses, and never retries a rejected idea without new evidence |
 | limits | about 90 minutes and $5 of model calls; never deletes brain data, never pushes brain data, never changes a company repo, starts no other agents |
+
+When a brain unit fails (brain-care, brain-temporal, brain-worker, orca-serve), its `OnFailure=` starts
+`brain-failed@<unit>.service`. That runs `~/.local/bin/brain-unit-failed`, which sends one notification line: the unit, its
+result, its last log line. It sends at most one line for each unit in an hour. With no notifier installed, the line
+goes to the journal only.
 
 Run it now: `systemctl --user start brain-care.service`. Watch it: `brain agents screen brain-care-<day>`. Stop it:
 `brain agents stop brain-care-<day>`.

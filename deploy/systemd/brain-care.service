@@ -3,6 +3,7 @@
 #          systemctl --user daemon-reload && systemctl --user enable --now brain-care.timer
 [Unit]
 Description=brain: start the daily brain-care agent (Orca session on saahil-brain)
+OnFailure=brain-failed@%n.service
 
 [Service]
 Type=oneshot

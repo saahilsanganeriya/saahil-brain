@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeExec(t *testing.T, path, body string) {
@@ -112,7 +113,7 @@ func TestSetupDevboxDryRunWritesNothing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(kit, "SHA256SUMS"), []byte(sums.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, script := range []string{"setup-devbox.sh", "setup-laptop.sh", "devbox", "brain-care"} {
+	for _, script := range []string{"setup-devbox.sh", "setup-laptop.sh", "devbox", "brain-care", "brain-unit-failed"} {
 		raw, err := os.ReadFile(script)
 		if err != nil {
 			t.Fatal(err)
@@ -159,6 +160,7 @@ func buildKit(t *testing.T, plant func(kit string)) string {
 		"docs/ARCHITECTURE.md", "docs/DEVBOX-AND-ORCA.md", "docs/BACKFILL.md", "docs/OPERATIONS.md", "docs/LESSONS.md",
 		"docs/CONFIG.md", "deploy/systemd/brain-temporal.service", "deploy/systemd/brain-worker.service",
 		"deploy/systemd/brain-care.service", "deploy/systemd/brain-care.timer", "deploy/systemd/orca-serve.service",
+		"deploy/systemd/brain-failed@.service",
 		"templates/brain-care-goal.md", "templates/brain-care-playbook.md"}
 	for _, f := range files {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(kit, f)), 0o755); err != nil {
@@ -169,7 +171,7 @@ func buildKit(t *testing.T, plant func(kit string)) string {
 		}
 	}
 	for _, f := range []string{"bin/brain-darwin-arm64", "bin/brain-linux-amd64", "bin/brain-worker-linux-amd64",
-		"scripts/setup-devbox.sh", "scripts/setup-laptop.sh", "scripts/devbox", "scripts/brain-care"} {
+		"scripts/setup-devbox.sh", "scripts/setup-laptop.sh", "scripts/devbox", "scripts/brain-care", "scripts/brain-unit-failed"} {
 		writeExec(t, filepath.Join(kit, f), "echo "+f+"\n")
 	}
 	if plant != nil {
@@ -234,5 +236,77 @@ func TestCheckKitCatchesOwnerPathInTreeAndTamperedBinary(t *testing.T) {
 				t.Fatalf("exit %d, want %q in:\n%s", code, tc.want, out)
 			}
 		})
+	}
+}
+
+// TestEveryServiceTellsTheOwnerWhenItFails catches a brain unit that can fail with nobody told: the daily care
+// launcher exited 1 four days running and only the journal knew.
+func TestEveryServiceTellsTheOwnerWhenItFails(t *testing.T) {
+	services, _ := filepath.Glob("../deploy/systemd/*.service")
+	for _, path := range services {
+		name := filepath.Base(path)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unit := string(raw)
+		if strings.Contains(name, "@") {
+			if !strings.Contains(unit, "/brain-unit-failed %i") {
+				t.Errorf("%s does not run brain-unit-failed on the failed unit", name)
+			}
+			continue
+		}
+		if !strings.Contains(unit, "\nOnFailure=brain-failed@%n.service\n") {
+			t.Errorf("%s can fail with nobody told: no OnFailure=brain-failed@%%n.service", name)
+		}
+	}
+	if _, err := os.Stat("../deploy/systemd/brain-failed@.service"); err != nil {
+		t.Fatal("the OnFailure= target is not deployed:", err)
+	}
+}
+
+// TestUnitFailedPushesOneLineAnHour catches a failure line without the unit's own reason, and a restart loop that
+// pushes on every restart.
+func TestUnitFailedPushesOneLineAnHour(t *testing.T) {
+	home := t.TempDir()
+	log := filepath.Join(home, "pushes.log")
+	fake := filepath.Join(home, "fakebin")
+	writeExec(t, filepath.Join(fake, "systemctl"), `echo exit-code`)
+	writeExec(t, filepath.Join(fake, "journalctl"), `case "$*" in *_SYSTEMD_USER_UNIT=example.service*) echo "example: the step it could not do" ;; esac`)
+	writeExec(t, filepath.Join(fake, "happier"), `echo "$*" >>"$LOG"`)
+	env := []string{"HOME=" + home, "LOG=" + log, "PATH=" + fake + ":/usr/bin:/bin"}
+	pushes := func() []string {
+		raw, _ := os.ReadFile(log)
+		return strings.FieldsFunc(string(raw), func(r rune) bool { return r == '\n' })
+	}
+
+	if out, code := run(t, env, "./brain-unit-failed", "example.service"); code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	got := pushes()
+	want := "notify -t brain -p example.service failed (exit-code): example: the step it could not do · journalctl --user -u example.service"
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("pushes %q, want one %q", got, want)
+	}
+
+	run(t, env, "./brain-unit-failed", "example.service")
+	if n := len(pushes()); n != 1 {
+		t.Fatalf("a second failure within the hour pushed again (%d pushes)", n)
+	}
+
+	stamp := filepath.Join(home, ".local", "state", "brain", "unit-failed", "example.service")
+	old := time.Now().Add(-61 * time.Minute)
+	if err := os.Chtimes(stamp, old, old); err != nil {
+		t.Fatal(err)
+	}
+	run(t, env, "./brain-unit-failed", "example.service")
+	if n := len(pushes()); n != 2 {
+		t.Fatalf("a failure an hour later was not pushed (%d pushes)", n)
+	}
+
+	bare := []string{"HOME=" + t.TempDir(), "PATH=" + fake + ":/usr/bin:/bin"}
+	_ = os.Remove(filepath.Join(fake, "happier"))
+	if out, code := run(t, bare, "./brain-unit-failed", "example.service"); code != 0 || !strings.Contains(out, "example.service failed") {
+		t.Fatalf("without a notifier: exit %d, want 0 with the line on stderr:\n%s", code, out)
 	}
 }
