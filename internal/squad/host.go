@@ -30,6 +30,9 @@ var ErrViaBridge = errors.New("the laptop is reached from the devbox only throug
 // ErrNoWorkRepo: brain agents new needs a checkout to make the worktree in.
 var ErrNoWorkRepo = errors.New("work_repo is not set: pass --repo <checkout>, or brain identity --init --work-repo <path> (or --profile <team>)")
 
+// ErrNoAgentHandle: Orca created the worktree but its reply names no started agent terminal.
+var ErrNoAgentHandle = errors.New("orca worktree create reported no agent terminal")
+
 // ErrNoOrcaEnv: the laptop reaches the devbox's Orca server through the environment its Orca app paired, orca_env.
 var ErrNoOrcaEnv = errors.New("orca_env is not set: brain identity --init --orca-env <id> (the devbox's environment in the laptop's Orca app)")
 

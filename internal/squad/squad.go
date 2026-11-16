@@ -445,7 +445,12 @@ func (f *Squad) NewAgent(ctx context.Context, name, base, dir, repo string) erro
 			return err
 		}
 		var made struct {
-			AgentTerminalHandle string `json:"agentTerminalHandle"`
+			Launch struct {
+				Outcome struct {
+					Handle string `json:"handle"`
+				} `json:"outcome"`
+			} `json:"launch"` // Orca 1.4.258+: the agent the create started
+			AgentTerminalHandle string `json:"agentTerminalHandle"` // older Orca hosts
 			StartupTerminal     struct {
 				Handle string `json:"handle"`
 			} `json:"startupTerminal"`
@@ -457,7 +462,10 @@ func (f *Squad) NewAgent(ctx context.Context, name, base, dir, repo string) erro
 		if err := json.Unmarshal(raw, &made); err != nil {
 			return err
 		}
-		handle = cmp.Or(made.AgentTerminalHandle, made.StartupTerminal.Handle)
+		handle = cmp.Or(made.Launch.Outcome.Handle, made.AgentTerminalHandle, made.StartupTerminal.Handle)
+		if handle == "" { // registering "" would silently drop the name and fail later in `agents goal`
+			return fmt.Errorf("%w for %s in %s", ErrNoAgentHandle, name, made.Worktree.Path)
+		}
 		if err := f.register(ctx, name, handle); err != nil {
 			return err
 		}

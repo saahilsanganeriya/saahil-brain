@@ -26,13 +26,14 @@ type sent struct {
 // fakeOrca answers the orca CLI from a fixed terminal list and records what is typed; every other command (bash,
 // git) runs for real against the test's temp folders.
 type fakeOrca struct {
-	terminals []Terminal
-	sends     []sent
-	created   [][]string
-	closed    []string
-	onEnter   func()
-	roots     []string // when set, terminal create accepts only these folders, as Orca accepts only project roots
-	onCreate  func()
+	noLaunchHandle bool // worktree create starts no agent terminal
+	terminals      []Terminal
+	sends          []sent
+	created        [][]string
+	closed         []string
+	onEnter        func()
+	roots          []string // when set, terminal create accepts only these folders, as Orca accepts only project roots
+	onCreate       func()
 }
 
 func (f *fakeOrca) run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -65,7 +66,11 @@ func (f *fakeOrca) run(ctx context.Context, name string, args ...string) ([]byte
 		f.created = append(f.created, args)
 		t := Terminal{Handle: "term_wt", TabID: "tab-wt", WorktreePath: "/wt/" + flagValue(args, "--name")}
 		f.terminals = append(f.terminals, t)
-		return reply(map[string]any{"agentTerminalHandle": "term_wt", "worktree": map[string]any{"path": t.WorktreePath, "branch": "refs/heads/" + flagValue(args, "--name")}})
+		made := map[string]any{"worktree": map[string]any{"path": t.WorktreePath, "branch": "refs/heads/" + flagValue(args, "--name")}}
+		if !f.noLaunchHandle { // Orca 1.4.258+ reports the started agent under launch.outcome
+			made["launch"] = map[string]any{"outcome": map[string]any{"kind": "terminal", "handle": "term_wt"}}
+		}
+		return reply(made)
 	case "terminal wait":
 		return reply(map[string]any{"wait": map[string]any{"satisfied": false}})
 	case "terminal close":
@@ -431,5 +436,30 @@ func TestBoxNeverDeletes(t *testing.T) {
 	}
 	if !hasFlag(argv[0], "--update") || !hasFlag(argv[0], "--exclude=artifacts/big/") {
 		t.Fatalf("rsync lost --update or the exclude: %v", argv[0])
+	}
+}
+
+// Catches brain-care failing every day since Orca 1.4.258 moved the started agent's handle from
+// result.agentTerminalHandle to result.launch.outcome.handle: the name was registered to an empty handle, so the next
+// `brain agents goal` found no agent. A reply without any handle must fail loudly instead of registering nothing.
+func TestNewAgentRegistersOrcasLaunchHandle(t *testing.T) {
+	origin, repo := filepath.Join(t.TempDir(), "origin.git"), filepath.Join(t.TempDir(), "saahil-brain")
+	git(t, "init", "-q", "--bare", "-b", "main", origin)
+	git(t, "clone", "-q", origin, repo)
+	git(t, "-C", repo, "commit", "-q", "--allow-empty", "-m", "first")
+	git(t, "-C", repo, "push", "-q", "origin", "HEAD:main")
+	orca := &fakeOrca{}
+	f, _ := testSquad(t, orca)
+	if err := f.NewAgent(context.Background(), "brain-care", "origin/main", "", repo); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.agent(context.Background(), "brain-care")
+	if err != nil || got == nil || got.Handle != "term_wt" {
+		t.Fatalf("agent by name after NewAgent: %+v, %v; want handle term_wt", got, err)
+	}
+	orca = &fakeOrca{noLaunchHandle: true}
+	f, _ = testSquad(t, orca)
+	if err := f.NewAgent(context.Background(), "brain-care", "origin/main", "", repo); !errors.Is(err, ErrNoAgentHandle) {
+		t.Errorf("worktree create without an agent handle: err %v, want ErrNoAgentHandle", err)
 	}
 }
