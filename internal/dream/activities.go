@@ -528,11 +528,16 @@ func (a *Activities) Demote(_ context.Context) (StepOutcome, error) {
 		demoted, restored, rank.DemoteAfterShown)}, nil
 }
 
-// Reconcile reports the sync-conflict copies the doctor reports; the owner decides them (brain sync
-// --archive-conflicts keeps the newer file). Abandoned unison half-copies it archives itself: brain sync already
-// moves them on its client side, and this step is the remote side's only sweep.
+// Reconcile handles sync debris on this machine. Abandoned unison half-copies it archives: brain sync moves them on
+// its client side, and this step is the remote side's only sweep. A conflict copy that holds nothing its live file
+// lacks it archives too (scan.ArchiveSettledConflicts). Every other conflict copy it reports, as the doctor does; the
+// owner decides those (brain sync --archive-conflicts keeps the newer file).
 func (a *Activities) Reconcile(_ context.Context) (StepOutcome, error) {
 	archived, err := brainscan.ArchiveStaleTemps(a.Cfg.BrainRoot, time.Now())
+	if err != nil {
+		return StepOutcome{Status: "failed", Reason: err.Error()}, err
+	}
+	settled, err := brainscan.ArchiveSettledConflicts(a.Cfg.BrainRoot, time.Now())
 	if err != nil {
 		return StepOutcome{Status: "failed", Reason: err.Error()}, err
 	}
@@ -546,6 +551,9 @@ func (a *Activities) Reconcile(_ context.Context) (StepOutcome, error) {
 	}
 	if archived > 0 {
 		reason += fmt.Sprintf("; archived %d abandoned unison half-cop%s", archived, pluralY(archived))
+	}
+	if settled > 0 {
+		reason += fmt.Sprintf("; archived %d conflict cop%s with nothing the live file lacks", settled, pluralY(settled))
 	}
 	return StepOutcome{Status: "ok", Reason: reason}, nil
 }

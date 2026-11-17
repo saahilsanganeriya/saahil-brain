@@ -17,14 +17,14 @@ import (
 func TestReconcileSkipsWhatTheSyncNeverCarries(t *testing.T) {
 	brain := t.TempDir()
 	for _, p := range []string{
-		"notes/a (conflict on 2026-10-23).md", "notes/a.md",
+		"notes/a (conflict on 2026-10-23).md",
 		"work/box-a/STATE (conflict on 2026-10-22).md",
 		"work/box-a/artifacts/run-1/out (conflict on 2026-10-22).md",
 		"work/box-a/tools/node_modules/pkg/x (conflict on 2026-10-22).md",
 		".archive/conflicts/devbox/old (conflict on 2026-10-01).md",
 		"work/box-b/.unison.GOAL.md.0123.unison.tmp",
 	} {
-		write(t, filepath.Join(brain, p), "")
+		write(t, filepath.Join(brain, p), "this copy's own line\n")
 	}
 	acts := &Activities{Cfg: Config{BrainRoot: brain}}
 	out, err := acts.Reconcile(context.Background())
