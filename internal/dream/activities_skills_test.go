@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -218,4 +219,30 @@ func roundAll(xs []float64) []float64 {
 		xs[i] = float64(int(x*100+0.5)) / 100
 	}
 	return xs
+}
+
+// TestVerifyLeavesReplacedNotesAlone catches a supersedes edge that points at a live note (doctor: graph
+// supersession, 2026-11-17): the merge step superseded a playbook, verify then judged that playbook against its own
+// evidence, found nothing there about a replacement, and wrote its status back to current. A note that the run left
+// superseded or retired is not a live claim: verify must not judge it, and must still judge the note that replaced it.
+func TestVerifyLeavesReplacedNotesAlone(t *testing.T) {
+	note := func(id, status string) Edit {
+		return Edit{Path: "notes/" + id + ".md", Action: "write", Content: "---\nid: " + id + "\ntype: playbook\nstatus: " +
+			status + "\nsummary: s\nscope: global\nhubs: [h]\nevidence: [work/box/r.md]\nas_of: 2026-10-08\n---\nbody\n"}
+	}
+	claims := latestClaims([]Edit{
+		note("playbook-old", "current"),
+		note("playbook-new", "current"),
+		note("playbook-old", "superseded"),
+		note("playbook-wrong", "retired"),
+		note("playbook-unsure", "proposed"),
+	})
+	var got []string
+	for _, c := range claims {
+		got = append(got, c.Path)
+	}
+	want := []string{"notes/playbook-new.md", "notes/playbook-unsure.md"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("verify would judge %v; want %v (a superseded or retired note is not a live claim)", got, want)
+	}
 }

@@ -210,7 +210,8 @@ func (a *Activities) verifyInBatches(ctx context.Context, in LLMStepInput, skill
 }
 
 // latestClaims is each claim note the run wrote, in the order first written, as its last write left it; hub pages,
-// cards and earlier versions are not verify's to judge.
+// cards and earlier versions are not verify's to judge. Nor is a note the run left superseded or retired: it is no
+// longer a live claim, and a fix that writes its status back breaks the supersedes edge that replaced it.
 func latestClaims(proposed []Edit) []Edit {
 	last, order := map[string]Edit{}, []string{}
 	for _, e := range proposed {
@@ -222,7 +223,8 @@ func latestClaims(proposed []Edit) []Edit {
 	var claims []Edit
 	for _, path := range order {
 		e := last[path]
-		if n, err := delta.Parse([]byte(e.Content)); e.Action == "write" && err == nil && claimTypes[n.Type] {
+		if n, err := delta.Parse([]byte(e.Content)); e.Action == "write" && err == nil && claimTypes[n.Type] &&
+			n.Status != "superseded" && n.Status != "retired" {
 			claims = append(claims, e)
 		}
 	}
