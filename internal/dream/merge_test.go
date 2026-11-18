@@ -335,3 +335,52 @@ func must[T any](v T, err error) T {
 	}
 	return v
 }
+
+// TestDuplicateGroupKeepsANoteThatHoldsIt catches a merge that can never land: the group kept its newest note, a
+// lesson (300 chars), though an older member's body was far over that cap, so the merged body was refused in every
+// dream (5 of 10 on one day for one pair) or, when it fitted, lost the older note's facts. The kept note is the
+// newest one whose cap holds the longest body of the group, and it takes the newest date; a group that fits its
+// newest note keeps it as before.
+func TestDuplicateGroupKeepsANoteThatHoldsIt(t *testing.T) {
+	acts, _ := newMergeBrain(t)
+	brain := acts.Cfg.BrainRoot
+	note := func(id, typ, asOf, body string) {
+		write(t, filepath.Join(brain, "notes", id+".md"), "---\nid: "+id+"\ntype: "+typ+"\nstatus: current\nsummary: Name "+
+			"runs by their ids\nscope: global\nhubs: [ci-depot]\nevidence: [hubs/ci-depot.md]\nas_of: "+asOf+"\n---\n"+body+"\n")
+	}
+	long := strings.TrimSpace(strings.Repeat("Wrong move: a label the text never defines. ", 30))
+	note("anti-pattern-long-old", "anti-pattern", "2026-10-01", long)
+	note("lesson-short-new", "lesson", "2026-10-10", "Name runs by their ids.")
+	note("anti-pattern-brief-old", "anti-pattern", "2026-10-01", "Wrong move: an undefined label.")
+	note("lesson-brief-new", "lesson", "2026-10-10", "Define each label.")
+	_, notes, err := globalCatalog(brain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := settlePlan(MergePlan{Duplicates: []DuplicateGroup{
+		{Keep: "lesson-short-new", Supersede: []string{"anti-pattern-long-old"}},
+		{Keep: "lesson-brief-new", Supersede: []string{"anti-pattern-brief-old"}}}}, notes)
+	if len(plan.Duplicates) != 2 {
+		t.Fatalf("groups: %+v", plan.Duplicates)
+	}
+	if g := plan.Duplicates[0]; g.Keep != "anti-pattern-long-old" || !slices.Equal(g.Supersede, []string{"lesson-short-new"}) {
+		t.Fatalf("the group keeps a note that cannot hold its longest body: %+v", g)
+	}
+	if g := plan.Duplicates[1]; g.Keep != "lesson-brief-new" {
+		t.Fatalf("a group that fits its newest note no longer keeps it: %+v", g)
+	}
+	merged := long + " Right move: name the run by its id."
+	units, _ := mergeUnits(plan, map[string]string{"anti-pattern-long-old": merged}, nil, notes, "2026-10-11")
+	_, edits, refused, err := acts.dryRunUnits(t.Context(), units)
+	if err != nil || len(refused) > 0 || len(edits) != 2 {
+		t.Fatalf("the merge did not land: refused %v, %d edits, %v", refused, len(edits), err)
+	}
+	for _, e := range edits {
+		write(t, filepath.Join(brain, e.Path), e.Content)
+	}
+	kept, gone := readNote(t, acts, "anti-pattern-long-old"), readNote(t, acts, "lesson-short-new")
+	if strings.TrimSpace(kept.Body) != merged || kept.AsOf != "2026-10-10" || kept.Status != "current" ||
+		!slices.Contains(kept.Supersedes, gone.ID) || gone.Status != "superseded" {
+		t.Fatalf("kept=%+v gone=%+v", kept, gone)
+	}
+}

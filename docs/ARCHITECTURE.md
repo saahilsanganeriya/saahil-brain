@@ -242,8 +242,9 @@ parts, and the model can only propose edits; code checks and applies them.
 JSON list of material on stdin, and a JSON schema for the answer (`{"edits": [...], "notes": "..."}`). The call runs in
 an empty temp folder, with no hooks, no MCP servers and no settings: it sees the brain only through its input.
 
-**curate.merge** finds duplicate global notes and conflicting rules. It keeps the newest note of a duplicate group
-with every distinct fact, supersedes the others, narrows a conflict when dates settle it (a line at the end of the
+**curate.merge** finds duplicate global notes and conflicting rules. Of a duplicate group it keeps the newest note whose
+cap holds the longest body of the group (a lesson holds 300 chars, so it does not keep a longer note; the kept note
+takes the newest date of the group), with every distinct fact, supersedes the others, narrows a conflict when dates settle it (a line at the end of the
 older note, or the why of its `related` link to the newer note when the body has no room, as in most lessons; a
 note with no room even for that link is first written shorter by the bodies stage, every fact kept), and
 queues a pair it cannot settle in `.brain/owner-questions.jsonl` for you. **curate.cards** refreshes up to 4 CARDs per dream whose box has

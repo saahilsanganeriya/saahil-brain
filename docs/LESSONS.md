@@ -666,3 +666,20 @@ a new person showed steps that only ever happened by hand, and values that only 
   58 rendered to frontmatter that does not parse; now 0. Replayed, both failed dreams lint clean.
 - **Rule.** A writer must write only what its reader reads back the same. Test a rendered value by reading it back,
   not by a list of characters that are safe.
+
+## 44. A duplicate merge that could never land, because the kept note was too small
+
+- **Symptom.** The dream's merge step refused the same unit in 5 of 10 dreams on one day: `merge into <lesson>: a
+  lesson body is ≤ 300 chars`. Each dream paid for the merge step again and the two duplicate notes stayed live.
+- **Cause.** Of a duplicate group, the code kept the newest note. Here the newest note was a lesson (300 chars) and
+  the older note was an anti-pattern of 2,605 chars. The bodies stage kept every fact, as its rule says, and its
+  answer was 2,513 chars. The ledger keeps an answer on the notes of its group, so each later dream read the same
+  answer and the applier refused it again. The same rule had a silent form: when the model did fit the cap, the
+  facts of the older note went. Of the live lessons that had replaced one longer older note, the first 8 held 11 of
+  the 57 fact tokens (numbers, dates, ids, commands) of the notes they replaced.
+- **Fix.** Of a duplicate group, the code keeps the newest note whose cap holds the longest body of the group. When
+  no note does, it keeps the newest, as before. The kept note takes the newest date of the group. Replayed on a
+  copy of the brain with the real model: the refused group lands (2 edits, 0 refused), and 8 past groups land with
+  55 of the 57 fact tokens of the older notes (the other 2 are quoted passages that the count reads as one token).
+- **Rule.** Before a step asks a model to fit content into a container, check that the container can hold what is
+  already there. A cached answer that the applier refuses is refused in every later run: count repeated refusals.

@@ -471,7 +471,7 @@ func (a *Activities) mergeCall(ctx context.Context, in MergeStepInput, skill, st
 }
 
 // settlePlan keeps what the applier and the owner's rules allow: ids that are current global notes, each in one group
-// at most; the newest note kept; a supersede or narrow only when the newer note is dated after the older (equal or
+// at most; of a group, the newest note that can hold its longest body kept; a supersede or narrow only when the newer note is dated after the older (equal or
 // missing dates go to the owner); a stale note replaced only by one dated no earlier. A note this plan supersedes takes
 // no further part; a group's kept note stays current, so it may still be narrowed or asked about.
 func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
@@ -491,12 +491,7 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 		if len(members) < 2 {
 			continue
 		}
-		keep := members[0]
-		for _, id := range members {
-			if notes[id].AsOf > notes[keep].AsOf {
-				keep = id
-			}
-		}
+		keep := roomiest(members, notes)
 		group := DuplicateGroup{Keep: keep, Why: g.Why}
 		for _, id := range members {
 			grouped[id] = true
@@ -540,6 +535,42 @@ func settlePlan(p MergePlan, notes map[string]delta.Note) MergePlan {
 }
 
 func dated(n delta.Note) bool { return len(n.AsOf) == len("2006-01-02") }
+
+// roomiest is the note a duplicate group keeps: the newest member whose cap holds the longest body of the group, or
+// the newest of all when none does. A lesson holds 300 chars, so it cannot keep the facts of a longer note.
+func roomiest(members []string, notes map[string]delta.Note) string {
+	newest := func(fits func(delta.Note) bool) string {
+		keep := ""
+		for _, id := range members {
+			if fits(notes[id]) && (keep == "" || notes[id].AsOf > notes[keep].AsOf) {
+				keep = id
+			}
+		}
+		return keep
+	}
+	holdsAll := func(n delta.Note) bool {
+		for _, id := range members {
+			if !bodyFits(n, notes[id].Body, members) {
+				return false
+			}
+		}
+		return true
+	}
+	if keep := newest(holdsAll); keep != "" {
+		return keep
+	}
+	return newest(func(delta.Note) bool { return true })
+}
+
+// bodyFits: body is within what n may hold as the kept note of its group, in the unit of n's cap (a lesson's chars,
+// else bytes).
+func bodyFits(n delta.Note, body string, members []string) bool {
+	body = strings.TrimSpace(body)
+	if n.Type == "lesson" {
+		return utf8.RuneCountInString(body) <= config.LessonMaxChars
+	}
+	return len(body) <= bodyCap(n, members)
+}
 
 // MergeGroupInput is one group as the bodies stage reads it: its notes' whole text and the cap the kept body must fit.
 type MergeGroupInput struct {
@@ -600,7 +631,16 @@ func mergeUnits(p MergePlan, bodies, shorter map[string]string, notes map[string
 			continue
 		}
 		body += "\n"
-		u := unit{label: "merge into " + g.Keep, ops: []delta.Op{{Op: "update_note", ID: g.Keep, ReplaceBody: &body}}}
+		update := delta.Op{Op: "update_note", ID: g.Keep, ReplaceBody: &body}
+		asOf := notes[g.Keep].AsOf
+		for _, old := range g.Supersede {
+			asOf = max(asOf, notes[old].AsOf)
+		}
+		if asOf != notes[g.Keep].AsOf { // the merged body holds a newer member's facts
+			raw, _ := json.Marshal(asOf)
+			update.Set = map[string]json.RawMessage{"as_of": raw}
+		}
+		u := unit{label: "merge into " + g.Keep, ops: []delta.Op{update}}
 		for _, old := range g.Supersede {
 			u.ops = append(u.ops, delta.Op{Op: "supersede", Old: old, New: g.Keep})
 		}
