@@ -329,6 +329,7 @@ is kept as a conflict copy, never lost.
 | conflicts | the loser stays as `<file> (conflict…)`; `brain sync --archive-conflicts` moves losers to `.archive/conflicts/<machine>/`. The index and the session-note writer never read a conflict copy |
 | half-copies | a Unison temp file (`.unison.*`) older than 2 h is an abandoned transfer; every sync archives it on the laptop, and the dream's reconcile step archives it on the devbox (unison's remote, where no sync runs), files and folders |
 | settled conflict copies | a Unison conflict copy that holds nothing its live file lacks is the other machine's older replica, not an edit: the same bytes, lines that the live file still has in the same order, or an earlier version of that file in the brain's git history. The dream's reconcile step moves it into `.archive/conflicts/devbox/`. A copy with content of its own stays for the owner |
+| failed files | Unison exit 2 means a file failed to transfer. The sync runs one more pass, then writes each file that the last pass failed, with Unison's reason, into `sync-last.json` (`failed`), and the paths that also failed in the run before (`repeated`). A file that a live agent wrote while Unison copied it ("modified during synchronization") goes in the next run. Thus `sync.last` stays ok when every failure has that reason and no failure is repeated |
 | after a sync | the laptop re-indexes, so its pointers stay fresh |
 
 ## 12. Git history

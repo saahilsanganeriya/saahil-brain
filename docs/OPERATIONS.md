@@ -61,7 +61,7 @@ For the laptop from the devbox: `brain peer step doctor --wait 10m`.
 | `hooks usage` | pull rate = sessions that called a brain tool; open rate = pointers opened per shown. The honest measure of use |
 | `host.*` | each agent host is wired. `skip` = that host is not installed |
 | `mesh.peer` | the other machine answers and runs the same version |
-| `sync.last` | an exit of 1 with "skipped … maxsizethreshold" is normal: files over 2 MB stay on their machine. When the last sync is older than 70 min or failed, the line also gives the state of the laptop's hourly agent: not loaded, running (launchd starts no new run while one run continues) or waiting, with its last exit code and log line. For one day after the bridge reloads the agent (launchd stopped spawning it), the line is a warning that gives the time of the reload and its record |
+| `sync.last` | an exit of 1 with "skipped … maxsizethreshold" is normal: files over 2 MB stay on their machine. An exit of 2 is also ok when each failed file was written during the run ("files written during the run, the next run carries them"): `sync-last.json` gives each failed file with the reason from Unison. The line is red when a file failed for a different reason, or failed in the run before too. When the last sync is older than 70 min or failed, the line also gives the state of the laptop's hourly agent: not loaded, running (launchd starts no new run while one run continues) or waiting, with its last exit code and log line. For one day after the bridge reloads the agent (launchd stopped spawning it), the line is a warning that gives the time of the reload and its record |
 
 ## Dreams
 

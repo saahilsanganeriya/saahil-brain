@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,13 +43,59 @@ func prefixed(prefix string, items []string) []string {
 }
 
 type syncRecord struct {
-	Started  time.Time `json:"started"`
-	Ended    time.Time `json:"ended"`
-	ExitCode int       `json:"exitCode"`
-	Summary  string    `json:"summary"`
+	Started  time.Time     `json:"started"`
+	Ended    time.Time     `json:"ended"`
+	ExitCode int           `json:"exitCode"`
+	Summary  string        `json:"summary"`
+	Failed   []syncFailure `json:"failed"`             // every file the last pass failed, with unison's reason
+	Repeated []string      `json:"repeated,omitempty"` // failed paths the previous run failed too
+}
+
+type syncFailure struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 func syncRecordPath() string { return filepath.Join(config.StateDir(), "sync-last.json") }
+
+// syncFailures reads unison's "Failed [<path>]: <reason>" lines; a reason may go on over the next lines, up to
+// unison's next line of its own (an action, a progress bar, a result or another failure).
+func syncFailures(out string) []syncFailure {
+	lines := strings.Split(strings.ReplaceAll(out, "\r", "\n"), "\n")
+	var failed []syncFailure
+	for i := 0; i < len(lines); i++ {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(lines[i]), "Failed [")
+		if !ok {
+			continue
+		}
+		path, reason, ok := strings.Cut(rest, "]: ")
+		if !ok {
+			continue
+		}
+		for ; i+1 < len(lines); i++ {
+			next := strings.TrimSpace(lines[i+1])
+			if next == "" || strings.HasPrefix(next, "[") || strings.HasPrefix(next, "Failed [") ||
+				strings.HasPrefix(next, "Synchronization ") || strings.HasPrefix(next, "Unison ") ||
+				strings.HasPrefix(next, "Saving ") || strings.HasSuffix(next, " ETA") {
+				break
+			}
+			reason += " " + next
+		}
+		failed = append(failed, syncFailure{Path: path, Reason: reason})
+	}
+	return failed
+}
+
+// repeatedFailures: the paths that failed in this run and in the one before it, which the next run did not carry.
+func repeatedFailures(previous, now []syncFailure) []string {
+	var repeated []string
+	for _, f := range now {
+		if slices.ContainsFunc(previous, func(p syncFailure) bool { return p.Path == f.Path }) {
+			repeated = append(repeated, f.Path)
+		}
+	}
+	return repeated
+}
 
 // workText un-ignores the text types inside work/ that the extension rule above ignores.
 var workText = `Regex work/.*\.(` + strings.Join(config.SyncWorkTextExts, "|") + `)`
@@ -148,6 +195,11 @@ func cmdSync(args []string) int {
 	_ = os.WriteFile(filepath.Join(config.StateDir(), "unison-last.out"), out, 0o600)
 	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(out), "\r", "\n")), "\n")
 	rec.Summary = lines[len(lines)-1]
+	rec.Failed = syncFailures(string(out))
+	var previous syncRecord
+	if raw, err := os.ReadFile(syncRecordPath()); err == nil && json.Unmarshal(raw, &previous) == nil {
+		rec.Repeated = repeatedFailures(previous.Failed, rec.Failed)
+	}
 	// the full run is in unison-last.out; print the summary, not one line per file
 	skipped := 0
 	kinds := map[string]int{}

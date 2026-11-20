@@ -683,3 +683,20 @@ a new person showed steps that only ever happened by hand, and values that only 
   55 of the 57 fact tokens of the older notes (the other 2 are quoted passages that the count reads as one token).
 - **Rule.** Before a step asks a model to fit content into a container, check that the container can hold what is
   already there. A cached answer that the applier refuses is refused in every later run: count repeated refusals.
+
+## 45. The sync health line was red for files that the next run carries
+
+- **Symptom.** `brain doctor` showed `sync.last` red on both machines: "exit 2: failed: <file>". The file changed in
+  each run. The record kept only the last line of the Unison output, so neither machine could tell why a file
+  failed. The devbox could not see the second of two failed files.
+- **Cause.** Many agents write into `work/` all the time. When a file changes while Unison copies it, Unison stops
+  that one transfer ("The source file … has been modified during synchronization. Transfer aborted.") and exits 2.
+  The sync then runs one more pass, but another file can change during that pass too. The next hourly run carries
+  the file. The doctor read every exit 2 as a failure.
+- **Fix.** The sync writes each failed file with the reason from Unison into `sync-last.json`. It also writes the
+  files that failed in the run before. The doctor shows exit 2 as ok only when Unison gives "during
+  synchronization" for each failed file and no file failed in two runs. Replayed with the real Unison on two local
+  replicas and a file that grows during the run: before, `sync.last` was red; after, it is ok. The second run with
+  the same growing file is red again, because that file failed in two runs.
+- **Rule.** A health check must read the reason for a failure, not only the exit code. Keep the reason in the
+  record, so that the other machine can read it.

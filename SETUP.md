@@ -396,7 +396,7 @@ Find the symptom, fix the cause, run the step's check again. More causes are in 
 | 2.2 bridge | `brain peer status` on the devbox fails | the tunnel is down, or the token differs | LAPTOP: `launchctl kickstart -k gui/$(id -u)/com.saahil.brain-tunnel`; read `~/Library/Logs/brain-tunnel.log` and `brain-bridge.log`; rerun `setup-laptop.sh` (it copies the token again) |
 | 2.2 bridge | the tunnel log says `remote port forwarding failed for listen port 7722` | a stale listener from a dead tunnel | wait 3 minutes (sshd keepalive), or set `ClientAliveInterval 60` / `ClientAliveCountMax 3` on the devbox |
 | 2.2 sync | `unison not installed` | Homebrew step skipped | `brew install unison`, then `brain sync --setup`, `brain sync --enable` |
-| 2.2 sync | exit 2, "failed: <file>" | a file was being written during the sync | run `brain sync` again |
+| 2.2 sync | exit 2, "failed: <file>" | a file was being written during the sync | nothing: the next run carries it, and `brain doctor` shows `sync.last` ok. If the same file fails in two runs, `failed` in `~/.local/state/brain/sync-last.json` gives the reason from Unison: stop the process that writes the file, then run `brain sync` again |
 | any laptop step | the command hangs at 0% with no error | a launchd-started process tried to read `~/Documents` (macOS privacy control) | stop it by its PID; run the same command in an interactive Terminal |
 | 3.5 | `no hubs under …/hubs` | `brain init` did not seed hubs (an older binary) | `brain file --seed-hubs` copies the binary's seed hubs where missing |
 | 3.8 | `compare` reports `missing` or `changed` | something deleted or edited files during the move | stop; find the writer; never continue to the next folder until it is explained |

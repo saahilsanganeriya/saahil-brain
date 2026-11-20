@@ -36,3 +36,30 @@ func TestSyncNamesThisMachineStably(t *testing.T) {
 		t.Errorf("unison runs as host %q, want the fixed %q", name, want)
 	}
 }
+
+// TestSyncRecordsEachFailedFileAndWhy catches the 2026-11-20 record that kept only unison's last line ("failed:
+// <path>"): neither machine could tell a file a live agent wrote during the run from a real failure, and the
+// devbox could not see the second failed file at all. The output below is unison 2.53.3's, with placeholder paths.
+func TestSyncRecordsEachFailedFileAndWhy(t *testing.T) {
+	out := "Starting...\n" +
+		" 99%  1/2  (98.6 MiB of 98.6 MiB)   239 MiB/s    00:00:00 ETA\r" +
+		"Failed [work/box/log.txt]: The source file /Users/test-user/brain/work/box/log.txt\n" +
+		"has been modified during synchronization.  Transfer aborted.\n" +
+		"[BGN] Updating file work/box/ok.md from /Users/test-user/brain to //devbox//Users/test-user/brain\n" +
+		"[END] Updating file work/box/ok.md\n" +
+		"Failed [work/box/a.md]: Error in writing: Permission denied\n" +
+		"Synchronization incomplete at 23:07:58  (1 item transferred, 0 skipped, 2 failed)\n" +
+		"  failed: work/box/log.txt\n  failed: work/box/a.md\n"
+	got := syncFailures(out)
+	want := []syncFailure{
+		{Path: "work/box/log.txt", Reason: "The source file /Users/test-user/brain/work/box/log.txt has been modified during synchronization.  Transfer aborted."},
+		{Path: "work/box/a.md", Reason: "Error in writing: Permission denied"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("syncFailures = %q\nwant %q", got, want)
+	}
+	prev := []syncFailure{{Path: "work/box/a.md"}, {Path: "work/other.md"}}
+	if rep := repeatedFailures(prev, got); !slices.Equal(rep, []string{"work/box/a.md"}) {
+		t.Errorf("repeatedFailures = %q, want only the path that failed in both runs", rep)
+	}
+}

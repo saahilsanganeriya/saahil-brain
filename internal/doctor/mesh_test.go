@@ -56,3 +56,34 @@ func TestSyncLineWarnsAfterTheBridgeReloadedTheAgent(t *testing.T) {
 		t.Errorf("fresh sync an hour after a reload: %s %q, want warn naming the reload", status, detail)
 	}
 }
+
+// TestSyncLineToleratesOnlyFilesWrittenDuringTheRun catches sync.last red on both machines on 2026-11-20 for a file a
+// live agent was writing while unison copied it (unison exit 2, "has been modified during synchronization"): the next
+// run carries such a file, as it does a skipped one. A failure for any other reason, a file that failed in the
+// previous run too, or an exit 2 with no failures recorded stays red.
+func TestSyncLineToleratesOnlyFilesWrittenDuringTheRun(t *testing.T) {
+	t.Setenv("BRAIN_HOME", t.TempDir())
+	t.Setenv("BRAIN_MACHINE", "laptop")
+	_ = os.MkdirAll(config.StateDir(), 0o700)
+	const midRun = "The source file /Users/test-user/brain/work/box/log.txt has been modified during synchronization.  Transfer aborted."
+	ended := time.Now().Add(-5 * time.Minute).Format(time.RFC3339)
+	for _, tc := range []struct {
+		name, fields string
+		want         Status
+	}{
+		{"written during the run", `"failed":[{"path":"work/box/log.txt","reason":"` + midRun + `"}]`, OK},
+		{"failed in the previous run too", `"failed":[{"path":"work/box/log.txt","reason":"` + midRun + `"}],"repeated":["work/box/log.txt"]`, Fail},
+		{"another reason", `"failed":[{"path":"work/box/log.txt","reason":"` + midRun + `"},{"path":"work/box/a.md","reason":"Error in writing: Permission denied"}]`, Fail},
+		{"no failures recorded", `"failed":[]`, Fail},
+	} {
+		rec := fmt.Sprintf(`{"ended":%q,"exitCode":2,"summary":"  failed: work/box/log.txt",%s}`, ended, tc.fields)
+		_ = os.WriteFile(filepath.Join(config.StateDir(), "sync-last.json"), []byte(rec), 0o600)
+		status, detail := checkSync(context.Background())
+		if status != tc.want {
+			t.Errorf("%s: %s %q, want %s", tc.name, status, detail, tc.want)
+		}
+		if tc.want == OK && !strings.Contains(detail, "written during the run") {
+			t.Errorf("%s: %q does not say the files were written during the run", tc.name, detail)
+		}
+	}
+}

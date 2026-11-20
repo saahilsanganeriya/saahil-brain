@@ -128,6 +128,11 @@ func checkSync(ctx context.Context) (Status, string) {
 		Summary  string    `json:"summary"`
 		Agent    string    `json:"agent"`    // the laptop's bridge adds it
 		Reloaded string    `json:"reloaded"` // the same
+		Failed   []struct {
+			Path   string `json:"path"`
+			Reason string `json:"reason"`
+		} `json:"failed"`
+		Repeated []string `json:"repeated"`
 	}
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		return Fail, err.Error()
@@ -137,7 +142,19 @@ func checkSync(ctx context.Context) (Status, string) {
 	}
 	age := time.Since(rec.Ended).Round(time.Minute)
 	detail := fmt.Sprintf("last sync %s ago, exit %d: %s", age, rec.ExitCode, rec.Summary)
-	if rec.ExitCode < 2 && age <= 70*time.Minute {
+	// unison exit 2 for files a live agent wrote during the run is no failure: the next run carries them, as it does a
+	// skipped file; a file that failed in the previous run too is not carried, so it stays red
+	writtenDuringRun := rec.ExitCode == 2 && len(rec.Failed) > 0 && len(rec.Repeated) == 0
+	var paths []string
+	for _, f := range rec.Failed {
+		writtenDuringRun = writtenDuringRun && strings.Contains(f.Reason, "during synchronization")
+		paths = append(paths, f.Path)
+	}
+	if writtenDuringRun {
+		detail = fmt.Sprintf("last sync %s ago, exit 2: %d files written during the run, the next run carries them: %s",
+			age, len(paths), strings.Join(paths[:min(len(paths), 3)], ", "))
+	}
+	if (rec.ExitCode < 2 || writtenDuringRun) && age <= 70*time.Minute {
 		if rec.Reloaded != "" {
 			return Warn, detail + "; " + rec.Reloaded
 		}
