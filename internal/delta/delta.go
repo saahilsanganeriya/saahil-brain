@@ -360,13 +360,35 @@ func (a *applier) commit(n Note, orig []byte) error {
 		a.repoint(&n)
 		a.normalize(&n)
 	}
-	resolve := func(kind, ref string) bool { return (kind == "id" && a.adding[ref]) || a.resolve(kind, ref) }
+	held := heldElsewhere(orig)
+	resolve := func(kind, ref string) bool {
+		return (kind == "id" && a.adding[ref]) || (kind == "path" && held[ref]) || a.resolve(kind, ref)
+	}
 	if probs := Check(n, Render(n), resolve); len(probs) > 0 {
 		return errors.New(strings.Join(probs, "; "))
 	}
 	a.files[n.ID] = &entry{note: n, orig: orig}
 	a.touched = append(a.touched, n.ID)
 	return nil
+}
+
+// heldElsewhere is the evidence and source paths a note already cites that the sync never carries: that bulk lives
+// on the machine that made it, so an edit of the note keeps them rather than fail on a machine that cannot see them.
+func heldElsewhere(orig []byte) map[string]bool {
+	if orig == nil {
+		return nil
+	}
+	n, err := Parse(orig)
+	if err != nil {
+		return nil
+	}
+	held := map[string]bool{}
+	for _, p := range append(slices.Clone(n.Evidence), n.Sources...) {
+		if !config.SyncCarries(p) {
+			held[p] = true
+		}
+	}
+	return held
 }
 
 func (a *applier) find(id string) string {

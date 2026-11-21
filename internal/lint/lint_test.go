@@ -108,3 +108,25 @@ func TestSecretIsAnError(t *testing.T) {
 		t.Fatalf("exit %d: %v", r.ExitCode(), rules(r))
 	}
 }
+
+// Catches lint failing a live note for evidence the sync never carries (a box's artifacts/, non-text under work/):
+// that file lives on the machine that made it, so the guard blocked the note there and the dream's check reverted
+// every edit of its run. Absent synced evidence stays an error.
+func TestEvidenceTheSyncLeavesOnTheOtherMachineWarns(t *testing.T) {
+	root := seed(t)
+	lesson := func(id, evidence string) {
+		write(t, root, "notes/"+id+".md", string(delta.Render(delta.Note{ID: id, Type: "lesson", Status: "current",
+			Summary: id, Scope: "global", Hubs: []string{"image-lane"}, Evidence: []string{evidence}, Body: "when x → y."})))
+	}
+	lesson("lesson-cites-bulk", "work/box/artifacts/run-1/out.txt")
+	lesson("lesson-cites-gone", "work/box/reports/gone.md")
+	for id, want := range map[string]int{"lesson-cites-bulk": 1, "lesson-cites-gone": 2} {
+		r, err := New(root).File("notes/" + id + ".md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.ExitCode() != want {
+			t.Errorf("%s: exit %d, want %d: %v", id, r.ExitCode(), want, rules(r))
+		}
+	}
+}

@@ -271,12 +271,14 @@ func (l *Linter) checkNote(rel string, data []byte, add addFn) {
 	}
 	needsEvidence := live && (n.Type == "finding" || n.Type == "decision" || n.Type == "lesson")
 	for _, ev := range n.Evidence {
-		if l.pathExists(ev) {
-			continue
-		}
-		if needsEvidence {
+		switch {
+		case l.pathExists(ev):
+		case !config.SyncCarries(ev):
+			// bulk lives on the machine that made it (doctor counts it the same way); one machine cannot judge it
+			add(Warn, "dangling", "evidence %q is not on this machine, and the sync never carries it", ev)
+		case needsEvidence:
 			add(Error, "evidence", "evidence %q does not resolve", ev)
-		} else {
+		default:
 			add(Warn, "dangling", "evidence %q does not resolve", ev)
 		}
 	}

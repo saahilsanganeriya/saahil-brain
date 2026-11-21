@@ -316,3 +316,39 @@ func TestRenderedFlowItemReadsBack(t *testing.T) {
 		t.Fatalf("read back %q %q", back.Evidence, back.Aliases)
 	}
 }
+
+// TestEditKeepsEvidenceTheSyncLeavesOnTheOtherMachine catches an edit refused for a path it did not add: a supersede
+// of a note citing a box's artifacts/ (never synced, absent on the dream's machine) failed "does not resolve" in every
+// hourly merge. A path the edit adds, or an absent path the sync carries, is still refused.
+func TestEditKeepsEvidenceTheSyncLeavesOnTheOtherMachine(t *testing.T) {
+	root := newRoot(t)
+	note := func(id, evidence string) string {
+		return "---\nid: " + id + "\ntype: lesson\nstatus: current\nsummary: " + id + "\nscope: global\nhubs: [git]\n" +
+			"evidence: [" + evidence + "]\n---\nwhen x → y.\n"
+	}
+	for id, ev := range map[string]string{"lesson-cites-bulk": "work/box/artifacts/run-1/out.txt",
+		"lesson-cites-gone": "work/box/reports/gone.md"} {
+		if err := os.WriteFile(filepath.Join(root, "notes", id+".md"), []byte(note(id, ev)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep, err := Apply(context.Background(), root, parse(t, `{"ops":[
+ {"op":"supersede","old":"lesson-cites-bulk","new":"lesson-old-rebase"},
+ {"op":"update_note","id":"lesson-old-rebase","set":{"evidence":["work/box/artifacts/run-2/new.txt"]}},
+ {"op":"update_note","id":"lesson-cites-gone","append_body":"Seen again."}
+]}`), Options{Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rejected []int
+	for _, r := range rep.Rejected {
+		rejected = append(rejected, r.Index)
+	}
+	if len(rejected) != 2 || rejected[0] != 1 || rejected[1] != 2 {
+		t.Fatalf("want only ops 1 (adds an absent path) and 2 (keeps an absent synced path) rejected: %+v", rep.Rejected)
+	}
+	b, _ := os.ReadFile(filepath.Join(root, "notes", "lesson-cites-bulk.md"))
+	if got, _ := Parse(b); got.Status != "superseded" || len(got.Evidence) != 1 {
+		t.Fatalf("supersede did not land with its evidence kept: %+v", got)
+	}
+}

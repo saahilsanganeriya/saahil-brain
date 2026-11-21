@@ -700,3 +700,22 @@ a new person showed steps that only ever happened by hand, and values that only 
   the same growing file is red again, because that file failed in two runs.
 - **Rule.** A health check must read the reason for a failure, not only the exit code. Keep the reason in the
   record, so that the other machine can read it.
+
+## 46. A merge refused in every dream, for evidence that it did not add
+
+- **Symptom.** The dream's merge step refused the same unit in 7 of 16 dreams on one day: `merge into <lesson>: path
+  "work/<box>/artifacts/…" does not resolve`. Each dream paid to find the duplicate pair again, and the two notes
+  stayed live.
+- **Cause.** The unit supersedes the older note, and that edit makes the applier check every reference of the older
+  note again. The older note cited two files in a box's `artifacts/`, which the sync never carries. They were not
+  on the devbox, where the dream runs. The edit did not add the paths, but the applier refused the edit for them.
+  Lint has the same rule: a live finding, decision or lesson with such evidence is an error, so the write guard
+  blocks the note on that machine. 393 of 6,302 live notes (6%) cite such a file that is not on the devbox. The
+  dream could not edit any of them.
+- **Fix.** Lint gives a warning, not an error, for evidence that the sync never carries and that is not on this
+  machine. The doctor already counts it that way. An edit keeps such a path when the note already cites it. A path
+  that the edit adds is checked as before, and a missing file that the sync carries is still an error. On a copy
+  of the brain, the two refused units apply, with 0 lint errors. A neutral edit of each of the 393 notes applies
+  (before: 0 of 393), and 40 edits that add an absent `artifacts/` path are still refused.
+- **Rule.** Judge an edit by what it changes. When a check fails for a reference that the edit did not add, the
+  check is wrong for that edit.
