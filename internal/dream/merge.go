@@ -314,7 +314,7 @@ type MergeStepInput struct {
 type MergeStepResult struct {
 	Status  string // ok | skipped | failed: whether the find stage answered
 	Reason  string
-	Waiting []string // duplicate groups and too-full narrowed notes with no body this run: "<id>: <why>"
+	Waiting []string // duplicate groups and too-full narrowed notes with no body this run, and narrows no note can hold: "<id>: <why>"
 	CostUSD float64
 	Calls   int
 	Cached  int
@@ -399,8 +399,8 @@ func (a *Activities) MergeStep(ctx context.Context, in MergeStepInput) (MergeSte
 	if err != nil {
 		return out, err
 	}
-	units, owner := mergeUnits(out.Plan, bodies, shorter, notes, in.Today)
-	out.Owner = owner
+	units, owner, waiting := mergeUnits(out.Plan, bodies, shorter, notes, in.Today)
+	out.Owner, out.Waiting = owner, append(out.Waiting, waiting...)
 	out.Delta, out.Edits, out.Refused, err = a.dryRunUnits(ctx, units)
 	return out, err
 }
@@ -415,8 +415,8 @@ func (a *Activities) shorterBodies(ctx context.Context, in MergeStepInput, skill
 		if c.Resolution != "narrow" || narrowed(older, c.Newer) {
 			continue
 		}
-		line, link, linkOnly := narrowing(c, in.Today)
-		if bodyHolds(older, line, link) || !tooFull(older, linkOnly) {
+		line, link, linkOnly := narrowing(c, older, in.Today)
+		if bodyHolds(older, line, link) || linkOnly != nil && !tooFull(older, *linkOnly) || older.Type == "lesson" {
 			continue
 		}
 		if out.StopLLM {
@@ -621,10 +621,12 @@ type unit struct {
 
 // mergeUnits turns a settled plan into units, and its owner pairs into questions. A group whose merged body is
 // missing waits for the next merge, as does a narrow whose note is too full for it and has no shorter body; a narrow
-// already written (its line names the newer note) is not written again.
-func mergeUnits(p MergePlan, bodies, shorter map[string]string, notes map[string]delta.Note, today string) ([]unit, []OwnerQuestion) {
+// already written (its line names the newer note) is not written again. A lesson that can hold neither the line nor a
+// link is returned as waiting, "<id>: <why>".
+func mergeUnits(p MergePlan, bodies, shorter map[string]string, notes map[string]delta.Note, today string) ([]unit, []OwnerQuestion, []string) {
 	var units []unit
 	var owner []OwnerQuestion
+	var waiting []string
 	for _, g := range p.Duplicates {
 		body := strings.TrimSpace(bodies[g.Keep])
 		if body == "" {
@@ -656,16 +658,19 @@ func mergeUnits(p MergePlan, bodies, shorter map[string]string, notes map[string
 			if narrowed(older, c.Newer) {
 				continue
 			}
-			line, link, linkOnly := narrowing(c, today)
+			line, link, linkOnly := narrowing(c, older, today)
 			var ops []delta.Op
 			switch body, ok := shorter[c.Older]; {
 			case bodyHolds(older, line, link):
-				ops = []delta.Op{{Op: "update_note", ID: c.Older, AppendBody: line}, link}
-			case !tooFull(older, linkOnly):
-				ops = []delta.Op{linkOnly}
+				ops = withLink(delta.Op{Op: "update_note", ID: c.Older, AppendBody: line}, link)
+			case linkOnly != nil && !tooFull(older, *linkOnly):
+				ops = []delta.Op{*linkOnly}
 			case ok:
 				body = strings.TrimSpace(body) + "\n\n" + line + "\n"
-				ops = []delta.Op{{Op: "update_note", ID: c.Older, ReplaceBody: &body}, link}
+				ops = withLink(delta.Op{Op: "update_note", ID: c.Older, ReplaceBody: &body}, link)
+			case older.Type == "lesson":
+				waiting = append(waiting, c.Older+": its related links are full and its body cannot hold the narrowing by "+c.Newer)
+				continue
 			default:
 				continue
 			}
@@ -683,7 +688,7 @@ func mergeUnits(p MergePlan, bodies, shorter map[string]string, notes map[string
 		units = append(units, unit{label: s.ReplacedBy + " replaces stale " + s.ID,
 			ops: []delta.Op{{Op: "supersede", Old: s.ID, New: s.ReplacedBy}}})
 	}
-	return units, owner
+	return units, owner, waiting
 }
 
 // narrowed: the older note already names the newer as its narrower, in a body line or in the related link's why.
@@ -697,13 +702,27 @@ func narrowed(older delta.Note, newer string) bool {
 }
 
 // narrowing is what a narrow writes into the older note: the line and its link, or, when the body cannot hold the
-// line, the link alone with the line as its why.
-func narrowing(c Conflict, today string) (string, delta.Op, delta.Op) {
+// line, the link alone with the line as its why. When the older note's related links are full, both links are nil and
+// the line goes alone: the applier holds each kind to config.LinksPerKindMax and never drops a link, so a link would
+// refuse the whole narrow, line and all.
+func narrowing(c Conflict, older delta.Note, today string) (string, *delta.Op, *delta.Op) {
 	why := oneLine(c.Why, 300)
+	line := "Narrowed " + today + " by " + c.Newer + ": " + why
+	if len(older.Related) >= config.LinksPerKindMax {
+		return line, nil, nil
+	}
 	link := delta.Op{Op: "link", Src: c.Older, Rel: "related", Dst: c.Newer, Why: "the newer owner rule that narrows this one"}
 	linkOnly := link
 	linkOnly.Why = "Narrowed " + today + ": " + why
-	return "Narrowed " + today + " by " + c.Newer + ": " + why, link, linkOnly
+	return line, &link, &linkOnly
+}
+
+// withLink is op followed by the narrowing link, when the note has room for one.
+func withLink(op delta.Op, link *delta.Op) []delta.Op {
+	if link == nil {
+		return []delta.Op{op}
+	}
+	return []delta.Op{op, *link}
 }
 
 // tooFull: a note other than a lesson that cannot take even the link alone within the 4 KB cap; its body is written
@@ -717,21 +736,26 @@ func tooFull(n delta.Note, linkOnly delta.Op) bool {
 	return len(delta.Render(n)) > config.NoteMaxBytes
 }
 
-// shorterCap is what a too-full note's shorter body may hold so that it, the narrowing line and the link fit the cap.
-func shorterCap(n delta.Note, line string, link delta.Op) int {
+// shorterCap is what a too-full note's shorter body may hold so that it, the narrowing line and the link (if any) fit
+// the cap.
+func shorterCap(n delta.Note, line string, link *delta.Op) int {
 	n.Body, n.Updated = "", time.Time{}.Format(time.RFC3339)
-	n.Related = append(slices.Clone(n.Related), delta.Related{ID: link.Dst, Why: link.Why})
+	if link != nil {
+		n.Related = append(slices.Clone(n.Related), delta.Related{ID: link.Dst, Why: link.Why})
+	}
 	return config.NoteMaxBytes - len(delta.Render(n)) - len("\n\n"+line+"\n")
 }
 
 // bodyHolds: the note stays within the applier's caps (a lesson's 300 chars, a note's 4 KB) with the line appended
-// and the link added; a lesson body usually sits near its cap, so its narrowing goes in the link's why instead.
-func bodyHolds(n delta.Note, line string, link delta.Op) bool {
+// and the link (if any) added; a lesson body usually sits near its cap, so its narrowing goes in the link's why instead.
+func bodyHolds(n delta.Note, line string, link *delta.Op) bool {
 	n.Body = strings.TrimRight(n.Body, "\n") + "\n\n" + line + "\n"
 	if n.Type == "lesson" && utf8.RuneCountInString(strings.TrimSpace(n.Body)) > config.LessonMaxChars {
 		return false
 	}
-	n.Related = append(slices.Clone(n.Related), delta.Related{ID: link.Dst, Why: link.Why})
+	if link != nil {
+		n.Related = append(slices.Clone(n.Related), delta.Related{ID: link.Dst, Why: link.Why})
+	}
 	n.Updated = time.Time{}.Format(time.RFC3339)
 	return len(delta.Render(n)) <= config.NoteMaxBytes
 }

@@ -210,7 +210,7 @@ func TestNarrowOfAFullLessonGoesInItsLink(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		units, _ := mergeUnits(plan, nil, nil, notes, today)
+		units, _, _ := mergeUnits(plan, nil, nil, notes, today)
 		_, edits, refused, err := acts.dryRunUnits(t.Context(), units)
 		if err != nil {
 			t.Fatal(err)
@@ -229,6 +229,69 @@ func TestNarrowOfAFullLessonGoesInItsLink(t *testing.T) {
 	}
 	if units, _, _ := narrow("2026-10-09"); len(units) != 0 {
 		t.Fatalf("a narrow already in the link is written again: %+v", units)
+	}
+}
+
+// TestNarrowOfANoteWithFullRelatedWritesTheLineAlone catches a narrow refused every dream: the older note already
+// holds the related links the applier allows, so the narrowing link made one too many and the applier refused the
+// whole unit, line and all (one pair refused in 4 dreams of one day, another in 3 dreams), and the older rule stayed
+// live as written. The line goes in without the link and is not written twice; a lesson that cannot hold the line
+// either is named as waiting, not refused.
+func TestNarrowOfANoteWithFullRelatedWritesTheLineAlone(t *testing.T) {
+	acts, _ := newMergeBrain(t)
+	brain := acts.Cfg.BrainRoot
+	var related []string
+	for i := 1; i <= config.LinksPerKindMax; i++ {
+		id := fmt.Sprintf("decision-earlier-%d", i)
+		write(t, filepath.Join(brain, "notes", id+".md"), "---\nid: "+id+"\ntype: decision\nstatus: superseded\n"+
+			"summary: An earlier narrower rule\nscope: global\nhubs: [ci-depot]\nevidence: [hubs/ci-depot.md]\n"+
+			"as_of: 2026-10-01\n---\nAn earlier rule.\n")
+		related = append(related, "{id: "+id+", why: the newer owner rule that narrows this one}")
+	}
+	head := func(id, typ string) string {
+		return "---\nid: " + id + "\ntype: " + typ + "\nstatus: current\nsummary: Detach a process that must outlive " +
+			"the session\nscope: global\nhubs: [ci-depot]\nevidence: [hubs/ci-depot.md]\nrelated: [" +
+			strings.Join(related, ", ") + "]\nas_of: 2026-09-19\n---\n"
+	}
+	write(t, filepath.Join(brain, "notes", "anti-pattern-full-links.md"), head("anti-pattern-full-links", "anti-pattern")+
+		"Right move: launch a durable process detached and record its PID.\n")
+	full := strings.TrimSpace(strings.Repeat("Detach durable runs and record the PID. ", 7))
+	write(t, filepath.Join(brain, "notes", "lesson-full-links.md"), head("lesson-full-links", "lesson")+full+"\n")
+	why := "watchers use run_in_background"
+	bodiesCalls := 0
+	acts.LLM.(*llm.Fake).Respond = func(c llm.Call) llm.Result {
+		if !strings.Contains(c.Input, `"stage":"find"`) {
+			bodiesCalls++
+			return llm.Result{JSON: json.RawMessage(`{"bodies": []}`)}
+		}
+		conflict := `{"newer": "decision-flakes-only-rerun", "older": "%s", "resolution": "narrow", "why": "` + why + `"}`
+		return llm.Result{JSON: json.RawMessage(`{"duplicates": [], "stale": [], "conflicts": [` +
+			fmt.Sprintf(conflict, "anti-pattern-full-links") + `, ` + fmt.Sprintf(conflict, "lesson-full-links") + `]}`)}
+	}
+	merge := func(today string) MergeStepResult {
+		res, err := acts.MergeStep(t.Context(), MergeStepInput{BudgetUSD: 1, CapUSD: 10, Today: today})
+		if err != nil || res.Status != "ok" {
+			t.Fatalf("merge: %+v %v", res, err)
+		}
+		return res
+	}
+
+	res := merge("2026-11-22")
+	if len(res.Refused) > 0 || len(res.Edits) != 1 {
+		t.Fatalf("the narrow of a note with full related links did not land: refused %v, %d edits", res.Refused, len(res.Edits))
+	}
+	write(t, filepath.Join(brain, res.Edits[0].Path), res.Edits[0].Content)
+	n := readNote(t, acts, "anti-pattern-full-links")
+	if !strings.HasSuffix(strings.TrimSpace(n.Body), "Narrowed 2026-11-22 by decision-flakes-only-rerun: "+why) ||
+		len(n.Related) != config.LinksPerKindMax || n.Related[0].ID != "decision-earlier-1" {
+		t.Fatalf("not the narrowing line alone, the related links kept: body %q related %+v", n.Body, n.Related)
+	}
+	if len(res.Waiting) != 1 || !strings.HasPrefix(res.Waiting[0], "lesson-full-links: ") || bodiesCalls != 0 {
+		t.Fatalf("the lesson that holds neither the line nor a link is not named as waiting, or a shorter body was paid "+
+			"for: waiting %q, %d bodies calls", res.Waiting, bodiesCalls)
+	}
+	if again := merge("2026-11-23"); len(again.Edits) != 0 || len(again.Refused) != 0 {
+		t.Fatalf("a narrow already in the body is written again: %d edits, refused %v", len(again.Edits), again.Refused)
 	}
 }
 
@@ -370,7 +433,7 @@ func TestDuplicateGroupKeepsANoteThatHoldsIt(t *testing.T) {
 		t.Fatalf("a group that fits its newest note no longer keeps it: %+v", g)
 	}
 	merged := long + " Right move: name the run by its id."
-	units, _ := mergeUnits(plan, map[string]string{"anti-pattern-long-old": merged}, nil, notes, "2026-10-11")
+	units, _, _ := mergeUnits(plan, map[string]string{"anti-pattern-long-old": merged}, nil, notes, "2026-10-11")
 	_, edits, refused, err := acts.dryRunUnits(t.Context(), units)
 	if err != nil || len(refused) > 0 || len(edits) != 2 {
 		t.Fatalf("the merge did not land: refused %v, %d edits, %v", refused, len(edits), err)

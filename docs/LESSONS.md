@@ -719,3 +719,20 @@ a new person showed steps that only ever happened by hand, and values that only 
   (before: 0 of 393), and 40 edits that add an absent `artifacts/` path are still refused.
 - **Rule.** Judge an edit by what it changes. When a check fails for a reference that the edit did not add, the
   check is wrong for that edit.
+
+## 47. A narrow refused in every dream, for a link that had no room
+
+- **Symptom.** The dream's merge step refused the same narrow in 4 dreams on one day, and another narrow in 3 dreams
+  of an earlier week: `<newer> narrows <older>: about and related hold ≤ 5 each`. The older rule stayed live as
+  written, and it still gave the advice that the newer rule stops.
+- **Cause.** A narrow writes a line at the end of the older note and adds a `related` link to the newer note. The
+  older note already held 5 `related` links, the maximum. The applier never drops a link, so the sixth link made
+  the applier refuse the whole unit, the line too. Because the line was not written, the next merge found the same
+  conflict again. 25 current global notes hold 5 `related` links; a narrow onto any of them failed in the same way.
+- **Fix.** When the older note holds 5 `related` links, the narrow writes the line alone. The merge already reads
+  the line, so it does not write the narrow again. A lesson that can hold neither the line nor a link waits, and
+  the step names it. On a copy of the brain, the two refused narrows apply. A narrow onto each of the 23 such notes
+  dated before the newest note gives 17 lines with 0 lint errors and 6 named waits (before: 23 refused). A
+  narrow onto 200 other notes gives the same edits as before, byte for byte.
+- **Rule.** A unit applies whole or not at all. Do not put an optional part, such as a link, in the same unit as
+  the fact when the optional part can fail.
