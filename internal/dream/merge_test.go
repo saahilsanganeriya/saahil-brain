@@ -1,11 +1,13 @@
 package dream
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -445,5 +447,94 @@ func TestDuplicateGroupKeepsANoteThatHoldsIt(t *testing.T) {
 	if strings.TrimSpace(kept.Body) != merged || kept.AsOf != "2026-10-10" || kept.Status != "current" ||
 		!slices.Contains(kept.Supersedes, gone.ID) || gone.Status != "superseded" {
 		t.Fatalf("kept=%+v gone=%+v", kept, gone)
+	}
+}
+
+// stagePriced charges the find and bodies stages their own prices and records each call whose ceiling, as the CLI
+// passes it on (--max-budget-usd, 2 decimals), is more than the run cap leaves.
+type stagePriced struct {
+	llm.Runner
+	find, bodies float64
+	spent        float64
+	over         []string
+	bodiesCalls  int
+}
+
+func (s *stagePriced) Run(ctx context.Context, c llm.Call) (llm.Result, error) {
+	if passed, _ := strconv.ParseFloat(strconv.FormatFloat(c.MaxBudgetUSD, 'f', 2, 64), 64); passed > RunCapUSD-s.spent+1e-9 {
+		s.over = append(s.over, fmt.Sprintf("--max-budget-usd %.2f with $%.4f spent", passed, s.spent))
+	}
+	res, err := s.Runner.Run(ctx, c)
+	res.CostUSD = s.bodies
+	if strings.Contains(c.Input, `"stage":"find"`) {
+		res.CostUSD = s.find
+	} else {
+		s.bodiesCalls++
+	}
+	s.spent += res.CostUSD
+	return res, err
+}
+
+// TestMergeBodiesFitWhatTheRunCapLeaves catches a bodies call that reserved the find's whole $2.50 step budget: in a
+// dream that had spent $5.76 of its $8 run cap, every bodies call waited although one costs $0.13 on average ($1.23
+// at most of 361), so its 4 duplicate groups wrote 0 files (2026-11-23 19Z; bodies waited on the cap in 68 of 252
+// merges). A bodies call takes what the cap leaves, at most the step budget, and waits only below the floor a call
+// needs; no ceiling ever passes the run cap. The find keeps its whole budget: it costs up to $2.28, so started on what
+// the cap leaves it would overrun and lose the plan.
+func TestMergeBodiesFitWhatTheRunCapLeaves(t *testing.T) {
+	const find, bodies = 1.57, 0.13
+	budget := stepBudgetUSD[config.ModelJudgment]
+	for _, tc := range []struct {
+		name       string
+		spentFirst float64 // spent before the merge; the find adds its price
+		lands      bool
+	}{
+		{"the cap leaves $2.2388 after the find", RunCapUSD - 2.2388 - find, true},
+		{"the cap leaves less than a call's floor", RunCapUSD - minCallBudgetUSD + 0.06 - find, false},
+		{"the cap leaves less than the find's budget", RunCapUSD - budget + 0.01, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acts, _ := newMergeBrain(t)
+			priced := &stagePriced{Runner: acts.LLM, find: find, bodies: bodies, spent: tc.spentFirst}
+			acts.LLM = priced
+			res, err := acts.MergeStep(t.Context(), MergeStepInput{RunSpentUSD: tc.spentFirst,
+				BudgetUSD: budget, CapUSD: RunCapUSD, Today: "2026-11-23"})
+			if tc.spentFirst+budget > RunCapUSD {
+				if err != nil || res.Status != "skipped" || res.Calls != 0 || !strings.Contains(res.Reason, "cost cap: $") {
+					t.Fatalf("the find started on less than its budget: %+v %v", res, err)
+				}
+				return
+			}
+			if err != nil || res.Status != "ok" {
+				t.Fatalf("merge: %+v %v", res, err)
+			}
+			if len(priced.over) > 0 {
+				t.Fatalf("a call's ceiling passes what the run cap leaves: %v", priced.over)
+			}
+			if tc.spentFirst+res.CostUSD > RunCapUSD {
+				t.Fatalf("the run spent $%.2f of its $%.2f cap", tc.spentFirst+res.CostUSD, RunCapUSD)
+			}
+			merged := false
+			for _, e := range res.Edits {
+				merged = merged || strings.Contains(e.Content, "MERGED anti-pattern-probe-new")
+			}
+			if !tc.lands {
+				if priced.bodiesCalls != 0 || merged || len(res.Waiting) == 0 ||
+					!strings.Contains(res.Waiting[0], "run cap: $") || !strings.Contains(res.Waiting[0], " leaves $0.94") {
+					t.Fatalf("under the floor a bodies call was made or its wait does not say what the cap leaves: "+
+						"%d calls, merged %v, waiting %q", priced.bodiesCalls, merged, res.Waiting)
+				}
+				return
+			}
+			for _, w := range res.Waiting {
+				if strings.Contains(w, "cap") {
+					t.Fatalf("a bodies call waits on the cap while it leaves $2.2388: %q", res.Waiting)
+				}
+			}
+			if priced.bodiesCalls != 3 || !merged {
+				t.Fatalf("the duplicate groups did not get their bodies: %d calls, merged %v, waiting %q",
+					priced.bodiesCalls, merged, res.Waiting)
+			}
+		})
 	}
 }

@@ -158,12 +158,13 @@ func (a *Activities) verifyInBatches(ctx context.Context, in LLMStepInput, skill
 			return LLMStepResult{}, err
 		}
 		key := llm.Key(in.Workflow, in.Step, in.Model, skill, input)
-		bin.RunSpentUSD, bin.BudgetUSD = spent, min(in.BudgetUSD, RunCapUSD-spent)
+		ceiling, fits := capCeiling(in.BudgetUSD, RunCapUSD, spent)
+		bin.RunSpentUSD, bin.BudgetUSD = spent, ceiling
 		if _, cached, err := a.Ledger.Done(key); err != nil {
 			return LLMStepResult{}, err
-		} else if !cached && bin.BudgetUSD < minVerifyBudgetUSD {
+		} else if !cached && !fits {
 			unverified += len(claims) - b*len(claims)/batches
-			why, out.StopLLM = fmt.Sprintf("run cap: $%.2f spent leaves $%.2f", spent, RunCapUSD-spent), true
+			why, out.StopLLM = capLeaves(spent, RunCapUSD), true
 			break
 		}
 		res, got, err := a.callOnce(ctx, bin, key, skill, input)
@@ -339,8 +340,9 @@ const (
 	maxMembers    = 40
 	// verify judges at most this many claims per call; at about $0.05 a claim a batch stays far under its ceiling
 	verifyBatchNotes = 12
-	// a verify batch is not started with less than this left under the run cap: it would overrun and lose its verdicts
-	minVerifyBudgetUSD = 1.0
+	// a call that takes what the run cap leaves is not started with less than this: it would overrun and lose its
+	// answer (a verify batch costs $0.55 on average, a merge bodies call $0.13; 360 of 361 bodies calls cost under it)
+	minCallBudgetUSD = 1.0
 )
 
 var claimTypes = map[string]bool{"finding": true, "decision": true, "lesson": true, "anti-pattern": true, "playbook": true}

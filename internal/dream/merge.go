@@ -457,8 +457,10 @@ func (a *Activities) shorterBodies(ctx context.Context, in MergeStepInput, skill
 // decode is unmarked, since a cached broken answer would fail every later merge on the same notes.
 func (a *Activities) mergeCall(ctx context.Context, in MergeStepInput, skill, step, input, schema string, dst any,
 	spentHere float64) (LLMStepResult, error) {
+	// a bodies call costs about a tenth of the find's budget: reserving all of it parked the bodies whenever the find
+	// had run in a busy dream, so it takes what the run cap leaves instead
 	p := paid{workflow: "dream", step: step, model: config.ModelJudgment, skill: skill, input: input, schema: schema,
-		spentUSD: in.RunSpentUSD + spentHere, capUSD: in.CapUSD, budgetUSD: in.BudgetUSD}
+		spentUSD: in.RunSpentUSD + spentHere, capUSD: in.CapUSD, budgetUSD: in.BudgetUSD, fitCap: step != mergeStepName}
 	res, out, err := a.paidCall(ctx, p)
 	if err != nil || out.Status != "ok" {
 		return out, err

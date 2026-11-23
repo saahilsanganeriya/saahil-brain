@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,6 +24,18 @@ type paid struct {
 	spentUSD, capUSD                            float64
 	budgetUSD                                   float64 // per call; 0 → the model's step budget
 	runCap                                      bool    // askTwice: spentUSD is the dream run's spend, not the ledger total
+	fitCap                                      bool    // the call takes what the cap leaves, at most its budget
+}
+
+// capCeiling is a call's ceiling under a cap: its budget or what the cap leaves, whichever is less, rounded down to
+// the cent the CLI passes on; fits is false when that is too little for a call to finish (minCallBudgetUSD).
+func capCeiling(budgetUSD, capUSD, spentUSD float64) (ceiling float64, fits bool) {
+	ceiling = min(budgetUSD, math.Floor((capUSD-spentUSD)*100)/100)
+	return ceiling, ceiling >= minCallBudgetUSD
+}
+
+func capLeaves(spentUSD, capUSD float64) string {
+	return fmt.Sprintf("run cap: $%.2f spent leaves $%.2f", spentUSD, capUSD-spentUSD)
 }
 
 // paidCall answers a key from the ledger for $0, or pays for one call when the cap and the daily guard allow it.
@@ -34,6 +47,13 @@ func (a *Activities) paidCall(ctx context.Context, p paid) (llm.Result, LLMStepR
 	budget := p.budgetUSD
 	if budget == 0 {
 		budget = stepBudgetUSD[p.model]
+	}
+	if p.fitCap {
+		ceiling, fits := capCeiling(budget, p.capUSD, p.spentUSD)
+		if !fits {
+			return llm.Result{}, LLMStepResult{Status: "skipped", StopLLM: true, Reason: capLeaves(p.spentUSD, p.capUSD)}, nil
+		}
+		budget = ceiling
 	}
 	if p.spentUSD+budget > p.capUSD {
 		return llm.Result{}, LLMStepResult{Status: "skipped", StopLLM: true, Reason: fmt.Sprintf(

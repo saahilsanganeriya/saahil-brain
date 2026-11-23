@@ -267,7 +267,8 @@ already in this repository's code or scripts unless the lesson says otherwise; t
 
 - **Symptom (prevented).** A loop or a retry storm in an unattended job can spend without limit.
 - **Cause.** Dreams, learning and the backfill call models with nobody watching.
-- **Fix.** Three caps in code: ≤ $8 per dream run (each step must fit its budget first: Opus $2.50, Haiku $0.50); ≤
+- **Fix.** Three caps in code: ≤ $8 per dream run (each call must fit its budget first: Opus $2.50, Haiku $0.50; a
+  verify batch and a merge bodies call take what the cap leaves, down to $1.00, see 48); ≤
   $100 per UTC day for all brain model calls, failed attempts included; backfill ≤ $80 in total (`--budget`). Every
   answer is cached by an idempotency key, so a retry or rerun never pays twice. On the reference setup the most
   expensive dream cost $5.97, and the busiest 24 hours (backfill included) about $75.
@@ -736,3 +737,23 @@ a new person showed steps that only ever happened by hand, and values that only 
   narrow onto 200 other notes gives the same edits as before, byte for byte.
 - **Rule.** A unit applies whole or not at all. Do not put an optional part, such as a link, in the same unit as
   the fact when the optional part can fail.
+
+## 48. Merges that wrote nothing, because a small call reserved a large budget
+
+- **Symptom.** The merge step of a busy dream found 4 duplicate groups and wrote 0 files: `4 bodies wait, first:
+  <note>: cost cap: $5.76 spent + $2.50 step budget > $8.00`. The bodies of 62 merges waited in this way, 22 of
+  them in one week. The groups stayed unmerged until a later merge ran with more money left.
+- **Cause.** Every Opus call reserved the Opus step budget, $2.50, before the run cap check. The merge's find call
+  costs $1.45 on average and up to $2.28, so $2.50 fits it. A bodies call writes one merged or shorter body: it
+  cost $0.13 on average and at most $1.23 in 361 calls. After learn, link, hubs and the find, a dream had spent
+  about $5.5 to $7, so the $2.50 reservation did not fit, although the call itself did. Verify had the same problem
+  and a fix (a batch takes what the cap leaves); the merge did not use it.
+- **Fix.** A bodies call takes what the run cap leaves, up to $2.50, rounded down to the cent that the CLI passes
+  on. It waits only when less than $1.00 is left (the floor that verify uses). The find keeps its whole budget,
+  because it would overrun on less. One function sets the ceiling for verify and for the bodies. In 60 of the 62
+  merges, $1.00 or more was left. On a copy of the brain, a replay of the recorded merges under the money that each
+  dream had left gives: the 4-group merge writes 6 files (before: 0); in the merges whose groups are still open,
+  0 bodies wait (before: 3) and 9 files change (before: 3); in 6 merges with no wait, the delta is the same, byte
+  for byte.
+- **Rule.** Reserve for a call what that call can cost, not what the largest call of its model can cost. When a step
+  has a rule for "what the cap leaves", every step that makes small calls uses the same rule.
