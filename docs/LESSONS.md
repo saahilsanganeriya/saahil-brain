@@ -757,3 +757,18 @@ a new person showed steps that only ever happened by hand, and values that only 
   for byte.
 - **Rule.** Reserve for a call what that call can cost, not what the largest call of its model can cost. When a step
   has a rule for "what the cap leaves", every step that makes small calls uses the same rule.
+
+## 49. A dream passed the run cap, and the daily checks did not show it
+
+- **Symptom.** A dream spent $9.04 against the $8 run cap. Its merge started a bodies call with $1.01 left; the call
+  ran 12 minutes, cost $2.05 and failed with `error_max_budget_usd`, so it gave no answer. The step stayed `ok`
+  ("2 bodies wait"). `brain dream status` lists only the last five dreams, and the five after it cost $0.03 to $0.07.
+  `brain metrics` showed only the day's total spend. The breach was found only by a script over the run records.
+- **Cause.** The CLI checks `--max-budget-usd` only between the turns of a call, so a ceiling does not stop a turn in
+  progress, and a call started with little room can pass the run cap. The snapshot had no row for a run over the cap
+  or for money paid for calls that failed. A failed call inside an ok step was not visible anywhere.
+- **Fix.** The snapshot lists each run of the last 24 hours that spent past the run cap, and counts the calls that
+  failed and what they cost. Replays on two windows show the right counts: 2026-11-24 (the $9.04 run, 1 failed call,
+  $2.06) and 2026-10-17 (an $8.15 run, 1 failed verify call, $2.74). Before the fix, neither window showed either.
+- **Rule.** Each limit that the daily checks rely on has its own row in the snapshot. Money paid for no answer is
+  counted, also when the step that paid it reports `ok`.

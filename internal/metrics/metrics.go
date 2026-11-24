@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"saahil.local/brain/internal/dream"
 )
 
 const Window = 24 * time.Hour
@@ -23,6 +25,8 @@ type Snapshot struct {
 	At      time.Time          `json:"at"`
 	Dreams  Dreams             `json:"dreams"`
 	LLM     map[string]Spend   `json:"llm"`   // by workflow, last 24 h
+	// calls that cost money and gave no answer (a ceiling hit, an error result), every workflow, last 24 h
+	FailedCalls Spend `json:"llm_failed"`
 	Hooks   Hooks              `json:"hooks"` // last 24 h
 	Pulls   map[string]int     `json:"pulls"` // "<verb>/<mcp|cli>" calls, last 24 h
 	Evals   map[string]float64 `json:"evals"` // "<eval>/<all|dev|test>/<metric>" from the newest reports
@@ -40,6 +44,8 @@ type Dreams struct {
 	Held        int      `json:"held"`                   // edits the run's edit cap held
 	Lost        int      `json:"lost"`                   // held edits that never return: their step judges only its run's proposals
 	Carried     int      `json:"carried"`                // held edits that wait for the next dream in .brain/held-carry.json
+	// "<run> $<cost>" for each run that spent past the run cap: a ceiling is checked only between a call's turns
+	OverCap []string `json:"over_cap,omitempty"`
 }
 
 type Spend struct {
@@ -118,6 +124,9 @@ func (s *Snapshot) readDreams(root string, since time.Time) error {
 		s.Dreams.Edits += run.Edits
 		s.Dreams.Deletions += run.Deletions
 		s.Dreams.CostUSD += run.CostUSD
+		if run.CostUSD > dream.RunCapUSD {
+			s.Dreams.OverCap = append(s.Dreams.OverCap, fmt.Sprintf("%s $%.2f", run.RunID, run.CostUSD))
+		}
 		for _, r := range run.Rejected {
 			if r.Held {
 				s.Dreams.Held++
@@ -153,7 +162,11 @@ func (s *Snapshot) readLLM(db *sql.DB, from string) error {
 		}
 		s.LLM[wf] = sp
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return db.QueryRow(`SELECT count(*), COALESCE(sum(cost_usd), 0) FROM llm_calls WHERE started >= ? AND status = 'failed'`,
+		from).Scan(&s.FailedCalls.Calls, &s.FailedCalls.CostUSD)
 }
 
 func (s *Snapshot) readHooks(db *sql.DB, from string) error {
@@ -362,6 +375,10 @@ func Table(cur, prev Snapshot, hasPrev bool) string {
 	pc, pu := total(prev.LLM)
 	row("model calls", float64(cc), float64(pc), "%.0f")
 	row("model spend USD", cu, pu, "%.2f")
+	row("model calls that failed", float64(cur.FailedCalls.Calls), float64(prev.FailedCalls.Calls), "%.0f")
+	row("model spend on failed calls USD", cur.FailedCalls.CostUSD, prev.FailedCalls.CostUSD, "%.2f")
+	row(fmt.Sprintf("dreams over the run cap ($%.0f)", dream.RunCapUSD), float64(len(cur.Dreams.OverCap)),
+		float64(len(prev.Dreams.OverCap)), "%.0f")
 	row("prompts seen by the hook", float64(cur.Hooks.Prompts), float64(prev.Hooks.Prompts), "%.0f")
 	row("prompt hook p95 ms", cur.Hooks.PromptP95Ms, prev.Hooks.PromptP95Ms, "%.0f")
 	if cur.Hooks.PromptsTimed > 0 {
@@ -403,6 +420,9 @@ func Table(cur, prev Snapshot, hasPrev bool) string {
 	}
 	for _, f := range cur.Dreams.FailedSteps {
 		fmt.Fprintf(&b, "  failed: %s\n", f)
+	}
+	for _, r := range cur.Dreams.OverCap {
+		fmt.Fprintf(&b, "  over the run cap: %s\n", r)
 	}
 	return b.String()
 }

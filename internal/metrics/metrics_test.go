@@ -143,3 +143,54 @@ func TestPromptPartsP95FromRowsThatTimedThem(t *testing.T) {
 			s.Hooks.PromptsStaleNames)
 	}
 }
+
+// TestSnapshotShowsDreamsOverTheRunCapAndFailedCalls catches a breach the care agent could not see: on 2026-11-24 a
+// dream spent $9.04 against the $8 run cap after a merge bodies call failed at its ceiling for $2.05, and the
+// snapshot showed only the day's total spend while `brain dream status` listed the five cheap dreams after it.
+func TestSnapshotShowsDreamsOverTheRunCapAndFailedCalls(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 24, 23, 0, 0, 0, time.UTC)
+	for name, body := range map[string]string{
+		"over.json":  `{"run_id":"over","status":"completed","started":"2026-11-24T16:00:00Z","cost_usd":9.0415,"steps":[]}`,
+		"at.json":    `{"run_id":"at","status":"completed","started":"2026-11-24T15:00:00Z","cost_usd":8.0,"steps":[]}`,
+		"old.json":   `{"run_id":"old","status":"completed","started":"2026-11-22T16:00:00Z","cost_usd":8.15,"steps":[]}`,
+		"cheap.json": `{"run_id":"cheap","status":"completed","started":"2026-11-24T17:00:00Z","cost_usd":0.05,"steps":[]}`,
+	} {
+		p := filepath.Join(root, ".brain", "dream-runs", name)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(filepath.Join(root, ".index", "brain.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for i, c := range []struct {
+		started, status string
+		cost            float64
+	}{{"2026-11-24T16:36:06Z", "failed", 2.055}, {"2026-11-24T16:29:13Z", "done", 1.615}, {"2026-11-22T16:00:00Z", "failed", 3.3}} {
+		if _, err := st.DB.Exec(`INSERT INTO llm_calls(key, workflow, step, model, cost_usd, tokens_in, tokens_out, started, ended, status)
+			VALUES (?, 'dream', 'curate.merge.bodies', 'opus', ?, 0, 0, ?, ?, ?)`, i, c.cost, c.started, c.started, c.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := Take(root, st.DB, "devbox", "test", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Dreams.OverCap) != 1 || s.Dreams.OverCap[0] != "over $9.04" {
+		t.Errorf("over the run cap %q, want only the last day's dream that spent past $8 (one at $8 exactly is within it)", s.Dreams.OverCap)
+	}
+	if s.FailedCalls.Calls != 1 || s.FailedCalls.CostUSD != 2.055 {
+		t.Errorf("failed calls %+v, want the last day's one failed call and the $2.055 it cost", s.FailedCalls)
+	}
+	table := Table(s, Snapshot{}, false)
+	for _, want := range []string{"dreams over the run cap ($8)                 1", "model calls that failed                      1",
+		"model spend on failed calls USD              2.06", "over the run cap: over $9.04"} {
+		if !strings.Contains(table, want) {
+			t.Errorf("table lacks %q:\n%s", want, table)
+		}
+	}
+}
