@@ -772,3 +772,19 @@ a new person showed steps that only ever happened by hand, and values that only 
   $2.06) and 2026-10-17 (an $8.15 run, 1 failed verify call, $2.74). Before the fix, neither window showed either.
 - **Rule.** Each limit that the daily checks rely on has its own row in the snapshot. Money paid for no answer is
   counted, also when the step that paid it reports `ok`.
+
+## 50. A call paid for an answer and then threw it away
+
+- **Symptom.** From 2026-10-17 to 2026-11-25, 9 dream steps failed with `error_max_budget_usd` (7 `curate.hubs`, 1
+  `verify`, 1 merge bodies call). Each paid $2.06 to $3.30 and kept no answer, about $25.70 in all. Most of their
+  ledger rows show 0 tokens, because an error result reports zero usage.
+- **Cause.** The CLI checks `--max-budget-usd` only after a turn. A call answers in one turn, with its
+  StructuredOutput tool call. When that turn costs more than the ceiling, the CLI ends the call with
+  `error_max_budget_usd` and drops the answer, also when it has already taken it ("Structured output provided
+  successfully"). With `--output-format json` the answer is not in the output at all.
+- **Fix.** The client reads `--output-format stream-json`. When the result is `error_max_budget_usd`, the turn ended
+  on the tool call (`stop_reason` `tool_use`), the CLI did not refuse the answer and the answer matches the call's
+  schema, the client keeps that answer. The cost is the same; only the answer is new. Token counts come from the
+  per-model usage when the result reports none.
+- **Rule.** A limit that is checked after the work is done must not throw away the work. Keep what was paid for when
+  it is complete and valid, and let the limit stop only the next step.

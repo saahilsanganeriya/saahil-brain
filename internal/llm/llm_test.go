@@ -12,10 +12,10 @@ import (
 )
 
 // fakeClaude is a stand-in binary: it fails unless the flags the cost guard depends on are present and the input
-// arrived on stdin, then prints a result the way `claude --output-format json` does.
+// arrived on stdin, then prints a result line the way `claude --output-format stream-json` ends.
 const fakeClaude = `#!/bin/sh
 input=$(cat)
-case "$*" in *"--bare -p --model claude-haiku-5-5 --output-format json --max-budget-usd 0.50 --no-session-persistence --append-system-prompt SKILL --json-schema {}"*) ;; *) echo "bad args: $*" >&2; exit 3;; esac
+case "$*" in *"--bare -p --model claude-haiku-5-5 --output-format stream-json --verbose --max-budget-usd 0.50 --no-session-persistence --append-system-prompt SKILL --json-schema {}"*) ;; *) echo "bad args: $*" >&2; exit 3;; esac
 [ "$input" = "the input" ] || { echo "bad stdin" >&2; exit 4; }
 subtype=${FAKE_SUBTYPE:-success}
 cat <<EOF
@@ -47,6 +47,62 @@ func TestClaudeRunnerParsesCostAndUsage(t *testing.T) {
 	var modelErr *ModelError
 	if !errors.As(err, &modelErr) || modelErr.Subtype != "error_max_budget_usd" || res.CostUSD != 0.0123 {
 		t.Fatalf("budget hit: err=%v res=%+v", err, res)
+	}
+}
+
+// budgetCutStream is what the CLI prints when a call's one answer turn costs more than --max-budget-usd: the
+// StructuredOutput tool call holds the whole answer, the CLI may or may not run the tool (FAKE_TOOL_RESULT), and the
+// result line reports error_max_budget_usd with no answer.
+const budgetCutStream = `#!/bin/sh
+cat >/dev/null
+cat <<EOF
+{"type":"system","subtype":"init"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":$FAKE_ANSWER}]}}
+$FAKE_TOOL_RESULT
+{"type":"result","subtype":"error_max_budget_usd","is_error":true,"stop_reason":"$FAKE_STOP","total_cost_usd":2.65,
+ "usage":{"input_tokens":0,"output_tokens":0},"modelUsage":{"m":{"inputTokens":100,"cacheReadInputTokens":20,"outputTokens":40}},
+ "errors":["Reached maximum budget"]}
+EOF
+`
+
+// TestBudgetCutKeepsACompleteAnswer catches a runner that throws away an answer it paid for: the CLI checks the
+// ceiling only after a turn, so 9 dream steps since 2026-10-17 paid $2.50-$3.67 each for an answer the model had
+// written and got "model error error_max_budget_usd", whether or not the CLI had already taken the answer. An answer
+// is kept only when its turn ended on the tool call, the CLI did not refuse it and it matches the schema, so a turn
+// cut by max_tokens or a refused answer still fails.
+func TestBudgetCutKeepsACompleteAnswer(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(bin, []byte(budgetCutStream), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	schema := `{"type":"object","properties":{"edits":{"type":"array"}},"required":["edits"]}`
+	call := Call{Skill: "S", Input: "in", Model: "m", MaxBudgetUSD: 2.5, JSONSchema: schema}
+	took := `{"type":"user","message":{"content":[{"type":"tool_result","content":"Structured output provided successfully"}]}}`
+	refused := `{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"does not match the schema"}]}}`
+	for _, tc := range []struct {
+		name, answer, toolResult, stop string
+		kept                           bool
+	}{
+		{"complete answer, tool not run", `{"edits":[{"op":"x"}]}`, "", "tool_use", true},
+		{"complete answer the CLI took", `{"edits":[{"op":"x"}]}`, took, "tool_use", true},
+		{"answer the CLI refused", `{"edits":[{"op":"x"}]}`, refused, "tool_use", false},
+		{"turn cut by max_tokens", `{"edits":[{"op":"x"}]}`, "", "max_tokens", false},
+		{"answer outside the schema", `{"edit":[]}`, "", "tool_use", false},
+	} {
+		t.Setenv("FAKE_ANSWER", tc.answer)
+		t.Setenv("FAKE_TOOL_RESULT", tc.toolResult)
+		t.Setenv("FAKE_STOP", tc.stop)
+		res, err := Claude{Bin: bin}.Run(context.Background(), call)
+		if res.CostUSD != 2.65 || res.TokensIn != 120 || res.TokensOut != 40 {
+			t.Errorf("%s: cost or tokens lost: %+v", tc.name, res)
+		}
+		var modelErr *ModelError
+		if tc.kept && (err != nil || string(res.JSON) != tc.answer) {
+			t.Errorf("%s: want the answer kept, got err=%v json=%s", tc.name, err, res.JSON)
+		}
+		if !tc.kept && (!errors.As(err, &modelErr) || modelErr.Subtype != "error_max_budget_usd") {
+			t.Errorf("%s: want error_max_budget_usd, got err=%v json=%s", tc.name, err, res.JSON)
+		}
 	}
 }
 
