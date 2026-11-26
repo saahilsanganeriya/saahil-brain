@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"saahil.local/brain/skills"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -134,23 +135,30 @@ func parseDelta(res llm.Result) (delta.Delta, bool) {
 
 // verifyInBatches judges the run's claims a batch at a time, each batch with only its notes' latest version and the
 // evidence they cite: one call over every claim of a busy dream overran its ceiling and lost all its verdicts. A
-// batch's ceiling is the step budget or what the run cap leaves, whichever is less, so later batches still fit.
+// batch's ceiling is the step budget or what the run cap leaves, whichever is less, so later batches still fit. A
+// dream's claims the cap leaves unjudged wait for a later dream, which judges them after its own (waitingClaims).
 func (a *Activities) verifyInBatches(ctx context.Context, in LLMStepInput, skill string) (LLMStepResult, error) {
-	claims := latestClaims(in.Proposed)
-	if len(claims) == 0 {
+	now := time.Now().UTC()
+	own := latestClaims(in.Proposed)
+	waiting, since, dropped, err := a.waitingClaims(in, own, now)
+	if err != nil {
+		return LLMStepResult{}, err
+	}
+	if len(own)+len(waiting) == 0 {
 		return LLMStepResult{Status: "skipped", Reason: "no claims to verify"}, nil
 	}
 	var (
-		merged     delta.Delta
-		keys       []string
-		out        = LLMStepResult{Cached: true}
-		spent      = in.RunSpentUSD
-		unverified int
-		why        string
+		merged   delta.Delta
+		keys     []string
+		out      = LLMStepResult{Cached: true}
+		spent    = in.RunSpentUSD
+		unjudged []Edit
+		judged   int // of the waiting claims
+		why      string
 	)
-	batches := (len(claims) + verifyBatchNotes - 1) / verifyBatchNotes
-	for b := 0; b < batches; b++ {
-		part := claims[b*len(claims)/batches : (b+1)*len(claims)/batches]
+	ownParts := claimBatches(own)
+	parts := append(ownParts, claimBatches(waiting)...)
+	for b, part := range parts {
 		bin := in
 		bin.Proposed = part
 		input, err := a.skillInput(bin)
@@ -163,7 +171,7 @@ func (a *Activities) verifyInBatches(ctx context.Context, in LLMStepInput, skill
 		if _, cached, err := a.Ledger.Done(key); err != nil {
 			return LLMStepResult{}, err
 		} else if !cached && !fits {
-			unverified += len(claims) - b*len(claims)/batches
+			unjudged = append(unjudged, slices.Concat(parts[b:]...)...)
 			why, out.StopLLM = capLeaves(spent, RunCapUSD), true
 			break
 		}
@@ -176,27 +184,40 @@ func (a *Activities) verifyInBatches(ctx context.Context, in LLMStepInput, skill
 		d, ok := parseDelta(res)
 		switch {
 		case got.Status != "ok":
-			unverified, why = unverified+len(part), got.Reason
+			unjudged, why = append(unjudged, part...), got.Reason
 			if got.StopLLM {
-				unverified += len(claims) - (b+1)*len(claims)/batches
+				unjudged = append(unjudged, slices.Concat(parts[b+1:]...)...)
 				out.StopLLM = true
 			}
 		case !ok:
-			unverified, why = unverified+len(part), "answer is not a delta"
+			unjudged, why = append(unjudged, part...), "answer is not a delta"
 			if err := a.Ledger.Finish(key, llm.Result{}, "failed", time.Now()); err != nil {
 				return LLMStepResult{}, err
 			}
 		default:
 			merged.Ops, merged.Verdicts = append(merged.Ops, d.Ops...), append(merged.Verdicts, d.Verdicts...)
 			keys = append(keys, key)
+			if b >= len(ownParts) {
+				judged += len(part)
+			}
 		}
 		if out.StopLLM {
 			break
 		}
 	}
+	ownLeft := len(unjudged) - (len(waiting) - judged)
+	tail := waitingTail(judged, len(waiting)-judged, ownLeft, dropped)
+	if in.Workflow == "dream" {
+		if err := a.saveWaitingClaims(unjudged, since, now); err != nil {
+			return LLMStepResult{}, err
+		}
+		if len(unjudged) > 0 {
+			tail += fmt.Sprintf("; %d claims wait for the next dream", min(len(unjudged), carryMax))
+		}
+	}
 	if len(keys) == 0 {
 		out.Status, out.Cached = "failed", false
-		out.Reason = fmt.Sprintf("%d of %d claims unverified: %s", unverified, len(claims), why)
+		out.Reason = fmt.Sprintf("%d of %d claims unverified: %s", ownLeft, len(own), why) + tail
 		if out.StopLLM {
 			out.Status = "skipped"
 		}
@@ -204,10 +225,115 @@ func (a *Activities) verifyInBatches(ctx context.Context, in LLMStepInput, skill
 	}
 	out.Status = "ok"
 	res, err := a.applyDelta(ctx, in, out, merged, keys)
-	if unverified > 0 {
-		res.Reason += fmt.Sprintf("; %d of %d claims unverified: %s", unverified, len(claims), why)
+	if ownLeft > 0 {
+		res.Reason += fmt.Sprintf("; %d of %d claims unverified: %s", ownLeft, len(own), why)
 	}
+	res.Reason += tail
 	return res, err
+}
+
+// claimBatches splits claims into calls of at most verifyBatchNotes, as even as they go.
+func claimBatches(claims []Edit) [][]Edit {
+	batches := (len(claims) + verifyBatchNotes - 1) / verifyBatchNotes
+	parts := make([][]Edit, 0, batches)
+	for b := 0; b < batches; b++ {
+		parts = append(parts, claims[b*len(claims)/batches:(b+1)*len(claims)/batches])
+	}
+	return parts
+}
+
+func waitingTail(judged, left, ownLeft, dropped int) string {
+	var s string
+	if judged > 0 || left > 0 {
+		s += fmt.Sprintf("; %d earlier claims judged, %d not reached", judged, left)
+	}
+	if dropped > 0 {
+		s += fmt.Sprintf("; %d claims dropped unverified after %s", dropped, carryMaxAge)
+	}
+	return s
+}
+
+// WaitingClaim is a claim note a dream's verify did not judge (the run cap, a failed call), in .brain/verify-carry.json.
+type WaitingClaim struct {
+	Path  string    `json:"path"`
+	Since time.Time `json:"since"` // when its first dream left it unjudged
+}
+
+func (a *Activities) claimCarryPath() string { return a.path(".brain", "verify-carry.json") }
+
+// waitingClaims reads the claims earlier dreams left unjudged, oldest first, as their files read now: a claim the run
+// wrote again is its own, and a file that is gone, no longer a claim, superseded or retired is no longer waiting. One
+// that waited longer than carryMaxAge is dropped and counted.
+func (a *Activities) waitingClaims(in LLMStepInput, own []Edit, now time.Time) ([]Edit, map[string]time.Time,
+	int, error) {
+	since := map[string]time.Time{}
+	if in.Workflow != "dream" {
+		return nil, since, 0, nil
+	}
+	b, err := os.ReadFile(a.claimCarryPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, since, 0, nil
+	}
+	if err != nil {
+		return nil, since, 0, err
+	}
+	var list []WaitingClaim
+	if err := json.Unmarshal(b, &list); err != nil {
+		return nil, since, 0, fmt.Errorf("%s: %w", a.claimCarryPath(), err)
+	}
+	slices.SortStableFunc(list, func(x, y WaitingClaim) int { return x.Since.Compare(y.Since) })
+	var claims []Edit
+	dropped := 0
+	for _, w := range list {
+		if _, seen := since[w.Path]; seen || slices.ContainsFunc(own, func(e Edit) bool { return e.Path == w.Path }) {
+			continue
+		}
+		if now.Sub(w.Since) > carryMaxAge {
+			dropped++
+			continue
+		}
+		abs, err := a.writablePath(w.Path)
+		if err != nil {
+			continue
+		}
+		content, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		e := Edit{Path: w.Path, Action: "write", Content: string(content)}
+		if len(latestClaims([]Edit{e})) == 1 {
+			claims, since[w.Path] = append(claims, e), w.Since
+		}
+	}
+	return claims, since, dropped, nil
+}
+
+// saveWaitingClaims replaces the carry list with the claims this run left unjudged, the carryMax newest; an empty
+// list removes the file.
+func (a *Activities) saveWaitingClaims(unjudged []Edit, since map[string]time.Time, now time.Time) error {
+	var list []WaitingClaim
+	for _, e := range unjudged {
+		t, ok := since[e.Path]
+		if !ok {
+			t = now
+		}
+		list = append(list, WaitingClaim{Path: e.Path, Since: t})
+	}
+	slices.SortStableFunc(list, func(x, y WaitingClaim) int { return x.Since.Compare(y.Since) })
+	if len(list) > carryMax {
+		list = list[len(list)-carryMax:]
+	}
+	if len(list) == 0 {
+		if err := os.Remove(a.claimCarryPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	b, err := json.MarshalIndent(list, "", " ")
+	if err != nil {
+		return err
+	}
+	return writeFile(a.claimCarryPath(), append(b, '\n'))
 }
 
 // latestClaims is each claim note the run wrote, in the order first written, as its last write left it; hub pages,

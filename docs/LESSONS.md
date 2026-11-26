@@ -788,3 +788,17 @@ a new person showed steps that only ever happened by hand, and values that only 
   per-model usage when the result reports none.
 - **Rule.** A limit that is checked after the work is done must not throw away the work. Keep what was paid for when
   it is complete and valid, and let the limit stop only the next step.
+
+## 51. Claims that the cost cap left unverified were never verified
+
+- **Symptom.** From 2026-11-19 to 2026-11-26, the dreams' verify step left 431 claims unverified ("run cap: $X spent
+  leaves $Y"), 128 of 184 on 11-25 alone. Verify fixes or rejects about 48% of the claims that it judges (684 fixes
+  and 41 rejects in 1,528 verdicts), so about half of those claims kept an error.
+- **Cause.** Verify judges only the claims of its own run. It runs last, so in a busy dream it gets what the $8 run
+  cap leaves, and the claims that do not fit are not given to any later step. The dreams after it often end $2 to $4
+  under the cap.
+- **Fix.** The claims that a run leaves unjudged wait in `.brain/verify-carry.json`. A later dream judges them after
+  its own claims, in their own batches, with what its run cap leaves, for at most 24 hours. A replay of the recorded
+  dreams of that week: 431 claims unverified for good become 291, for about $1.19 a day more.
+- **Rule.** Work that a cap stops is not finished work. When a cap skips a check, keep the list of what was skipped
+  and let the next run with room do it, in the same bounds as other paid-for work that waits.

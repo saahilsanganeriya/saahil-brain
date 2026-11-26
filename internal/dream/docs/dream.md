@@ -156,7 +156,11 @@ refused, with the reason recorded. A refused call stops the rest of its own step
 batches that are left), not the later steps: each later step checks its own smallest call against what is left, so
 a $2.50 step that does not fit does not cancel the $0.50 summaries or the verify batches after it. Learn's sessions
 stay unconsumed after a refusal, so the next dream learns them. The deterministic steps always finish. A verify batch is different: its budget is the step budget or what the $8 cap leaves, whichever is less. It
-does not start with less than $1.00 left. The step reason gives the number of claims that stay unverified, and why. The prompt text is never stored or logged — only its hash.
+does not start with less than $1.00 left. The step reason gives the number of claims that stay unverified, and why.
+Those claims wait in `.brain/verify-carry.json` (path, and the time its first dream left it). The next dream judges
+them after its own claims, in their own batches, as the files read then; a claim that the run wrote again is its own,
+and a file that is gone, superseded or retired, or no longer a claim does not wait. A claim waits at most 24 hours
+(the list holds the 100 newest), the same bounds as the held edits. The prompt text is never stored or logged — only its hash.
 
 ## Failure modes
 

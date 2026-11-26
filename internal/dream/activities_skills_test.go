@@ -214,6 +214,87 @@ func TestVerifyJudgesClaimsInBatches(t *testing.T) {
 	}
 }
 
+// TestVerifyCarriesClaimsTheRunCapLeftUnverified catches verify judging only its own run's claims: from 2026-11-19
+// to 11-26 the run cap left 431 claims unverified (128 of 184 on 11-25) and no later dream judged them, though verify
+// fixes 45% of the claims it judges. A claim the cap leaves waits in .brain/verify-carry.json; a later dream judges
+// it after its own claims with what the run cap leaves, as the file reads then, for at most carryMaxAge.
+func TestVerifyCarriesClaimsTheRunCapLeftUnverified(t *testing.T) {
+	brain, skills := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(skills, "verify.md"), "# skill verify\n")
+	note := func(i int, summary, status string) Edit {
+		id := fmt.Sprintf("finding-claim-%02d", i)
+		e := Edit{Path: "notes/" + id + ".md", Action: "write", Content: "---\nid: " + id +
+			"\ntype: finding\nstatus: " + status + "\nsummary: " + summary + "\nscope: hub\nhubs: [git]\nevidence: [work/box/r.md]\n---\nbody\n"}
+		write(t, filepath.Join(brain, e.Path), e.Content) // the dream applies its edits before verify reads them
+		return e
+	}
+	write(t, filepath.Join(brain, "work/box/r.md"), "report\n")
+	var sent [][]string
+	respond := func(c llm.Call) llm.Result {
+		var p skillPayload
+		if err := json.Unmarshal([]byte(c.Input), &p); err != nil {
+			t.Fatal(err)
+		}
+		var ids, verdicts []string
+		for _, e := range p.Proposed {
+			id := strings.TrimSuffix(filepath.Base(e.Path), ".md")
+			ids, verdicts = append(ids, id), append(verdicts, `{"id":"`+id+`","verdict":"keep"}`)
+		}
+		sent = append(sent, ids)
+		return llm.Result{JSON: json.RawMessage(`{"ops":[],"verdicts":[` + strings.Join(verdicts, ",") + `]}`)}
+	}
+	ledger, err := llm.OpenLedger(filepath.Join(brain, ".index", "brain.db"), filepath.Join(brain, ".data", "llm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	acts := &Activities{Cfg: Config{BrainRoot: brain, SkillsDir: skills}, LLM: &llm.Fake{CostUSD: 0.8, Respond: respond},
+		Ledger: ledger}
+	in := LLMStepInput{Workflow: "dream", Step: "verify", Skill: "verify", Model: "m", BudgetUSD: 2.5, RunSpentUSD: 6.5}
+	for i := 0; i < 25; i++ {
+		in.Proposed = append(in.Proposed, note(i, "first run", "current"))
+	}
+	out, err := acts.SkillStep(context.Background(), in)
+	if err != nil || !strings.Contains(out.Reason, "17 of 25 claims unverified: run cap") ||
+		!strings.Contains(out.Reason, "17 claims wait for the next dream") {
+		t.Fatalf("$6.50 spent: %+v %v; want 8 judged and 17 waiting for the next dream", out, err)
+	}
+
+	// The next dream: 2 claims of its own, one of them a waiting claim it rewrote; one waiting claim is now superseded.
+	sent = nil
+	note(9, "superseded since", "superseded")
+	in.RunSpentUSD, in.Proposed = 2.0, []Edit{note(30, "second run", "current"), note(10, "rewritten", "current")}
+	out, err = acts.SkillStep(context.Background(), in)
+	if err != nil || out.Status != "ok" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if len(sent) != 3 || fmt.Sprint(sent[0]) != "[finding-claim-30 finding-claim-10]" {
+		t.Fatalf("batches %v; want its own 2 claims first, then the 15 waiting ones in 2 batches", sent)
+	}
+	var carried []string
+	for _, b := range sent[1:] {
+		carried = append(carried, b...)
+	}
+	if len(carried) != 15 || slices.Contains(carried, "finding-claim-09") || slices.Contains(carried, "finding-claim-10") {
+		t.Errorf("waiting claims judged %v; want 15: not the superseded 09, not 10 twice", carried)
+	}
+	if !strings.Contains(out.Reason, "15 earlier claims judged") || strings.Contains(out.Reason, "wait for the next dream") {
+		t.Errorf("reason %q; want 15 earlier claims judged and none left waiting", out.Reason)
+	}
+	if _, err := os.Stat(filepath.Join(brain, ".brain", "verify-carry.json")); !os.IsNotExist(err) {
+		t.Errorf("carry list still on disk (%v); nothing waits", err)
+	}
+
+	// A claim that waited longer than carryMaxAge is dropped and counted, never judged.
+	write(t, filepath.Join(brain, ".brain", "verify-carry.json"),
+		`[{"path":"notes/finding-claim-20.md","since":"2020-01-01T00:00:00Z"}]`)
+	sent, in.Proposed = nil, []Edit{note(31, "third run", "current")}
+	out, err = acts.SkillStep(context.Background(), in)
+	if err != nil || len(sent) != 1 || !strings.Contains(out.Reason, "1 claims dropped unverified after 24h0m0s") {
+		t.Fatalf("batches %v, reason %q, %v; want only its own claim judged and the old one dropped", sent, out.Reason, err)
+	}
+}
+
 func roundAll(xs []float64) []float64 {
 	for i, x := range xs {
 		xs[i] = float64(int(x*100+0.5)) / 100
